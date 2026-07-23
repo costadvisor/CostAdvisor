@@ -543,6 +543,8 @@ def upsert_custom_fx_rate(
     current_user: User = Depends(get_current_user),
 ):
     require_permission(db, current_user, payload.team_id, "fx_rates.edit")
+    now = datetime.now(timezone.utc)
+    rate_val = payload.rate if payload.value_type == "fixed" else None
     existing = db.query(CustomFxRate).filter(
         CustomFxRate.team_id == payload.team_id,
         CustomFxRate.from_currency == payload.from_currency,
@@ -552,11 +554,11 @@ def upsert_custom_fx_rate(
     ).first()
     if existing:
         existing.value_type = payload.value_type
-        existing.rate = payload.rate if payload.value_type == "fixed" else None
+        existing.rate = rate_val
         existing.ref_year = payload.ref_year
         existing.ref_quarter = payload.ref_quarter
         existing.updated_by = current_user.id
-        existing.updated_at = datetime.now(timezone.utc)
+        existing.updated_at = now
     else:
         existing = CustomFxRate(
             team_id=payload.team_id,
@@ -565,17 +567,26 @@ def upsert_custom_fx_rate(
             year=payload.year,
             quarter=payload.quarter,
             value_type=payload.value_type,
-            rate=payload.rate if payload.value_type == "fixed" else None,
+            rate=rate_val,
             ref_year=payload.ref_year,
             ref_quarter=payload.ref_quarter,
             updated_by=current_user.id,
+            updated_at=now,
         )
         db.add(existing)
     db.flush()
-    rate_id = existing.id
-    db.expunge(existing)
+    # Build the response from in-memory values BEFORE commit — the RLS GUCs are
+    # transaction-local, so re-querying (or refreshing) after commit can return
+    # None and 500 the response_model.
+    result = CustomFxRateOut(
+        id=existing.id, team_id=existing.team_id,
+        from_currency=existing.from_currency, to_currency=existing.to_currency,
+        year=existing.year, quarter=existing.quarter, value_type=existing.value_type,
+        rate=float(rate_val) if rate_val is not None else None,
+        ref_year=existing.ref_year, ref_quarter=existing.ref_quarter, updated_at=now,
+    )
     db.commit()
-    return db.query(CustomFxRate).filter(CustomFxRate.id == rate_id).first()
+    return result
 
 
 @router.delete("/custom/{rate_id}", status_code=204)

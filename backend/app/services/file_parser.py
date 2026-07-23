@@ -95,6 +95,77 @@ def parse_index_upload(content: bytes, filename: str) -> dict:
     return {"rows": rows, "errors": errors}
 
 
+def parse_coverage_price_upload(content: bytes, filename: str) -> dict:
+    """
+    Parse catalog combo base-price upload (Scrum 58/60 coverage anchors).
+    Expected columns: formula (catalog code, e.g. OLE-FAC-SAT), region, base_price
+    Optional columns: currency, base_period (Q1-2025), margin_pct
+
+    Returns {"rows": [...], "errors": [{"row": N, "message": "..."}]}.
+    Raises ValueError only for structural issues (missing required columns).
+    """
+    df = _read_file(content, filename)
+
+    required = {"formula", "region", "base_price"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"Missing required column(s): {', '.join(sorted(missing))}. "
+            f"Expected: formula, region, base_price. Optional: currency, base_period, margin_pct."
+        )
+
+    rows = []
+    errors = []
+    for idx, row in df.iterrows():
+        row_num = int(idx) + 2
+        code = str(row["formula"]).strip()
+        region = str(row["region"]).strip()
+        if not code or code.lower() == "nan":
+            errors.append({"row": row_num, "message": "Formula code cannot be empty."})
+            continue
+        if not region or region.lower() == "nan":
+            errors.append({"row": row_num, "message": "Region cannot be empty."})
+            continue
+        try:
+            base_price = float(row["base_price"])
+            if base_price < 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            errors.append({
+                "row": row_num,
+                "message": f"Invalid base_price '{row['base_price']}'. Must be a non-negative number.",
+            })
+            continue
+
+        out = {"code": code, "region": region, "base_price": base_price,
+               "currency": None, "base_year": None, "base_quarter": None, "margin_pct": None}
+
+        if "currency" in df.columns and pd.notna(row["currency"]):
+            ccy = str(row["currency"]).strip().upper()
+            if len(ccy) != 3:
+                errors.append({"row": row_num, "message": f"Invalid currency '{row['currency']}'. Use a 3-letter code."})
+                continue
+            out["currency"] = ccy
+        if "base_period" in df.columns and pd.notna(row["base_period"]):
+            try:
+                out["base_year"], out["base_quarter"] = _parse_period(str(row["base_period"]))
+            except ValueError:
+                errors.append({
+                    "row": row_num,
+                    "message": f"Invalid base_period '{row['base_period']}'. Use format Q1-2025 or 2025-Q1.",
+                })
+                continue
+        if "margin_pct" in df.columns and pd.notna(row["margin_pct"]):
+            try:
+                out["margin_pct"] = float(row["margin_pct"])
+            except (ValueError, TypeError):
+                errors.append({"row": row_num, "message": f"Invalid margin_pct '{row['margin_pct']}'."})
+                continue
+
+        rows.append(out)
+    return {"rows": rows, "errors": errors}
+
+
 def parse_price_upload(content: bytes, filename: str) -> dict:
     """
     Parse actual price upload.

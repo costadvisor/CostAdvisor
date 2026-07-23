@@ -25,15 +25,32 @@ export default function Navbar() {
     };
   }, [open]);
 
+  // The 8-tab journey shell (Scrum 61/UI-1): raw index feeds → portfolio →
+  // monitor → forecast → negotiate, plus the two cross-cutting/back-office
+  // tabs (Intelligence, Team) and Admin (super-admin only). This is the
+  // primary nav now — Dashboard/Formulas/Products/Suppliers no longer get a
+  // persistent tab (Monitor/Portfolio are their new-IA homes; the other two
+  // stay reachable, not gone, via the account menu below).
   const tabs = [
-    { path: '/dashboard', label: 'Dashboard' },
-    { path: '/indexes', label: 'Indexes' },
-    { path: '/fx-rates', label: 'FX Rates' },
-    { path: '/formulas', label: 'Formulas' },
-    { path: '/products', label: 'Products' },
-    { path: '/suppliers', label: 'Suppliers' },
+    { path: '/index-library', label: 'Indexes' },
+    { path: '/portfolio', label: 'Portfolio' },
+    { path: '/monitor', label: 'Monitor' },
+    { path: '/forecast', label: 'Forecast' },
+    { path: '/negotiate', label: 'Negotiate' },
+    { path: '/intelligence', label: 'Intelligence' },
     { path: '/team', label: 'Team', badge: pendingInviteCount || 0 },
     ...(user?.is_super_admin ? [{ path: '/admin', label: 'Admin' }] : []),
+  ];
+
+  // Old flat-nav pages that don't have a slot in the 8-tab journey shell but
+  // are still functional and still linked-to from within it (e.g. Portfolio's
+  // "+ Add product" goes to /products) — kept one click away in the account
+  // menu instead of dropped outright, so nothing becomes a dead end.
+  const moreLinks = [
+    { path: '/dashboard', label: 'Dashboard' },
+    { path: '/products', label: 'Products' },
+    { path: '/suppliers', label: 'Suppliers' },
+    { path: '/formulas', label: 'Formulas' },
   ];
 
   const goProfile = () => { setOpen(false); navigate('/profile'); };
@@ -133,6 +150,11 @@ export default function Navbar() {
                   {user?.email}
                 </div>
               </div>
+              <div style={{ padding: '4px 10px 2px', fontSize: 9, fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase', color: 'var(--muted)' }}>More</div>
+              {moreLinks.map(l => (
+                <MenuItem key={l.path} onClick={() => { setOpen(false); navigate(l.path); }} label={l.label} />
+              ))}
+              <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
               <MenuItem onClick={goProfile} label="Profile" />
               <MenuItem onClick={handleLogout} label="Logout" />
             </div>

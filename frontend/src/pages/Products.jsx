@@ -12,6 +12,7 @@ export default function Products() {
   const showAlert = useAlert();
   const [products, setProducts] = useState([]);
   const [families, setFamilies] = useState([]);
+  const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -23,6 +24,7 @@ export default function Products() {
   const [activeContent, setActiveContent] = useState(1.0);
   const [unit, setUnit] = useState('kg');
   const [chemicalFamilyId, setChemicalFamilyId] = useState('');
+  const [formulaTemplateId, setFormulaTemplateId] = useState('');
 
   const fetchData = () => {
     if (!activeTeamId) return;
@@ -30,10 +32,12 @@ export default function Products() {
     Promise.all([
       api.get('/api/products', { params: { team_id: activeTeamId } }),
       api.get('/api/chemical-families'),
+      api.get('/api/formulas/', { params: { team_id: activeTeamId } }),
     ])
-      .then(([pRes, fRes]) => {
+      .then(([pRes, fRes, tRes]) => {
         setProducts(pRes.data);
         setFamilies(fRes.data);
+        setTemplates(tRes.data);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -43,6 +47,7 @@ export default function Products() {
 
   const resetForm = () => {
     setName(''); setFormula(''); setActiveContent(1.0); setUnit('kg'); setChemicalFamilyId('');
+    setFormulaTemplateId('');
     setEditing(null); setShowForm(false);
   };
 
@@ -52,6 +57,7 @@ export default function Products() {
     setActiveContent(p.active_content ?? 1.0);
     setUnit(p.unit || 'kg');
     setChemicalFamilyId(p.chemical_family_id ?? '');
+    setFormulaTemplateId(p.formula_template_id ?? '');
     setEditing(p.id);
     setShowForm(true);
   };
@@ -65,6 +71,7 @@ export default function Products() {
       active_content: activeContent,
       unit,
       chemical_family_id: chemicalFamilyId ? Number(chemicalFamilyId) : null,
+      formula_template_id: formulaTemplateId || null,
     };
     try {
       if (editing) {
@@ -161,6 +168,21 @@ export default function Products() {
               <input className="ca-input" type="number" value={activeContent} min={0} max={1} step={0.01}
                 onChange={e => setActiveContent(+e.target.value)} />
             </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label className="ca-label">Catalog Formula</label>
+              <select className="ca-select" value={formulaTemplateId}
+                onChange={e => setFormulaTemplateId(e.target.value)}>
+                <option value="">None — model by hand</option>
+                {templates.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}{t.code ? ` (${t.code})` : ''}{t.team_id ? ' · team' : ''}
+                  </option>
+                ))}
+              </select>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+                New cost models for this product auto-load the linked recipe at their region.
+              </div>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="ca-btn ca-btn-primary" onClick={handleSave} disabled={saving || !name.trim()}>
@@ -185,6 +207,7 @@ export default function Products() {
                 <th>Name</th>
                 <th>Formula</th>
                 <th>Family</th>
+                <th>Catalog Formula</th>
                 <th className="center">Unit</th>
                 <th className="center">Active Content</th>
                 <th className="center">Actions</th>
@@ -200,6 +223,17 @@ export default function Products() {
                       ? <span className="ca-tag">{getFamilyName(p.chemical_family_id)}</span>
                       : <span style={{ color: 'var(--muted)' }}>{'\u2014'}</span>
                     }
+                  </td>
+                  <td>
+                    {p.formula_template_id ? (
+                      <span title={p.formula_template_name || ''} style={{
+                        fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                        color: 'var(--text-secondary)', background: 'var(--surface2)',
+                        padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap',
+                      }}>
+                        {p.formula_template_code || p.formula_template_name || 'linked'}
+                      </span>
+                    ) : <span style={{ color: 'var(--muted)' }}>{'\u2014'}</span>}
                   </td>
                   <td className="center">{p.unit}</td>
                   <td className="center">{p.active_content ? `${(p.active_content * 100).toFixed(0)}%` : '\u2014'}</td>

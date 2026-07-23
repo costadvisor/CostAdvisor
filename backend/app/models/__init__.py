@@ -1,6 +1,8 @@
 from app.models.user import User
 from app.models.team import Team, TeamMembership
 from app.models.chemical_family import ChemicalFamily
+from app.models.subfamily import Subfamily
+from app.models.region import Region
 from app.models.product import Product
 from app.models.supplier import Supplier
 from app.models.cost_model import CostModel, FormulaVersion, FormulaComponent
@@ -15,7 +17,7 @@ from app.models.audit_log import AuditLog
 from app.models.invite import TeamInvite
 from app.models.access_request import PlatformAccessRequest
 from app.models.rbac import Permission, Role, RolePermission, Plan, PlanPermission, TeamMemberRole, UserPlatformRole
-from app.models.formula_template import FormulaTemplate
+from app.models.formula_template import FormulaTemplate, FormulaTemplateComponent, FormulaRegionCoverage
 from app.models.demo import DemoHost, DemoBlockedSlot, DemoRequest
 
 __all__ = [
@@ -23,6 +25,8 @@ __all__ = [
     "Team",
     "TeamMembership",
     "ChemicalFamily",
+    "Subfamily",
+    "Region",
     "Product",
     "Supplier",
     "CostModel",
@@ -49,6 +53,8 @@ __all__ = [
     "TeamMemberRole",
     "UserPlatformRole",
     "FormulaTemplate",
+    "FormulaTemplateComponent",
+    "FormulaRegionCoverage",
     "DemoHost",
     "DemoBlockedSlot",
     "DemoRequest",

@@ -13,10 +13,13 @@ from app.rate_limit import limiter
 init_sentry()
 from app.routers import (
     auth, teams, products, cost_models, indexes, prices,
-    volumes, costing, scenarios, suppliers, chemical_families,
+    volumes, costing, scenarios, suppliers, chemical_families, subfamilies,
     fx_rates, audit, portfolio, admin, ai, account, freight_lanes,
-    invites, access_requests, settings as settings_router, formulas, demo,
+    invites, access_requests, settings as settings_router, formulas, demo, regions,
 )
+# Imported for its side effect: registers the before_flush listener that
+# auto-registers region codes so the region FK never rejects a user write.
+from app.services import regions as _region_events  # noqa: F401
 
 
 @asynccontextmanager
@@ -41,7 +44,8 @@ app.add_middleware(
     allow_origins=[
         settings.app_url,  # the app (prod: costadvisor.org; dev: app.dev.costadvisor.org)
         "http://localhost:3333",
-        "https://www.costadvisor.org",   # prod landing — access requests / demos
+        "https://www.costadvisor.org",  # landing page submitting access requests
+        "https://costadvisor.org",
         "https://dev.costadvisor.org",   # dev landing — access requests / demos
     ],
     allow_credentials=True,
@@ -53,6 +57,8 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(chemical_families.router, prefix="/api/chemical-families", tags=["chemical-families"])
+app.include_router(subfamilies.router, prefix="/api/subfamilies", tags=["subfamilies"])
+app.include_router(regions.router, prefix="/api/regions", tags=["regions"])
 app.include_router(suppliers.router, prefix="/api/suppliers", tags=["suppliers"])
 app.include_router(products.router, prefix="/api/products", tags=["products"])
 app.include_router(cost_models.router, prefix="/api/cost-models", tags=["cost-models"])

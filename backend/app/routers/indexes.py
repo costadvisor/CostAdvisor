@@ -4,10 +4,11 @@ import io
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.rate_limit import limiter
 from app.database import get_db, current_user_id_var, bypass_rls_var
 from app.models.user import User
 from app.models.index_data import (
@@ -23,6 +24,7 @@ from app.schemas.index_data import (
     TeamIndexSourceCreate, TeamIndexSourceOut, ScrapeNowResult,
     CellOverrideRequest, BulkOverrideRequest,
     FilterOptionsOut, IndexImpactItem, IndexImpactResponse,
+    IndexValuePublicOut, PublicQuarterPoint, ProxyLogicUpdate,
 )
 from app.services.data_resolver import resolve_index_values
 from app.services.file_parser import parse_index_upload
@@ -39,6 +41,123 @@ def require_super_admin(user: User):
 
 def require_team_access(db: Session, user: User, team_id: uuid.UUID, perm: str = "indexes.view"):
     _require_permission(db, user, team_id, perm)
+
+
+# Curated headline commodities for the public marketing landing page — the top / most
+# important ones with continuous, recent data. NOT the full index list. Easy to re-curate.
+PUBLIC_HEADLINE_COMMODITIES = [
+    "Caustic Soda", "Chlorine", "Sulfuric Acid", "Natural Gas", "Naphtha",
+]
+
+
+@router.get("/public-quarterly", response_model=list[IndexValuePublicOut])
+@limiter.limit("60/minute")
+def get_public_quarterly_indexes(
+    request: Request,
+    commodities: str | None = Query(None, description="Comma-separated commodity names; omit for the curated headline set"),
+    region: str | None = Query(None, description="Region filter; defaults to each commodity's most recent region"),
+    limit: int = Query(12, le=40, description="Max quarters per commodity (newest)"),
+    db: Session = Depends(get_db),
+):
+    """Public (no-auth) quarterly commodity-index series for the marketing landing page.
+    Platform-level scraped data only — `IndexValue` has no tenant column, so no RLS bypass
+    is needed and no team/override data is ever exposed (mirrors `/api/fx-rates/public-daily`).
+    Returns one entry per commodity with an oldest-first `points` series + QoQ delta."""
+    names = (
+        [n.strip() for n in commodities.split(",") if n.strip()]
+        if commodities else PUBLIC_HEADLINE_COMMODITIES
+    )
+
+    out: list[IndexValuePublicOut] = []
+    for name in names:
+        ci = db.query(CommodityIndex).filter(CommodityIndex.name == name).first()
+        if not ci:
+            continue
+        rows = (
+            db.query(IndexValue)
+            .filter(IndexValue.commodity_id == ci.id)
+            .order_by(IndexValue.year.desc(), IndexValue.quarter.desc())
+            .all()
+        )
+        if not rows:
+            continue
+        # Pick the region: requested one, else the region of the most recent row (avoids
+        # mixing regions in a single series when a commodity is quoted in several).
+        target_region = region or rows[0].region
+        rows = [r for r in rows if r.region == target_region][:limit]
+        if not rows:
+            continue
+        points = [
+            PublicQuarterPoint(year=r.year, quarter=r.quarter, value=float(r.value))
+            for r in reversed(rows)  # oldest-first for charting
+        ]
+        latest = points[-1].value
+        prev = points[-2].value if len(points) >= 2 else None
+        qoq = ((latest - prev) / prev * 100) if prev else None
+        out.append(IndexValuePublicOut(
+            commodity_name=ci.name,
+            category=ci.category,
+            unit=ci.unit,
+            currency=ci.currency,
+            source_url=ci.source_url,
+            region=target_region,
+            points=points,
+            latest=latest,
+            prev=prev,
+            qoq_pct=qoq,
+        ))
+    return out
+
+
+@router.put("/{commodity_id}/proxy-logic", response_model=CommodityIndexOut)
+def update_proxy_logic(
+    commodity_id: int,
+    body: ProxyLogicUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Super-admin edits a commodity index's structured `proxy_logic` (Scrum 67 / SCRUM-67
+    in the code comments). FD-1 (SCRUM-80) executes whatever is set here to produce estimates.
+    Platform-level metadata (no tenant column) — super-admin gated, audit-logged."""
+    require_super_admin(current_user)
+    current_user_id_var.set(str(current_user.id))
+    bypass_rls_var.set(True)
+
+    from app.constants.index_metadata import validate_proxy_logic, RETRIEVAL_STATUSES
+
+    ci = db.query(CommodityIndex).filter(CommodityIndex.id == commodity_id).first()
+    if not ci:
+        raise HTTPException(status_code=404, detail="Commodity index not found")
+
+    try:
+        validated = validate_proxy_logic(body.proxy_logic)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if body.retrieval_status is not None and body.retrieval_status not in RETRIEVAL_STATUSES:
+        raise HTTPException(status_code=422, detail=f"retrieval_status must be one of {list(RETRIEVAL_STATUSES)}")
+
+    old = {"proxy_logic": ci.proxy_logic, "retrieval_status": ci.retrieval_status}
+    ci.proxy_logic = validated
+    if body.retrieval_status is not None:
+        ci.retrieval_status = body.retrieval_status
+
+    # Build the response + capture fields BEFORE commit (transaction-local RLS GUCs reset on commit).
+    out = CommodityIndexOut.model_validate(ci)
+    name, new_status = ci.name, ci.retrieval_status
+    db.commit()
+
+    # Audit is best-effort: platform-level index metadata has no team, and audit_logs.team_id
+    # is NOT NULL with an FK to teams (the Scrum-10 platform-audit gap). Never fail the save on it.
+    try:
+        log_event(
+            db, uuid.UUID("00000000-0000-0000-0000-000000000000"), current_user.id,
+            "update", "index_proxy_logic", name,
+            previous_value=old, new_value={"proxy_logic": validated, "retrieval_status": new_status},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    return out
 
 
 @router.get("/", response_model=list[CommodityIndexOut])
@@ -393,6 +512,11 @@ def cell_override(
     log_event(db, body.team_id, current_user.id, "override", "index_cell",
               f"{commodity.name}/{body.region}/Q{body.quarter}-{body.year}",
               new_value={"value": body.value})
+    # Capture before commit — post-commit attribute access triggers a refresh
+    # under a transaction with no RLS GUC set, which can fail / return nothing.
+    override_id = override.id
+    scraped = float(iv.value) if iv else None
+    display_name = current_user.display_name
     db.commit()
 
     return IndexValueOut(
@@ -403,9 +527,9 @@ def cell_override(
         quarter=body.quarter,
         value=float(body.value),
         source="team_override",
-        scraped_value=float(iv.value) if iv else None,
-        override_id=override.id,
-        override_by=current_user.display_name,
+        scraped_value=scraped,
+        override_id=override_id,
+        override_by=display_name,
         override_at=now.isoformat(),
     )
 

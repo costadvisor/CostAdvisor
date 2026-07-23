@@ -11,10 +11,28 @@ class CommodityIndexOut(BaseModel):
     unit: str | None
     currency: str | None = None
     category: str | None = None
+    provider: str | None = None
+    frequency: str | None = None
     source_url: str | None = None
     scrape_enabled: bool
+    # Metadata + proxy mapping (Scrum 57)
+    access_tier: str | None = None
+    role: str | None = None
+    retrieval_status: str | None = None
+    free_source_name: str | None = None
+    free_source_url: str | None = None
+    proxy_logic: dict | None = None
+    proxy_for_id: int | None = None
 
     model_config = {"from_attributes": True}
+
+
+class ProxyLogicUpdate(BaseModel):
+    """Admin edit of a commodity index's structured proxy_logic (Scrum 67).
+    `retrieval_status` optional — lets an admin promote a `blocked` index to
+    `good_proxy`/`weak_proxy` once a spec is set. FD-1 (SCRUM-80) executes the spec."""
+    proxy_logic: dict | None = None
+    retrieval_status: str | None = None
 
 
 class IndexValueOut(BaseModel):
@@ -33,6 +51,27 @@ class IndexValueOut(BaseModel):
     global_scrape_at: str | None = None  # ISO timestamp of last global scrape
 
     model_config = {"from_attributes": True}
+
+
+class PublicQuarterPoint(BaseModel):
+    year: int
+    quarter: int
+    value: float
+
+
+class IndexValuePublicOut(BaseModel):
+    """Public, no-tenant view of one commodity's recent quarterly series — for the
+    marketing landing page. Platform scraped data only; no overrides, no team context."""
+    commodity_name: str
+    category: str | None = None
+    unit: str | None = None
+    currency: str | None = None
+    source_url: str | None = None
+    region: str
+    points: list[PublicQuarterPoint]  # oldest-first, ready to chart
+    latest: float | None = None
+    prev: float | None = None
+    qoq_pct: float | None = None  # quarter-over-quarter % change of the two most recent points
 
 
 class IndexValueFilter(BaseModel):

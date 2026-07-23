@@ -23,8 +23,8 @@ export default function Login() {
     }}>
       <div style={{ textAlign: 'center' }}>
         <div style={{
-          fontFamily: "'Syne', sans-serif", fontWeight: 800,
-          fontSize: 36, color: 'var(--accent)', marginBottom: 8,
+          fontFamily: "'Space Grotesk', system-ui, sans-serif", fontWeight: 700,
+          fontSize: 36, letterSpacing: '-0.02em', color: 'var(--accent)', marginBottom: 8,
         }}>
           Cost<span style={{ color: 'var(--muted)' }}>Advisor</span>
         </div>

@@ -7,7 +7,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 export default function Team() {
   const { pendingInviteCount } = useAuth();
   const [searchParams] = useSearchParams();
-  const VALID_TABS = ['teams', 'requests', 'activity', 'settings'];
+  const VALID_TABS = ['teams', 'requests', 'activity', 'taxonomy', 'settings'];
   const initialTab = VALID_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'teams';
   const [tab, setTab] = useState(initialTab);
 
@@ -15,6 +15,7 @@ export default function Team() {
     teams: 'Teams',
     requests: pendingInviteCount > 0 ? `Requests (${pendingInviteCount})` : 'Requests',
     activity: 'Activity Log',
+    taxonomy: 'Catalog',
     settings: 'Settings',
   };
 
@@ -24,7 +25,7 @@ export default function Team() {
         <div className="ca-h1">Team</div>
       </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        {['teams', 'requests', 'activity', 'settings'].map(t => (
+        {VALID_TABS.map(t => (
           <button key={t} className={`ca-btn ${tab === t ? 'ca-btn-primary' : 'ca-btn-ghost'}`}
             onClick={() => setTab(t)}>
             {TAB_LABELS[t]}
@@ -35,6 +36,7 @@ export default function Team() {
       {tab === 'teams' && <TeamsTab />}
       {tab === 'requests' && <RequestsTab />}
       {tab === 'activity' && <ActivityTab />}
+      {tab === 'taxonomy' && <TaxonomyTab />}
       {tab === 'settings' && <SettingsTab />}
     </div>
   );
@@ -53,6 +55,191 @@ function RoleBadge({ role }) {
       display: 'inline-block', padding: '1px 8px', borderRadius: 4,
       fontSize: 10, fontWeight: 600, background: s.bg, color: s.color,
     }}>{role}</span>
+  );
+}
+
+// ─── Catalog / Taxonomy fork management (Scrum 68) ────────────────────────────
+// The fork machinery (POST /{id}/fork) is backend-complete (Scrum 55/DB-1); this is the UI.
+function OriginChip({ kind, from }) {
+  const s = kind === 'fork'
+    ? { bg: 'var(--accent-dim)', color: 'var(--accent)', label: from ? `Team fork ← ${from}` : 'Team fork' }
+    : { bg: 'var(--neutral-bg)', color: 'var(--muted)', label: 'Platform' };
+  return <span style={{ display: 'inline-block', padding: '1px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: s.bg, color: s.color }} title={s.label}>{s.label}</span>;
+}
+
+function TaxonomyTab() {
+  const { activeTeamId } = useAuth();
+  const confirm = useConfirm();
+  const [families, setFamilies] = useState([]);
+  const [subfamilies, setSubfamilies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(null); // `${kind}-${id}` while a fork is in flight
+  const [editing, setEditing] = useState(null); // { kind, row } — the team's own fork being renamed
+
+  const load = () => {
+    if (!activeTeamId) return;
+    setLoading(true); setError(null);
+    Promise.all([
+      api.get('/api/chemical-families', { params: { team_id: activeTeamId } }),
+      api.get('/api/subfamilies', { params: { team_id: activeTeamId } }),
+    ])
+      .then(([f, s]) => { setFamilies(f.data || []); setSubfamilies(s.data || []); })
+      .catch(err => setError(formatApiError(err)))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, [activeTeamId]);
+
+  // fork lookup: does the active team already have a fork of this platform row?
+  const familyFork = (platformId) => families.find(f => f.origin_id === platformId && String(f.team_id) === String(activeTeamId));
+  const subfamilyFork = (platformId) => subfamilies.find(s => s.origin_id === platformId && String(s.team_id) === String(activeTeamId));
+  const platformFamilies = families.filter(f => f.team_id == null).sort((a, b) => a.name.localeCompare(b.name));
+
+  const fork = async (kind, row) => {
+    const label = kind === 'family' ? 'family' : 'subfamily';
+    const ok = await confirm({
+      title: `Fork ${label}`,
+      message: `Create an editable team copy of “${row.name}”? Your copy keeps a link to the platform original, so you'll always see what came from us versus what you change.`,
+      confirmLabel: 'Fork',
+    });
+    if (!ok) return;
+    setBusy(`${kind}-${row.id}`);
+    const url = kind === 'family' ? `/api/chemical-families/${row.id}/fork` : `/api/subfamilies/${row.id}/fork`;
+    try {
+      await api.post(url, { team_id: activeTeamId });
+      load();
+    } catch (err) {
+      setError(formatApiError(err));   // 409 already forked / 403 no permission surface here
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveEdit = async ({ name, code }) => {
+    const { kind, row } = editing;
+    const url = kind === 'family' ? `/api/chemical-families/${row.id}` : `/api/subfamilies/${row.id}`;
+    await api.put(url, { name, code });
+    setEditing(null);
+    load();
+  };
+
+  const ForkCell = ({ kind, row, fork: existing }) => existing ? (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <OriginChip kind="fork" from={row.name} />
+      <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={() => setEditing({ kind, row: existing })}>Edit</button>
+    </div>
+  ) : (
+    <button className="ca-btn ca-btn-sm ca-btn-ghost" disabled={busy === `${kind}-${row.id}`} onClick={() => fork(kind, row)}>
+      {busy === `${kind}-${row.id}` ? 'Forking…' : '+ Fork'}
+    </button>
+  );
+
+  if (loading) return <div style={{ padding: 20, color: 'var(--muted)' }}>Loading catalog…</div>;
+  if (error) return <div className="ca-card" style={{ color: 'var(--accent2)' }}>Error: {error}</div>;
+  if (!platformFamilies.length) return <div style={{ padding: 20, color: 'var(--muted)' }}>No platform catalog families available.</div>;
+
+  return (
+    <div className="ca-card">
+      <div style={{ marginBottom: 8 }}>
+        <div className="ca-card-title">Catalog taxonomy</div>
+        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 0' }}>
+          Fork a shared platform family or subfamily into a private, editable team copy. Origin lineage is preserved so you always know what came from the platform vs. your own edits.
+        </p>
+      </div>
+      <div className="ca-scroll-x">
+        <table className="ca-table">
+          <thead>
+            <tr><th>Family / subfamily</th><th>Code</th><th>Origin</th><th className="right">Your copy</th></tr>
+          </thead>
+          <tbody>
+            {platformFamilies.map(fam => {
+              const famFork = familyFork(fam.id);
+              const subs = subfamilies.filter(s => s.family_id === fam.id && s.team_id == null).sort((a, b) => a.name.localeCompare(b.name));
+              return (
+                <Fragment key={`fam-${fam.id}`}>
+                  <tr>
+                    <td style={{ fontWeight: 600 }}>{fam.name}</td>
+                    <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{fam.code || '—'}</td>
+                    <td><OriginChip kind="platform" /></td>
+                    <td className="right"><ForkCell kind="family" row={fam} fork={famFork} /></td>
+                  </tr>
+                  {subs.map(sub => (
+                    <tr key={`sub-${sub.id}`}>
+                      <td style={{ paddingLeft: 24, color: 'var(--text-secondary)' }}>↳ {sub.name}</td>
+                      <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{sub.code || '—'}</td>
+                      <td><OriginChip kind="platform" /></td>
+                      <td className="right"><ForkCell kind="subfamily" row={sub} fork={subfamilyFork(sub.id)} /></td>
+                    </tr>
+                  ))}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {editing && (
+        <EditForkModal
+          kind={editing.kind}
+          row={editing.row}
+          onClose={() => setEditing(null)}
+          onSave={saveEdit}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditForkModal({ kind, row, onClose, onSave }) {
+  const [name, setName] = useState(row.name);
+  const [code, setCode] = useState(row.code || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleSave = async () => {
+    if (!name.trim()) { setError('Name is required.'); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({ name: name.trim(), code: code.trim() || null });
+    } catch (err) {
+      setError(formatApiError(err));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 300,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="ca-card" style={{ width: 420, maxWidth: '92vw', padding: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>Edit your {kind === 'family' ? 'family' : 'subfamily'} copy</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--muted)', lineHeight: 1 }}>×</button>
+        </div>
+
+        <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 0, marginBottom: 16 }}>
+          This only changes your team's copy — the platform original stays as-is, and your fork keeps its link back to it.
+        </p>
+
+        <label className="ca-label">Name</label>
+        <input className="ca-input" value={name} onChange={e => { setName(e.target.value); setError(null); }} style={{ marginBottom: 14 }} />
+
+        <label className="ca-label">Code</label>
+        <input className="ca-input" value={code} onChange={e => setCode(e.target.value)} placeholder="optional" style={{ marginBottom: 4 }} />
+
+        {error && (
+          <div style={{ marginTop: 14, padding: '8px 12px', borderRadius: 6, fontSize: 11, background: 'var(--accent2-dim)', color: 'var(--accent2)' }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
+          <button className="ca-btn ca-btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="ca-btn ca-btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

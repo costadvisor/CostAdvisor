@@ -6,6 +6,9 @@ from app.database import SessionLocal, bypass_rls_var
 from app.models.index_data import CommodityIndex, IndexOverride, TeamIndexSource
 from app.services.scraper import SCRAPER_REGISTRY, GenericWebScraper
 from app.services.fx_sync import sync_fx_rates
+# Side-effect import: registers the before_flush region auto-register listener
+# so scraped writes on this worker process also satisfy the region FK.
+from app.services import regions as _region_events  # noqa: F401
 
 
 @celery_app.task(name="app.tasks.scrape_indexes.scrape_all")

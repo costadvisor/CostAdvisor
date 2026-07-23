@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import Modal from './Modal';
+import RegionSelect from './RegionSelect';
 import api, { formatApiError } from '../api';
 
-export default function AddIndexModal({ isOpen, onClose, commodities, teamId, onAdded }) {
+export default function AddIndexModal({ isOpen, onClose, commodities, teamId, onAdded, canManagePairs = false }) {
+  const [kind, setKind] = useState('index'); // 'index' | 'fx'
+  const [fxForm, setFxForm] = useState({ from_currency: '', to_currency: '', name: '', source_type: 'frankfurter', scrape_url: '', scrape_enabled: true });
   const [commodityQuery, setCommodityQuery] = useState('');
   const [commodityId, setCommodityId] = useState(null); // null = custom (not yet created)
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -25,6 +28,8 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
   useEffect(() => {
     if (isOpen) {
       setMessage(null);
+      setKind('index');
+      setFxForm({ from_currency: '', to_currency: '', name: '', source_type: 'frankfurter', scrape_url: '', scrape_enabled: true });
       setCommodityQuery('');
       setCommodityId(null);
       setShowSuggestions(false);
@@ -82,7 +87,7 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
       await api.post('/api/indexes/sources', {
         team_id: teamId,
         commodity_id: resolvedId,
-        region: region.toUpperCase().trim(),
+        region: region,
         source_type: sourceType,
         scrape_url: sourceType === 'scrape_url' ? scrapeUrl : null,
         scrape_config: sourceType === 'scrape_url' ? config : null,
@@ -125,9 +130,43 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
     }
   };
 
+  const handleAddFx = async () => {
+    if (!fxForm.from_currency || !fxForm.to_currency || !fxForm.name) {
+      setMessage({ type: 'error', text: 'Fill in From, To, and Name.' });
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    try {
+      await api.post('/api/fx-rates/pairs', fxForm);
+      setMessage({ type: 'success', text: 'FX pair added.' });
+      onAdded();
+      setTimeout(() => onClose(), 600);
+    } catch (err) {
+      setMessage({ type: 'error', text: formatApiError(err) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const fxField = field => e => setFxForm(f => ({ ...f, [field]: e.target.value }));
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Add Index" width={480}>
       <div className="ca-modal-body">
+        {canManagePairs && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+            {[['index', 'Commodity index'], ['fx', 'FX pair']].map(([k, label]) => (
+              <button key={k} type="button"
+                className={`ca-btn ca-btn-sm ${kind === k ? 'ca-btn-primary' : 'ca-btn-ghost'}`}
+                onClick={() => { setKind(k); setMessage(null); }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {kind === 'index' && (<>
         {/* Commodity combobox — compute matches here so keyboard handler can reference them */}
         {(() => {
           const q = commodityQuery.toLowerCase();
@@ -308,12 +347,7 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
 
         <div style={{ marginBottom: 14 }}>
           <label className="ca-label">Region</label>
-          <input
-            className="ca-input"
-            value={region}
-            onChange={e => setRegion(e.target.value)}
-            placeholder="e.g. EU, GLOBAL, US, APAC"
-          />
+          <RegionSelect value={region} onChange={setRegion} includeEmpty emptyLabel="Select a region…" />
         </div>
 
         <div style={{ marginBottom: 14 }}>
@@ -400,6 +434,46 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
           </div>
         )}
 
+        </>)}
+
+        {kind === 'fx' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 4 }}>
+            <div>
+              <label className="ca-label">From Currency</label>
+              <input className="ca-input" maxLength={3} placeholder="EUR" value={fxForm.from_currency}
+                onChange={e => setFxForm(f => ({ ...f, from_currency: e.target.value.toUpperCase() }))} />
+            </div>
+            <div>
+              <label className="ca-label">To Currency</label>
+              <input className="ca-input" maxLength={3} placeholder="USD" value={fxForm.to_currency}
+                onChange={e => setFxForm(f => ({ ...f, to_currency: e.target.value.toUpperCase() }))} />
+            </div>
+            <div>
+              <label className="ca-label">Name</label>
+              <input className="ca-input" placeholder="EUR/USD" value={fxForm.name} onChange={fxField('name')} />
+            </div>
+            <div>
+              <label className="ca-label">Source Type</label>
+              <select className="ca-select" value={fxForm.source_type} onChange={fxField('source_type')}>
+                <option value="frankfurter">Frankfurter (JSON API, recommended)</option>
+                <option value="ecb">ECB (SDMX quarterly)</option>
+                <option value="generic">Generic URL</option>
+                <option value="manual">Manual only</option>
+              </select>
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label className="ca-label">Scrape URL <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(optional)</span></label>
+              <input className="ca-input" placeholder="https://api.frankfurter.app/latest?from=CNY&to=EUR"
+                value={fxForm.scrape_url || ''} onChange={fxField('scrape_url')} />
+            </div>
+            <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input type="checkbox" id="addfx-scrape-enabled" checked={fxForm.scrape_enabled}
+                onChange={e => setFxForm(f => ({ ...f, scrape_enabled: e.target.checked }))} />
+              <label htmlFor="addfx-scrape-enabled" style={{ fontSize: 13, cursor: 'pointer' }}>Scraping enabled</label>
+            </div>
+          </div>
+        )}
+
         {/* Feedback */}
         {message && (
           <div style={{
@@ -414,8 +488,8 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
 
       <div className="ca-modal-footer">
         <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={onClose}>Cancel</button>
-        <button className="ca-btn ca-btn-primary ca-btn-sm" onClick={handleAdd} disabled={saving}>
-          {saving ? 'Adding...' : 'Add Index'}
+        <button className="ca-btn ca-btn-primary ca-btn-sm" onClick={kind === 'fx' ? handleAddFx : handleAdd} disabled={saving}>
+          {saving ? 'Adding...' : kind === 'fx' ? 'Add FX pair' : 'Add Index'}
         </button>
       </div>
     </Modal>

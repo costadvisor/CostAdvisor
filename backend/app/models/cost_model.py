@@ -26,8 +26,10 @@ class CostModel(Base):
         Integer, ForeignKey("suppliers.id"), nullable=True
     )
     destination_country: Mapped[str | None] = mapped_column(String(64))
-    destination_region: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    region: Mapped[str] = mapped_column(String(20), default="Europe")
+    destination_region: Mapped[str | None] = mapped_column(
+        String(20), ForeignKey("regions.code"), nullable=True
+    )
+    region: Mapped[str] = mapped_column(String(20), ForeignKey("regions.code"), default="Europe")
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     incoterm: Mapped[str | None] = mapped_column(String(8), nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(

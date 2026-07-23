@@ -1,0 +1,58 @@
+"""Vocabularies for CommodityIndex metadata + proxy mapping (Scrum 57).
+
+Single source of truth for the enum values, validated at the API/seed layer.
+Kept as plain tuples (like constants/incoterms.py) rather than DB enums so the
+admin proxy editor (SCRUM-67) and FD-1 executor (SCRUM-80) can share them.
+"""
+
+# How the real feed is licensed.
+ACCESS_TIERS = ("Free", "Partial", "Subscription")
+
+# Refresh cadence. `frequency` already exists on CommodityIndex — this is its
+# canonical vocabulary (also reused for a proxy's recalibration cadence).
+FREQUENCIES = ("Daily", "Weekly", "Monthly", "Quarterly", "Annual", "Irregular")
+
+# What the index feeds in a should-cost formula.
+ROLES = ("feedstock", "energy", "fixed")
+
+# How reliably we can get a live number for the index:
+#   free       — a free public feed gives the real number directly
+#   good_proxy — a solid free-data approximation
+#   weak_proxy — a rough free-data approximation (a softer signal)
+#   blocked    — no free source or proxy; needs a paid feed or manual entry
+RETRIEVAL_STATUSES = ("free", "good_proxy", "weak_proxy", "blocked")
+
+# Operations FD-1 (SCRUM-80) can execute against a base index to derive an estimate.
+PROXY_OPERATIONS = ("passthrough", "ratio", "multiply", "add", "spread", "regression")
+
+# Allowed keys of the structured proxy_logic spec (JSONB). Free-text lives in `note`.
+PROXY_LOGIC_KEYS = {"base_index", "operation", "spread", "spread_unit", "recalibration", "note"}
+
+
+def validate_proxy_logic(spec):
+    """Validate a structured proxy_logic dict; return it, or raise ValueError.
+
+    None is allowed (no proxy). The executable params (base_index/operation/spread/
+    recalibration) may be null when only the analyst `note` is known — they get
+    filled in via the admin editor (SCRUM-67).
+    """
+    if spec is None:
+        return None
+    if not isinstance(spec, dict):
+        raise ValueError("proxy_logic must be an object")
+    unknown = set(spec) - PROXY_LOGIC_KEYS
+    if unknown:
+        raise ValueError(f"proxy_logic has unknown keys: {sorted(unknown)}")
+    op = spec.get("operation")
+    if op is not None and op not in PROXY_OPERATIONS:
+        raise ValueError(f"proxy_logic.operation must be one of {PROXY_OPERATIONS}")
+    recal = spec.get("recalibration")
+    if recal is not None and recal not in FREQUENCIES:
+        raise ValueError(f"proxy_logic.recalibration must be one of {FREQUENCIES}")
+    spread = spec.get("spread")
+    if spread is not None and not isinstance(spread, (int, float)):
+        raise ValueError("proxy_logic.spread must be a number")
+    unit = spec.get("spread_unit")
+    if unit is not None and unit not in ("abs", "pct"):
+        raise ValueError("proxy_logic.spread_unit must be 'abs' or 'pct'")
+    return spec

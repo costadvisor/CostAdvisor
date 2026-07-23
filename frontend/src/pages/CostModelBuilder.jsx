@@ -1,13 +1,12 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { OVC_ITEMS, RM_ITEMS, PIE_COLORS, INCOTERMS } from '../utils/constants';
 import DonutChart from '../components/DonutChart';
 import IncotermAdjustments from '../components/IncotermAdjustments';
+import RegionSelect from '../components/RegionSelect';
 import api, { formatApiError } from '../api';
 import { useConfirm, useAlert } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
-
-const REGIONS = ['Europe', 'NA', 'Asia', 'Latam'];
 import { useAuth } from '../AuthContext';
 
 export default function CostModelBuilder() {
@@ -63,6 +62,10 @@ export default function CostModelBuilder() {
   // Formula template picker / saver
   const [formulaTemplates, setFormulaTemplates] = useState([]);
   const [showTemplateDropdown, setShowTemplateDropdown] = useState(false);
+  // Last catalog template loaded into this model — persisted onto the product
+  // at save so future models for it auto-load the same recipe.
+  const loadedTemplateIdRef = useRef(null);
+  const autoLoadedTemplateRef = useRef(false);
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
   const [canEditPlatform, setCanEditPlatform] = useState(false);
   const templateDropdownRef = useRef(null);
@@ -86,7 +89,9 @@ export default function CostModelBuilder() {
     Promise.all([
       api.get('/api/products', { params: { team_id: activeTeamId } }),
       api.get('/api/suppliers', { params: { team_id: activeTeamId } }),
-      api.get('/api/indexes', { params: { has_data: true } }),
+      // Full index list — catalog formulas reference commodities that don't
+      // carry values yet; filtering to has_data would blank their rows.
+      api.get('/api/indexes'),
       api.get('/api/formulas/', { params: { team_id: activeTeamId } }).catch(() => ({ data: [] })),
       api.get('/api/formulas/can-edit-platform').catch(() => ({ data: { can_edit: false } })),
     ]).then(([pRes, sRes, iRes, tmplRes, permRes]) => {
@@ -97,6 +102,31 @@ export default function CostModelBuilder() {
       setCanEditPlatform(permRes.data.can_edit);
     }).catch(() => setLoadError('Could not load reference data. Try reloading the page.'));
   }, [activeTeamId]);
+
+  // Preselect a product when arriving from Portfolio's draft "Complete formula"
+  // action (route state), so completing a draft attaches to the existing product
+  // instead of creating a near-duplicate.
+  useEffect(() => {
+    if (costModelId) return;
+    const pid = location.state?.productId;
+    if (!pid || !products.length) return;
+    const p = products.find(pp => pp.id === pid);
+    if (!p) return;
+    setProductId(p.id);
+    setProductName(p.name);
+    setFormula(p.formula || '');
+    setUnit(p.unit || 'kg');
+    setActiveContent(p.active_content ?? 0.65);
+    // A catalog-linked product auto-loads its recipe at this model's region
+    // (Scrum 58: "creating a product auto-loads the template by formula × region").
+    if (p.formula_template_id && formulaTemplates.length && !autoLoadedTemplateRef.current) {
+      const t = formulaTemplates.find(ft => ft.id === p.formula_template_id);
+      if (t) {
+        autoLoadedTemplateRef.current = true;
+        loadTemplateIntoModel(t);
+      }
+    }
+  }, [products, formulaTemplates, location.state, costModelId]);
 
   // Close template dropdown on outside click
   useEffect(() => {
@@ -238,8 +268,15 @@ export default function CostModelBuilder() {
           formula,
           active_content: activeContent,
           unit,
+          // Remember which catalog recipe priced this product, so its next
+          // cost model auto-loads the template at that model's region.
+          formula_template_id: loadedTemplateIdRef.current || null,
         });
         pid = data.id;
+      } else if (loadedTemplateIdRef.current) {
+        await api.put(`/api/products/${pid}`, {
+          formula_template_id: loadedTemplateIdRef.current,
+        });
       }
 
       let sid = supplierId || null;
@@ -347,6 +384,55 @@ export default function CostModelBuilder() {
   const addComp = () => setComponents([...components, { label: '', commodity_name: '', parts: 0 }]);
   const removeComp = (i) => setComponents(components.filter((_, j) => j !== i));
 
+  // Instantiate a library template into this model. Weighted templates load
+  // as simple-mode components (the resolver flattens chained formulas and
+  // picks the recipe for this model's region); expression templates keep the
+  // existing advanced-mode prefill.
+  const loadTemplateIntoModel = async (t) => {
+    setShowTemplateDropdown(false);
+    try {
+      const res = await api.get(`/api/formulas/${t.id}/resolve`, {
+        params: { team_id: activeTeamId, region },
+      });
+      const { lines, coverage: cov, region_resolved } = res.data;
+      loadedTemplateIdRef.current = t.id;
+      if (lines.length > 0) {
+        setFormulaMode('simple');
+        setShowLandedCost(true);
+        setComponents(lines.map(l => ({
+          label: l.name,
+          commodity_name: l.commodity_name || '',
+          commodity_id: l.commodity_id,
+          parts: Math.round(l.effective_weight_pct * 10) / 10,
+        })));
+        // Catalog recipes carry margin as a fixed line inside the weights —
+        // a separate margin on top would double-count it.
+        setMarginType('pct');
+        setMarginValue(0);
+        if (cov) {
+          if (cov.base_price != null) setBasePrice(cov.base_price);
+          if (cov.base_year) { setBaseYear(cov.base_year); setBaseQuarter(cov.base_quarter); }
+          if (cov.currency) setCurrency(cov.currency);
+        }
+        const fallback = region_resolved && region_resolved !== region
+          ? ` — pricing from ${region_resolved}` : '';
+        addToast(`Loaded ${t.name}${fallback}`, 'success');
+        if (cov?.needs_review) {
+          addToast('This recipe is a placeholder pending expert review — treat the number as directional', 'info');
+        }
+        if (!cov || cov.base_price == null) {
+          addToast('No base price anchor on this formula — set the starting price manually', 'info');
+        }
+      } else {
+        setFormulaMode('advanced');
+        setAdvancedExpression(t.expression || '');
+        setAdvancedVars(t.variables || {});
+      }
+    } catch (e) {
+      addToast(formatApiError(e), 'error');
+    }
+  };
+
   if (!loaded) return <div className="ca-page" style={{ color: 'var(--muted)' }}>Loading...</div>;
 
   const sym = currency === 'EUR' ? '\u20AC' : '$';
@@ -355,13 +441,13 @@ export default function CostModelBuilder() {
     <>
     <div className="ca-page ca-fade-in">
       {loadError && (
-        <div style={{ background: 'var(--accent2-bg, #fff1f0)', border: '1px solid var(--accent2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--accent2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ background: 'var(--accent2-dim)', border: '1px solid var(--accent2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--accent2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>{loadError}</span>
           <button className="ca-btn-icon" onClick={() => setLoadError(null)} style={{ marginLeft: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
       {justCreated && (
-        <div style={{ background: 'var(--accent-bg, #f0faf4)', border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--accent)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--accent)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>Model created. Next: go to <button className="ca-btn-link" onClick={() => navigate(`/cost-models/${costModelId}/pricing`)}>Pricing</button> to upload actual prices and see the gap.</span>
           <button className="ca-btn-icon" onClick={() => setJustCreated(false)} style={{ marginLeft: 12, fontWeight: 700 }}>✕</button>
         </div>
@@ -429,16 +515,11 @@ export default function CostModelBuilder() {
                 </div>
                 <div>
                   <label className="ca-label">Destination Region</label>
-                  <select className="ca-select" value={destinationRegion} onChange={e => setDestinationRegion(e.target.value)}>
-                    <option value="">—</option>
-                    {REGIONS.map(r => <option key={r}>{r}</option>)}
-                  </select>
+                  <RegionSelect value={destinationRegion} onChange={setDestinationRegion} includeEmpty />
                 </div>
                 <div>
                   <label className="ca-label">Producing Region</label>
-                  <select className="ca-select" value={region} onChange={e => setRegion(e.target.value)}>
-                    {REGIONS.map(r => <option key={r}>{r}</option>)}
-                  </select>
+                  <RegionSelect value={region} onChange={setRegion} />
                 </div>
                 <div>
                   <label className="ca-label">Currency</label>
@@ -573,6 +654,67 @@ export default function CostModelBuilder() {
 
                 {formulaMode === 'simple' ? (
                   <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <label className="ca-label" style={{ marginBottom: 0 }}>Components</label>
+                      <div style={{ position: 'relative' }} ref={templateDropdownRef}>
+                        <button
+                          className="ca-btn ca-btn-ghost ca-btn-sm"
+                          style={{ fontSize: 10 }}
+                          onClick={() => setShowTemplateDropdown(v => !v)}
+                        >
+                          Load Catalog Formula ▾
+                        </button>
+                        {showTemplateDropdown && (
+                          <div style={{
+                            position: 'absolute', right: 0, top: 'calc(100% + 4px)',
+                            background: 'var(--surface)', border: '1px solid var(--border)',
+                            borderRadius: 8, boxShadow: 'var(--shadow-popover)',
+                            zIndex: 50, minWidth: 280, maxHeight: 300, overflowY: 'auto', padding: 6,
+                          }}>
+                            {formulaTemplates.length === 0 ? (
+                              <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--muted)' }}>
+                                No templates available
+                              </div>
+                            ) : (
+                              [
+                                { label: 'Default', items: formulaTemplates.filter(t => !t.team_id) },
+                                { label: 'Team', items: formulaTemplates.filter(t => t.team_id) },
+                              ].map(group => group.items.length > 0 && (
+                                <div key={group.label}>
+                                  <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '6px 8px 2px' }}>
+                                    {group.label}
+                                  </div>
+                                  {group.items.map(t => (
+                                    <button
+                                      key={t.id}
+                                      style={{
+                                        display: 'block', width: '100%', textAlign: 'left',
+                                        padding: '6px 10px', borderRadius: 4, fontSize: 12,
+                                        border: 'none', cursor: 'pointer', background: 'transparent',
+                                        color: 'var(--text)',
+                                      }}
+                                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface2)'; }}
+                                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                                      onClick={() => loadTemplateIntoModel(t)}
+                                    >
+                                      <span style={{ fontWeight: 600 }}>{t.name}</span>
+                                      {t.code && (
+                                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--muted)', marginLeft: 6 }}>
+                                          {t.code}
+                                        </span>
+                                      )}
+                                      {t.description && (
+                                        <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>{t.description}</span>
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 60px 80px 90px 30px', gap: 8, marginBottom: 6 }}>
                       <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Label</span>
                       <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Reference Index</span>
@@ -655,11 +797,7 @@ export default function CostModelBuilder() {
                                       }}
                                       onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface2)'; }}
                                       onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                                      onClick={() => {
-                                        setAdvancedExpression(t.expression);
-                                        setAdvancedVars(t.variables || {});
-                                        setShowTemplateDropdown(false);
-                                      }}
+                                      onClick={() => loadTemplateIntoModel(t)}
                                     >
                                       <span style={{ fontWeight: 600 }}>{t.name}</span>
                                       {t.description && (

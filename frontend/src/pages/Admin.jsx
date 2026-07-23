@@ -3,6 +3,7 @@ import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { useConfirm, useAlert } from '../components/ConfirmDialog';
 import Tooltip from '../components/Tooltip';
+import { invalidateRegions } from '../components/RegionSelect';
 
 export default function Admin() {
   const { user, refreshUser } = useAuth();
@@ -15,6 +16,7 @@ export default function Admin() {
   const [auditLogs, setAuditLogs] = useState([]);
   const [accessRequests, setAccessRequests] = useState([]);
   const [demoRequests, setDemoRequests] = useState([]);
+  const [regions, setRegions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('users');
   const [impersonating, setImpersonating] = useState(false);
@@ -66,9 +68,18 @@ export default function Admin() {
       .finally(() => setLoading(false));
   };
 
+  const fetchRegions = () => {
+    setLoading(true);
+    api.get('/api/regions')
+      .then(r => { setRegions(r.data); invalidateRegions(); })  // refresh the shared picker cache too
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  };
+
   useEffect(() => {
     if (tab === 'audit') fetchAuditLogs();
     else if (tab === 'requests') fetchRequests();
+    else if (tab === 'regions') fetchRegions();
     else if (tab !== 'settings') fetchData();
   }, [tab, showDeleted]);
 
@@ -177,6 +188,8 @@ export default function Admin() {
               return pending > 0 ? `Requests (${pending})` : 'Requests';
             })(),
           },
+          { key: 'regions', label: regions.length ? `Regions (${regions.length})` : 'Regions' },
+          { key: 'proxies', label: 'Proxy Indexes' },
           { key: 'settings', label: 'Settings' },
         ].map(t => (
           <button
@@ -227,6 +240,10 @@ export default function Admin() {
           currentUser={user}
           onRefresh={fetchRequests}
         />
+      ) : tab === 'regions' ? (
+        <RegionsTab regions={regions} onRefresh={fetchRegions} />
+      ) : tab === 'proxies' ? (
+        <ProxyIndexesTab />
       ) : tab === 'settings' ? (
         <AdminSettingsTab users={users} />
       ) : (
@@ -985,6 +1002,392 @@ function AuditTab({ logs, eventType, setEventType, onRefresh, users }) {
         </div>
       </div>
     </>
+  );
+}
+
+
+// Flatten regions into a parent-first, depth-tagged list (tree via indentation).
+function orderRegionTree(regions) {
+  const byParent = new Map();
+  for (const r of regions) {
+    const key = r.parent_id ?? 'root';
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(r);
+  }
+  for (const list of byParent.values()) list.sort((a, b) => a.name.localeCompare(b.name));
+  const out = [];
+  const walk = (key, depth) => {
+    for (const r of byParent.get(key) || []) {
+      out.push({ ...r, depth });
+      walk(r.id, depth + 1);
+    }
+  };
+  walk('root', 0);
+  // Append any orphan (parent not present) so nothing is hidden.
+  const seen = new Set(out.map(r => r.id));
+  for (const r of regions) if (!seen.has(r.id)) out.push({ ...r, depth: 0 });
+  return out;
+}
+
+// All descendant ids of a region — excluded from its parent picker to prevent cycles.
+function descendantIds(regions, rootId) {
+  const kids = new Map();
+  for (const r of regions) {
+    if (r.parent_id == null) continue;
+    if (!kids.has(r.parent_id)) kids.set(r.parent_id, []);
+    kids.get(r.parent_id).push(r.id);
+  }
+  const out = new Set();
+  const stack = [rootId];
+  while (stack.length) {
+    const id = stack.pop();
+    for (const c of kids.get(id) || []) if (!out.has(c)) { out.add(c); stack.push(c); }
+  }
+  return out;
+}
+
+function RegionsTab({ regions, onRefresh }) {
+  const confirm = useConfirm();
+  const showAlert = useAlert();
+  const [formRegion, setFormRegion] = useState(undefined); // undefined = closed, null = create, obj = edit
+
+  const ordered = orderRegionTree(regions);
+  const nameOf = (id) => regions.find(r => r.id === id)?.name || '—';
+
+  const handleDelete = async (r) => {
+    const ok = await confirm({
+      title: `Delete region "${r.name}"?`,
+      message: 'Regions still used by a cost model, index value, or freight lane cannot be deleted. This cannot be undone.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.delete(`/api/regions/${r.id}`);
+      onRefresh();
+    } catch (e) {
+      showAlert({ title: 'Cannot delete region', message: formatApiError(e) });
+    }
+  };
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button className="ca-btn ca-btn-primary ca-btn-sm" onClick={() => setFormRegion(null)}>+ Add region</button>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{regions.length} region{regions.length !== 1 ? 's' : ''}</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>
+          Global reference data — shared across all teams. Subregions nest under a parent.
+        </span>
+      </div>
+
+      <div className="ca-card">
+        <div className="ca-scroll-x" style={{ minHeight: 300 }}>
+          <table className="ca-table">
+            <thead>
+              <tr>
+                <th>Region</th>
+                <th>Code</th>
+                <th>Parent</th>
+                <th className="center">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ordered.length === 0 && (
+                <tr><td colSpan={4} style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>No regions yet.</td></tr>
+              )}
+              {ordered.map(r => (
+                <tr key={r.id}>
+                  <td style={{ fontWeight: r.depth ? 400 : 600 }}>
+                    <span style={{ paddingLeft: r.depth * 20, color: r.depth ? 'var(--text-secondary)' : 'var(--text)' }}>
+                      {r.depth ? '↳ ' : ''}{r.name}
+                    </span>
+                  </td>
+                  <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--muted)' }}>{r.code}</td>
+                  <td style={{ fontSize: 11, color: 'var(--muted)' }}>{r.parent_id ? nameOf(r.parent_id) : '—'}</td>
+                  <td className="center">
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                      <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => setFormRegion(r)}>Edit</button>
+                      <button
+                        className="ca-btn ca-btn-ghost ca-btn-sm"
+                        style={{ color: 'var(--accent2)', borderColor: 'var(--accent2)' }}
+                        onClick={() => handleDelete(r)}
+                      >Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {formRegion !== undefined && (
+        <RegionFormModal
+          region={formRegion}
+          allRegions={regions}
+          onClose={() => setFormRegion(undefined)}
+          onSaved={() => { setFormRegion(undefined); onRefresh(); }}
+        />
+      )}
+    </>
+  );
+}
+
+function RegionFormModal({ region, allRegions, onClose, onSaved }) {
+  const isEdit = !!region;
+  const [code, setCode] = useState(region?.code || '');
+  const [name, setName] = useState(region?.name || '');
+  const [parentId, setParentId] = useState(region?.parent_id ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  // A region can't be parented to itself or one of its descendants.
+  const excluded = isEdit ? new Set([region.id, ...descendantIds(allRegions, region.id)]) : new Set();
+  const parentOptions = allRegions
+    .filter(r => !excluded.has(r.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const save = async () => {
+    if (!isEdit && !code.trim()) { setError('Code is required.'); return; }
+    if (!name.trim()) { setError('Name is required.'); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const parent_id = parentId === '' ? null : Number(parentId);
+      if (isEdit) {
+        await api.put(`/api/regions/${region.id}`, { name: name.trim(), parent_id });
+      } else {
+        await api.post('/api/regions', { code: code.trim(), name: name.trim(), parent_id });
+      }
+      onSaved();
+    } catch (e) {
+      setError(formatApiError(e));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="ca-modal-backdrop" onClick={onClose}>
+      <div className="ca-modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
+        <div className="ca-modal-header">
+          <div className="ca-modal-title">{isEdit ? 'Edit region' : 'Add region'}</div>
+          <button className="ca-modal-close" onClick={onClose}>×</button>
+        </div>
+        <div className="ca-modal-body">
+          <div style={{ marginBottom: 14 }}>
+            <label className="ca-label">Code</label>
+            <input
+              className="ca-input"
+              value={code}
+              onChange={e => setCode(e.target.value)}
+              placeholder="e.g. NWE"
+              maxLength={20}
+              disabled={isEdit}
+            />
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+              {isEdit
+                ? 'Code is the stable key data is stored under and cannot be changed.'
+                : 'Stable key stored on records (e.g. cost models, index values).'}
+            </div>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label className="ca-label">Name</label>
+            <input className="ca-input" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Northwest Europe" />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label className="ca-label">
+              Parent region <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(optional — makes this a subregion)</span>
+            </label>
+            <select className="ca-select" value={parentId} onChange={e => setParentId(e.target.value)}>
+              <option value="">— top-level —</option>
+              {parentOptions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </div>
+          {error && (
+            <div style={{ padding: '8px 12px', borderRadius: 6, fontSize: 11, background: 'var(--accent2-dim)', color: 'var(--accent2)' }}>
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="ca-modal-footer">
+          <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={onClose}>Cancel</button>
+          <button className="ca-btn ca-btn-primary ca-btn-sm" onClick={save} disabled={saving}>
+            {saving ? 'Saving…' : isEdit ? 'Save' : 'Add region'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Proxy-index calculation editor (Scrum 67 / SCRUM-67) ─────────────────────
+// Vocab mirrors backend app/constants/index_metadata.py (source of truth). Admin-only.
+const PROXY_OPERATIONS = ['passthrough', 'ratio', 'multiply', 'add', 'spread', 'regression'];
+const RECALIBRATION_OPTS = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual'];
+const RETRIEVAL_STATUSES = ['free', 'good_proxy', 'weak_proxy', 'blocked'];
+
+function ProxyIndexesTab() {
+  const [indexes, setIndexes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [editing, setEditing] = useState(undefined); // undefined = closed, obj = edit
+
+  const load = () => {
+    setLoading(true); setError(null);
+    api.get('/api/indexes/')
+      .then(({ data }) => setIndexes(data || []))
+      .catch(e => setError(formatApiError(e)))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  // A "proxy" index is one we can only approximate (good/weak proxy or blocked) or one that
+  // already carries a proxy_logic spec.
+  const proxies = indexes
+    .filter(i => ['good_proxy', 'weak_proxy', 'blocked'].includes(i.retrieval_status) || i.proxy_logic)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const opSummary = (pl) => {
+    if (!pl || !pl.operation) return '—';
+    const s = pl.spread != null ? ` ${pl.spread > 0 ? '+' : ''}${pl.spread}${pl.spread_unit === 'pct' ? '%' : ''}` : '';
+    return `${pl.base_index || '?'} · ${pl.operation}${s}`;
+  };
+
+  if (loading) return <div style={{ padding: 20, color: 'var(--muted)' }}>Loading indexes…</div>;
+  if (error) return <div className="ca-card" style={{ color: 'var(--accent2)' }}>Error: {error}</div>;
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{proxies.length} proxy / approximated index{proxies.length !== 1 ? 'es' : ''}</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>
+          Set how each paywalled index is derived from free data. FD-1 executes this spec to produce estimates.
+        </span>
+      </div>
+      <div className="ca-card">
+        <div className="ca-scroll-x" style={{ minHeight: 300 }}>
+          <table className="ca-table">
+            <thead>
+              <tr><th>Index</th><th>Status</th><th>Derivation</th><th className="center">Actions</th></tr>
+            </thead>
+            <tbody>
+              {proxies.length === 0 && (
+                <tr><td colSpan={4} style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>No proxy indexes.</td></tr>
+              )}
+              {proxies.map(i => (
+                <tr key={i.id}>
+                  <td style={{ fontWeight: 600 }}>{i.name}</td>
+                  <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: i.retrieval_status === 'blocked' ? 'var(--accent2)' : 'var(--muted)' }}>{i.retrieval_status || '—'}</td>
+                  <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{opSummary(i.proxy_logic)}</td>
+                  <td className="center">
+                    <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => setEditing(i)}>Edit</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {editing !== undefined && (
+        <ProxyLogicFormModal index={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); load(); }} />
+      )}
+    </>
+  );
+}
+
+function ProxyLogicFormModal({ index, onClose, onSaved }) {
+  const pl = index.proxy_logic || {};
+  const [baseIndex, setBaseIndex] = useState(pl.base_index || '');
+  const [operation, setOperation] = useState(pl.operation || '');
+  const [spread, setSpread] = useState(pl.spread ?? '');
+  const [spreadUnit, setSpreadUnit] = useState(pl.spread_unit || 'pct');
+  const [recalibration, setRecalibration] = useState(pl.recalibration || '');
+  const [note, setNote] = useState(pl.note || '');
+  const [retrievalStatus, setRetrievalStatus] = useState(index.retrieval_status || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const save = async () => {
+    setSaving(true); setError(null);
+    const proxy_logic = {
+      base_index: baseIndex.trim() || null,
+      operation: operation || null,
+      spread: spread === '' ? null : Number(spread),
+      spread_unit: spread === '' ? null : spreadUnit,
+      recalibration: recalibration || null,
+      note: note.trim() || null,
+    };
+    try {
+      await api.put(`/api/indexes/${index.id}/proxy-logic`, { proxy_logic, retrieval_status: retrievalStatus || null });
+      onSaved();
+    } catch (e) {
+      setError(formatApiError(e));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="ca-modal-backdrop" onClick={onClose}>
+      <div className="ca-modal" style={{ width: 460 }} onClick={e => e.stopPropagation()}>
+        <div className="ca-modal-header">
+          <div className="ca-modal-title">Proxy logic — {index.name}</div>
+          <button className="ca-modal-close" onClick={onClose}>×</button>
+        </div>
+        <div className="ca-modal-body">
+          <div style={{ marginBottom: 12 }}>
+            <label className="ca-label">Base index <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(the free feed to derive from)</span></label>
+            <input className="ca-input" value={baseIndex} onChange={e => setBaseIndex(e.target.value)} placeholder="e.g. Brent Crude" />
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <label className="ca-label">Operation</label>
+              <select className="ca-select" value={operation} onChange={e => setOperation(e.target.value)}>
+                <option value="">—</option>
+                {PROXY_OPERATIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            <div style={{ width: 110 }}>
+              <label className="ca-label">Spread</label>
+              <input className="ca-input" type="number" value={spread} onChange={e => setSpread(e.target.value)} placeholder="0" />
+            </div>
+            <div style={{ width: 90 }}>
+              <label className="ca-label">Unit</label>
+              <select className="ca-select" value={spreadUnit} onChange={e => setSpreadUnit(e.target.value)}>
+                <option value="pct">%</option>
+                <option value="abs">abs</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <label className="ca-label">Recalibration</label>
+              <select className="ca-select" value={recalibration} onChange={e => setRecalibration(e.target.value)}>
+                <option value="">—</option>
+                {RECALIBRATION_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="ca-label">Retrieval status</label>
+              <select className="ca-select" value={retrievalStatus} onChange={e => setRetrievalStatus(e.target.value)}>
+                <option value="">—</option>
+                {RETRIEVAL_STATUSES.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label className="ca-label">Note <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(analyst reasoning)</span></label>
+            <textarea className="ca-input" rows={2} value={note} onChange={e => setNote(e.target.value)} placeholder="How this estimate is worked out" />
+          </div>
+          {error && (
+            <div style={{ padding: '8px 12px', borderRadius: 6, fontSize: 11, background: 'var(--accent2-dim)', color: 'var(--accent2)' }}>{error}</div>
+          )}
+        </div>
+        <div className="ca-modal-footer">
+          <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={onClose}>Cancel</button>
+          <button className="ca-btn ca-btn-primary ca-btn-sm" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save proxy logic'}</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

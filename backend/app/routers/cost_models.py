@@ -225,9 +225,15 @@ def renegotiate(
                   new_value={"cost_model_id": str(cost_model_id),
                              "quarter": f"Q{data.base_quarter}-{data.base_year}",
                              "base_price": str(existing.base_price), "margin_type": existing.margin_type})
-        db.expunge(existing)
+        # Build the response while the session is live: expire first so the
+        # freshly-swapped components reload (the bulk delete + add left the
+        # cached collection stale), and so each component's commodity_name — a
+        # lazy relationship — resolves before commit. Expunging first (the old
+        # pattern) detached the components and 500'd on that lazy load.
+        db.expire(existing)
+        out = FormulaVersionOut.model_validate(existing)
         db.commit()
-        return existing
+        return out
     else:
         # New quarter — create new version
         fv = FormulaVersion(
@@ -257,13 +263,17 @@ def renegotiate(
             )
             db.add(fc)
 
+        db.flush()
         log_event(db, cm.team_id, current_user.id, "create", "formula_version", str(fv.id),
                   new_value={"cost_model_id": str(cost_model_id),
                              "quarter": f"Q{data.base_quarter}-{data.base_year}",
                              "base_price": str(fv.base_price), "margin_type": fv.margin_type})
-        db.expunge(fv)
+        # Build the response while session-bound so components (and each lazy
+        # commodity_name) load; expire first so the just-added components attach.
+        db.expire(fv)
+        out = FormulaVersionOut.model_validate(fv)
         db.commit()
-        return fv
+        return out
 
 
 @router.get("/{cost_model_id}/versions", response_model=list[FormulaVersionOut])

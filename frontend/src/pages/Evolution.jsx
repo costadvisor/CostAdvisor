@@ -182,7 +182,7 @@ export default function Evolution() {
       {gapComponents.length > 0 && (
         <div style={{ background: 'var(--warning-bg, #fffbea)', border: '1px solid var(--warning, #d97706)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--warning, #92400e)' }}>
           Missing index data for: <strong>{gapComponents.join(', ')}</strong>. Those components use their base-period value as a fallback.{' '}
-          <button className="ca-btn-link" onClick={() => navigate('/indexes')}>Configure in Indexes →</button>
+          <button className="ca-btn-link" onClick={() => navigate('/index-library')}>Configure in Index Library →</button>
         </div>
       )}
       <p className="ca-subtitle">

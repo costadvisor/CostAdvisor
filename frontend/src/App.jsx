@@ -11,19 +11,26 @@ import Squeeze from './pages/Squeeze';
 
 import Brief from './pages/Brief';
 import Pricing from './pages/Pricing';
-import Indexes from './pages/Indexes';
 import Dashboard from './pages/Dashboard';
 import Suppliers from './pages/Suppliers';
 import SupplierPurchases from './pages/SupplierPurchases';
 import Products from './pages/Products';
 import Admin from './pages/Admin';
 import Formulas from './pages/Formulas';
-import FxRates from './pages/FxRates';
 import Team from './pages/Team';
 import Privacy from './pages/Privacy';
 import Profile from './pages/Profile';
 import Terms from './pages/Terms';
 import NotFound from './pages/NotFound';
+import IndexLibraryArea from './pages/workspace/IndexLibraryArea';
+import PortfolioArea from './pages/workspace/PortfolioArea';
+import ProductDetailArea from './pages/workspace/ProductDetailArea';
+import MonitorArea from './pages/workspace/MonitorArea';
+import ForecastArea from './pages/workspace/ForecastArea';
+import NegotiateArea from './pages/workspace/NegotiateArea';
+import NegotiateDetailArea from './pages/workspace/NegotiateDetailArea';
+import IntelligenceArea from './pages/workspace/IntelligenceArea';
+import IntelligenceDetailArea from './pages/workspace/IntelligenceDetailArea';
 import { useAuth } from './AuthContext';
 
 export default function App() {
@@ -46,7 +53,7 @@ export default function App() {
             <Route path="/cost-models/:costModelId/brief" element={<Brief />} />
             <Route path="/cost-models/:costModelId/pricing" element={<Pricing />} />
             <Route path="/cost-models/:costModelId/squeeze" element={<Squeeze />} />
-            <Route path="/indexes" element={<Indexes />} />
+            <Route path="/indexes" element={<Navigate to="/index-library" replace />} />
             <Route path="/products" element={<Products />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/suppliers" element={<Suppliers />} />
@@ -55,7 +62,16 @@ export default function App() {
             <Route path="/profile" element={<Profile />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/formulas" element={<Formulas />} />
-            <Route path="/fx-rates" element={<FxRates />} />
+            <Route path="/fx-rates" element={<Navigate to="/index-library" replace />} />
+            <Route path="/index-library" element={<IndexLibraryArea />} />
+            <Route path="/portfolio" element={<PortfolioArea />} />
+            <Route path="/portfolio/:costModelId" element={<ProductDetailArea />} />
+            <Route path="/monitor" element={<MonitorArea />} />
+            <Route path="/forecast" element={<ForecastArea />} />
+            <Route path="/negotiate" element={<NegotiateArea />} />
+            <Route path="/negotiate/:costModelId" element={<NegotiateDetailArea />} />
+            <Route path="/intelligence" element={<IntelligenceArea />} />
+            <Route path="/intelligence/:costModelId" element={<IntelligenceDetailArea />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
