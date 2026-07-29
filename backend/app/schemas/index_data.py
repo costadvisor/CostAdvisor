@@ -23,6 +23,9 @@ class CommodityIndexOut(BaseModel):
     free_source_url: str | None = None
     proxy_logic: dict | None = None
     proxy_for_id: int | None = None
+    # Composite / calculated index (computed live from other indexes)
+    composite_expression: str | None = None
+    composite_variables: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -33,6 +36,14 @@ class ProxyLogicUpdate(BaseModel):
     `good_proxy`/`weak_proxy` once a spec is set. FD-1 (SCRUM-80) executes the spec."""
     proxy_logic: dict | None = None
     retrieval_status: str | None = None
+
+
+class CompositeUpdate(BaseModel):
+    """Super-admin edit of a composite/calculated index. `composite_expression` is an
+    advanced expression over `composite_variables` (index/fixed vars). Passing a null
+    or empty expression clears the composite (turns it back into a normal index)."""
+    composite_expression: str | None = None
+    composite_variables: dict | None = None
 
 
 class IndexValueOut(BaseModel):

@@ -25,9 +25,14 @@ class FormulaTemplateUpdate(BaseModel):
     variables: dict | None = None
 
 
+class FormulaTemplateForkRequest(BaseModel):
+    team_id: uuid.UUID
+
+
 class FormulaTemplateOut(BaseModel):
     id: uuid.UUID
     team_id: uuid.UUID | None
+    origin_id: uuid.UUID | None = None
     created_by: uuid.UUID
     creator_email: str | None = None
     name: str

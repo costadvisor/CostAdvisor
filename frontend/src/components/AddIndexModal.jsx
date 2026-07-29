@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import Modal from './Modal';
 import RegionSelect from './RegionSelect';
+import VariableMapEditor from './VariableMapEditor';
 import api, { formatApiError } from '../api';
 
-export default function AddIndexModal({ isOpen, onClose, commodities, teamId, onAdded, canManagePairs = false }) {
+export default function AddIndexModal({ isOpen, onClose, commodities, teamId, onAdded, canManagePairs = false, isSuperAdmin = false }) {
   const [kind, setKind] = useState('index'); // 'index' | 'fx'
   const [fxForm, setFxForm] = useState({ from_currency: '', to_currency: '', name: '', source_type: 'frankfurter', scrape_url: '', scrape_enabled: true });
   const [commodityQuery, setCommodityQuery] = useState('');
@@ -19,6 +20,8 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
   const [scrapeConfig, setScrapeConfig] = useState('{}');
   const [fixedValue, setFixedValue] = useState('');
   const [uploadFile, setUploadFile] = useState(null);
+  const [compositeExpr, setCompositeExpr] = useState('');
+  const [compositeVars, setCompositeVars] = useState({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
   const [detectedSource, setDetectedSource] = useState(null);
@@ -57,6 +60,39 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
   }, [scrapeUrl]);
 
   const handleAdd = async () => {
+    // Composite (calculated) index — platform-level, region-agnostic (computed live
+    // from other indexes). Create the commodity, then attach the composite formula.
+    if (sourceType === 'composite') {
+      if (!commodityQuery.trim()) { setMessage({ type: 'error', text: 'Enter a name for the composite index.' }); return; }
+      if (!compositeExpr.trim()) { setMessage({ type: 'error', text: 'Enter a formula (e.g. 0.6*Graphite + 0.3*Wood).' }); return; }
+      setSaving(true); setMessage(null);
+      try {
+        let resolvedId = commodityId;
+        if (!resolvedId) {
+          const res = await api.post('/api/indexes/commodities', {
+            name: commodityQuery.trim(),
+            unit: customUnit.trim() || null,
+            currency: customCurrency.trim() || null,
+            category: 'Composite',
+          });
+          resolvedId = res.data.id;
+        }
+        await api.put(`/api/indexes/${resolvedId}/composite`, {
+          composite_expression: compositeExpr.trim(),
+          composite_variables: compositeVars,
+        });
+        setMessage({ type: 'success', text: 'Composite index created.' });
+        setCommodityQuery(''); setCommodityId(null); setCompositeExpr(''); setCompositeVars({}); setSourceType('manual');
+        onAdded();
+        setTimeout(() => onClose(), 600);
+      } catch (err) {
+        setMessage({ type: 'error', text: formatApiError(err) });
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     if (!commodityQuery.trim() || !region) {
       setMessage({ type: 'error', text: 'Enter a commodity name and a region.' });
       return;
@@ -345,10 +381,12 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
           );
         })()}
 
-        <div style={{ marginBottom: 14 }}>
-          <label className="ca-label">Region</label>
-          <RegionSelect value={region} onChange={setRegion} includeEmpty emptyLabel="Select a region…" />
-        </div>
+        {sourceType !== 'composite' && (
+          <div style={{ marginBottom: 14 }}>
+            <label className="ca-label">Region</label>
+            <RegionSelect value={region} onChange={setRegion} includeEmpty emptyLabel="Select a region…" />
+          </div>
+        )}
 
         <div style={{ marginBottom: 14 }}>
           <label className="ca-label">Source Type</label>
@@ -357,8 +395,23 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
             <option value="scrape_url">Scrape URL</option>
             <option value="upload">Upload</option>
             <option value="fixed">Fixed (constant value)</option>
+            {isSuperAdmin && <option value="composite">Composite (calculated from other indexes)</option>}
           </select>
         </div>
+
+        {sourceType === 'composite' && (
+          <div style={{ marginBottom: 14 }}>
+            <VariableMapEditor
+              expression={compositeExpr} setExpression={setCompositeExpr}
+              vars={compositeVars} setVars={setCompositeVars}
+              commodities={commodities}
+              exprLabel="Formula (computed live from other indexes)"
+            />
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+              Platform-wide, region-agnostic — computed from the mapped indexes' values each period.
+            </div>
+          </div>
+        )}
 
         {sourceType === 'fixed' && (
           <div style={{ marginBottom: 14 }}>

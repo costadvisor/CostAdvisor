@@ -53,6 +53,8 @@ export default function Formulas() {
 
   const platformTemplates = templates.filter(t => !t.team_id);
   const teamTemplates = templates.filter(t => t.team_id);
+  // Platform templates this team has already forked (so we don't offer a duplicate fork).
+  const forkedOriginIds = new Set(teamTemplates.map(t => t.origin_id).filter(Boolean));
 
   const fetchData = async () => {
     if (!activeTeamId) return;
@@ -91,6 +93,16 @@ export default function Formulas() {
       addToast(e?.response?.data?.detail || 'Delete failed', 'error');
     } finally {
       setConfirmDeleteId(null);
+    }
+  };
+
+  const handleFork = async (id) => {
+    try {
+      await api.post(`/api/formulas/${id}/fork`, { team_id: activeTeamId });
+      addToast('Forked into your team — edit it under Team Formulas.', 'success');
+      fetchData();
+    } catch (e) {
+      addToast(e?.response?.data?.detail || 'Fork failed', 'error');
     }
   };
 
@@ -151,6 +163,9 @@ export default function Formulas() {
           <CatalogSection
             rows={platformTemplates}
             canEdit={canEditPlatform}
+            canFork={canEditTeam}
+            forkedOriginIds={forkedOriginIds}
+            onFork={handleFork}
             onEdit={openEdit}
             onDelete={id => setConfirmDeleteId(id)}
             onOpen={setDetailTemplate}
@@ -271,7 +286,7 @@ function NameButton({ template, onOpen }) {
   );
 }
 
-function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen }) {
+function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = false, forkedOriginIds, onFork }) {
   const [query, setQuery] = useState('');
   const [confFilter, setConfFilter] = useState('all');
   const [expanded, setExpanded] = useState(() => new Set());
@@ -484,7 +499,8 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen }) {
                   <tbody>
                     {[...fam.subs.entries()].map(([sub, list]) => (
                       <SubfamilyRows key={sub} sub={sub} list={list}
-                        canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} onOpen={onOpen} />
+                        canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} onOpen={onOpen}
+                        canFork={canFork} forkedOriginIds={forkedOriginIds} onFork={onFork} />
                     ))}
                   </tbody>
                 </table>
@@ -504,6 +520,9 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen }) {
             onEdit={onEdit}
             onDelete={onDelete}
             onOpen={onOpen}
+            canFork={canFork}
+            forkedOriginIds={forkedOriginIds}
+            onFork={onFork}
           />
         </div>
       )}
@@ -511,11 +530,12 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen }) {
   );
 }
 
-function SubfamilyRows({ sub, list, canEdit, onEdit, onDelete, onOpen }) {
+function SubfamilyRows({ sub, list, canEdit, onEdit, onDelete, onOpen, canFork = false, forkedOriginIds, onFork }) {
+  const showActions = canEdit || canFork;
   return (
     <>
       <tr>
-        <td colSpan={canEdit ? 5 : 4} style={{
+        <td colSpan={showActions ? 5 : 4} style={{
           padding: '8px 16px 4px 44px', fontSize: 10, fontWeight: 600,
           textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--muted)',
           borderBottom: 'none', background: 'var(--neutral-bg-soft)',
@@ -551,19 +571,22 @@ function SubfamilyRows({ sub, list, canEdit, onEdit, onDelete, onOpen }) {
               {' '}· {t.catalog_meta?.region_count ?? 0} {t.catalog_meta?.region_count === 1 ? 'region' : 'regions'}
             </span>
           </td>
-          {canEdit && (
-            <td style={{ width: 140, textAlign: 'center' }}>
+          {showActions && (
+            <td style={{ width: 160, textAlign: 'center' }}>
               <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => onEdit(t)}>
-                  Edit
-                </button>
-                <button
-                  className="ca-btn ca-btn-ghost ca-btn-sm"
-                  style={{ color: 'var(--accent2)', borderColor: 'var(--accent2)' }}
-                  onClick={() => onDelete(t.id)}
-                >
-                  Delete
-                </button>
+                {canEdit && (
+                  <>
+                    <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => onEdit(t)}>Edit</button>
+                    <button className="ca-btn ca-btn-ghost ca-btn-sm"
+                      style={{ color: 'var(--accent2)', borderColor: 'var(--accent2)' }}
+                      onClick={() => onDelete(t.id)}>Delete</button>
+                  </>
+                )}
+                {canFork && (
+                  forkedOriginIds?.has(t.id)
+                    ? <span className="ca-badge" style={{ background: 'var(--neutral-bg)', color: 'var(--muted)' }}>Forked</span>
+                    : <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => onFork(t.id)} title="Copy into your team as an editable formula">Fork</button>
+                )}
               </div>
             </td>
           )}
@@ -573,8 +596,9 @@ function SubfamilyRows({ sub, list, canEdit, onEdit, onDelete, onOpen }) {
   );
 }
 
-function FormulaSection({ title, subtitle, rows, canEdit, onEdit, onDelete, onOpen }) {
-  if (rows.length === 0 && !canEdit) return null;
+function FormulaSection({ title, subtitle, rows, canEdit, onEdit, onDelete, onOpen, canFork = false, forkedOriginIds, onFork }) {
+  const showActions = canEdit || canFork;
+  if (rows.length === 0 && !showActions) return null;
 
   const handleExport = () => {
     exportCsv(
@@ -619,31 +643,40 @@ function FormulaSection({ title, subtitle, rows, canEdit, onEdit, onDelete, onOp
                 <th>Description</th>
                 <th style={{ textAlign: 'center' }}>Variables</th>
                 <th>Created by</th>
-                {canEdit && <th style={{ textAlign: 'center' }}>Actions</th>}
+                {showActions && <th style={{ textAlign: 'center' }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
               {rows.map(t => (
                 <tr key={t.id}>
-                  <td><NameButton template={t} onOpen={onOpen} /></td>
+                  <td>
+                    <NameButton template={t} onOpen={onOpen} />
+                    {t.origin_id && (
+                      <span className="ca-badge" title="Forked from a platform formula"
+                        style={{ marginLeft: 6, background: 'var(--info-bg)', color: 'var(--accent4)' }}>fork</span>
+                    )}
+                  </td>
                   <td style={{ fontSize: 11, color: 'var(--muted)' }}>{t.description || '—'}</td>
                   <td style={{ textAlign: 'center', fontFamily: 'monospace', fontSize: 11 }}>
                     {t.variables ? Object.keys(t.variables).length : 0}
                   </td>
                   <td style={{ fontSize: 11, color: 'var(--muted)' }}>{t.creator_email || '—'}</td>
-                  {canEdit && (
+                  {showActions && (
                     <td style={{ textAlign: 'center' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                        <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => onEdit(t)}>
-                          Edit
-                        </button>
-                        <button
-                          className="ca-btn ca-btn-ghost ca-btn-sm"
-                          style={{ color: 'var(--accent2)', borderColor: 'var(--accent2)' }}
-                          onClick={() => onDelete(t.id)}
-                        >
-                          Delete
-                        </button>
+                        {canEdit && (
+                          <>
+                            <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => onEdit(t)}>Edit</button>
+                            <button className="ca-btn ca-btn-ghost ca-btn-sm"
+                              style={{ color: 'var(--accent2)', borderColor: 'var(--accent2)' }}
+                              onClick={() => onDelete(t.id)}>Delete</button>
+                          </>
+                        )}
+                        {canFork && (
+                          forkedOriginIds?.has(t.id)
+                            ? <span className="ca-badge" style={{ background: 'var(--neutral-bg)', color: 'var(--muted)' }}>Forked</span>
+                            : <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => onFork(t.id)} title="Copy into your team as an editable formula">Fork</button>
+                        )}
                       </div>
                     </td>
                   )}

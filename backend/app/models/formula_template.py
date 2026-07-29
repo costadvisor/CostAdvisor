@@ -27,6 +27,12 @@ class FormulaTemplate(Base):
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
+    # Fork back-link: a team fork points at the platform original it was copied
+    # from (same pattern as chemical_families.origin_id), so lineage survives a
+    # rename. NULL on platform rows and on non-forked team rows.
+    origin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("formula_templates.id", ondelete="SET NULL"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     # Catalog formula_id (e.g. "OLE-FAC-SAT") — the stable key the seed loader
     # upserts by. Unique among platform rows only; a fork keeps its origin's

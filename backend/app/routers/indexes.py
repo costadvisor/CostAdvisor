@@ -24,7 +24,7 @@ from app.schemas.index_data import (
     TeamIndexSourceCreate, TeamIndexSourceOut, ScrapeNowResult,
     CellOverrideRequest, BulkOverrideRequest,
     FilterOptionsOut, IndexImpactItem, IndexImpactResponse,
-    IndexValuePublicOut, PublicQuarterPoint, ProxyLogicUpdate,
+    IndexValuePublicOut, PublicQuarterPoint, ProxyLogicUpdate, CompositeUpdate,
 )
 from app.services.data_resolver import resolve_index_values
 from app.services.file_parser import parse_index_upload
@@ -153,6 +153,68 @@ def update_proxy_logic(
             db, uuid.UUID("00000000-0000-0000-0000-000000000000"), current_user.id,
             "update", "index_proxy_logic", name,
             previous_value=old, new_value={"proxy_logic": validated, "retrieval_status": new_status},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    return out
+
+
+@router.put("/{commodity_id}/composite", response_model=CommodityIndexOut)
+def update_composite(
+    commodity_id: int,
+    body: CompositeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Super-admin defines/edits a composite (calculated) index — its value is computed
+    live from other indexes via an advanced expression (e.g. `0.6*Graphite + 0.3*Wood`).
+    Platform-level (no tenant column). A null/blank expression clears the composite."""
+    require_super_admin(current_user)
+    current_user_id_var.set(str(current_user.id))
+    bypass_rls_var.set(True)
+
+    from app.constants.index_metadata import validate_composite_structure
+
+    ci = db.query(CommodityIndex).filter(CommodityIndex.id == commodity_id).first()
+    if not ci:
+        raise HTTPException(status_code=404, detail="Commodity index not found")
+
+    try:
+        expr, variables = validate_composite_structure(body.composite_expression, body.composite_variables)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # DB-level checks (need the session): referenced commodities exist, no self-reference,
+    # and no immediate cycle (a component that is itself composite must not reference this one).
+    if expr is not None:
+        for name, spec in (variables or {}).items():
+            if spec.get("type") != "index":
+                continue
+            cid = spec["commodity_id"]
+            if cid == commodity_id:
+                raise HTTPException(status_code=422, detail=f"variable '{name}' cannot reference the composite itself")
+            comp = db.query(CommodityIndex).filter(CommodityIndex.id == cid).first()
+            if not comp:
+                raise HTTPException(status_code=422, detail=f"variable '{name}' references unknown index id {cid}")
+            # Direct cycle: a composite component that references this index back.
+            if comp.composite_expression and comp.composite_variables:
+                back = {v.get("commodity_id") for v in comp.composite_variables.values() if v.get("type") == "index"}
+                if commodity_id in back:
+                    raise HTTPException(status_code=422, detail=f"cyclic reference between '{ci.name}' and '{comp.name}'")
+
+    old = {"composite_expression": ci.composite_expression, "composite_variables": ci.composite_variables}
+    ci.composite_expression = expr
+    ci.composite_variables = variables
+    out = CommodityIndexOut.model_validate(ci)
+    name = ci.name
+    db.commit()
+
+    try:
+        log_event(
+            db, uuid.UUID("00000000-0000-0000-0000-000000000000"), current_user.id,
+            "update", "index_composite", name,
+            previous_value=old, new_value={"composite_expression": expr, "composite_variables": variables},
         )
         db.commit()
     except Exception:

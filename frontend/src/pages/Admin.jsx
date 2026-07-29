@@ -189,7 +189,6 @@ export default function Admin() {
             })(),
           },
           { key: 'regions', label: regions.length ? `Regions (${regions.length})` : 'Regions' },
-          { key: 'proxies', label: 'Proxy Indexes' },
           { key: 'settings', label: 'Settings' },
         ].map(t => (
           <button
@@ -242,8 +241,6 @@ export default function Admin() {
         />
       ) : tab === 'regions' ? (
         <RegionsTab regions={regions} onRefresh={fetchRegions} />
-      ) : tab === 'proxies' ? (
-        <ProxyIndexesTab />
       ) : tab === 'settings' ? (
         <AdminSettingsTab users={users} />
       ) : (
@@ -1220,176 +1217,8 @@ function RegionFormModal({ region, allRegions, onClose, onSaved }) {
   );
 }
 
-// ─── Proxy-index calculation editor (Scrum 67 / SCRUM-67) ─────────────────────
-// Vocab mirrors backend app/constants/index_metadata.py (source of truth). Admin-only.
-const PROXY_OPERATIONS = ['passthrough', 'ratio', 'multiply', 'add', 'spread', 'regression'];
-const RECALIBRATION_OPTS = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual'];
-const RETRIEVAL_STATUSES = ['free', 'good_proxy', 'weak_proxy', 'blocked'];
-
-function ProxyIndexesTab() {
-  const [indexes, setIndexes] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [editing, setEditing] = useState(undefined); // undefined = closed, obj = edit
-
-  const load = () => {
-    setLoading(true); setError(null);
-    api.get('/api/indexes/')
-      .then(({ data }) => setIndexes(data || []))
-      .catch(e => setError(formatApiError(e)))
-      .finally(() => setLoading(false));
-  };
-  useEffect(load, []);
-
-  // A "proxy" index is one we can only approximate (good/weak proxy or blocked) or one that
-  // already carries a proxy_logic spec.
-  const proxies = indexes
-    .filter(i => ['good_proxy', 'weak_proxy', 'blocked'].includes(i.retrieval_status) || i.proxy_logic)
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  const opSummary = (pl) => {
-    if (!pl || !pl.operation) return '—';
-    const s = pl.spread != null ? ` ${pl.spread > 0 ? '+' : ''}${pl.spread}${pl.spread_unit === 'pct' ? '%' : ''}` : '';
-    return `${pl.base_index || '?'} · ${pl.operation}${s}`;
-  };
-
-  if (loading) return <div style={{ padding: 20, color: 'var(--muted)' }}>Loading indexes…</div>;
-  if (error) return <div className="ca-card" style={{ color: 'var(--accent2)' }}>Error: {error}</div>;
-
-  return (
-    <>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{proxies.length} proxy / approximated index{proxies.length !== 1 ? 'es' : ''}</span>
-        <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>
-          Set how each paywalled index is derived from free data. FD-1 executes this spec to produce estimates.
-        </span>
-      </div>
-      <div className="ca-card">
-        <div className="ca-scroll-x" style={{ minHeight: 300 }}>
-          <table className="ca-table">
-            <thead>
-              <tr><th>Index</th><th>Status</th><th>Derivation</th><th className="center">Actions</th></tr>
-            </thead>
-            <tbody>
-              {proxies.length === 0 && (
-                <tr><td colSpan={4} style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>No proxy indexes.</td></tr>
-              )}
-              {proxies.map(i => (
-                <tr key={i.id}>
-                  <td style={{ fontWeight: 600 }}>{i.name}</td>
-                  <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: i.retrieval_status === 'blocked' ? 'var(--accent2)' : 'var(--muted)' }}>{i.retrieval_status || '—'}</td>
-                  <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{opSummary(i.proxy_logic)}</td>
-                  <td className="center">
-                    <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => setEditing(i)}>Edit</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      {editing !== undefined && (
-        <ProxyLogicFormModal index={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); load(); }} />
-      )}
-    </>
-  );
-}
-
-function ProxyLogicFormModal({ index, onClose, onSaved }) {
-  const pl = index.proxy_logic || {};
-  const [baseIndex, setBaseIndex] = useState(pl.base_index || '');
-  const [operation, setOperation] = useState(pl.operation || '');
-  const [spread, setSpread] = useState(pl.spread ?? '');
-  const [spreadUnit, setSpreadUnit] = useState(pl.spread_unit || 'pct');
-  const [recalibration, setRecalibration] = useState(pl.recalibration || '');
-  const [note, setNote] = useState(pl.note || '');
-  const [retrievalStatus, setRetrievalStatus] = useState(index.retrieval_status || '');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-
-  const save = async () => {
-    setSaving(true); setError(null);
-    const proxy_logic = {
-      base_index: baseIndex.trim() || null,
-      operation: operation || null,
-      spread: spread === '' ? null : Number(spread),
-      spread_unit: spread === '' ? null : spreadUnit,
-      recalibration: recalibration || null,
-      note: note.trim() || null,
-    };
-    try {
-      await api.put(`/api/indexes/${index.id}/proxy-logic`, { proxy_logic, retrieval_status: retrievalStatus || null });
-      onSaved();
-    } catch (e) {
-      setError(formatApiError(e));
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="ca-modal-backdrop" onClick={onClose}>
-      <div className="ca-modal" style={{ width: 460 }} onClick={e => e.stopPropagation()}>
-        <div className="ca-modal-header">
-          <div className="ca-modal-title">Proxy logic — {index.name}</div>
-          <button className="ca-modal-close" onClick={onClose}>×</button>
-        </div>
-        <div className="ca-modal-body">
-          <div style={{ marginBottom: 12 }}>
-            <label className="ca-label">Base index <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(the free feed to derive from)</span></label>
-            <input className="ca-input" value={baseIndex} onChange={e => setBaseIndex(e.target.value)} placeholder="e.g. Brent Crude" />
-          </div>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-            <div style={{ flex: 1 }}>
-              <label className="ca-label">Operation</label>
-              <select className="ca-select" value={operation} onChange={e => setOperation(e.target.value)}>
-                <option value="">—</option>
-                {PROXY_OPERATIONS.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </div>
-            <div style={{ width: 110 }}>
-              <label className="ca-label">Spread</label>
-              <input className="ca-input" type="number" value={spread} onChange={e => setSpread(e.target.value)} placeholder="0" />
-            </div>
-            <div style={{ width: 90 }}>
-              <label className="ca-label">Unit</label>
-              <select className="ca-select" value={spreadUnit} onChange={e => setSpreadUnit(e.target.value)}>
-                <option value="pct">%</option>
-                <option value="abs">abs</option>
-              </select>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-            <div style={{ flex: 1 }}>
-              <label className="ca-label">Recalibration</label>
-              <select className="ca-select" value={recalibration} onChange={e => setRecalibration(e.target.value)}>
-                <option value="">—</option>
-                {RECALIBRATION_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="ca-label">Retrieval status</label>
-              <select className="ca-select" value={retrievalStatus} onChange={e => setRetrievalStatus(e.target.value)}>
-                <option value="">—</option>
-                {RETRIEVAL_STATUSES.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </div>
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <label className="ca-label">Note <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(analyst reasoning)</span></label>
-            <textarea className="ca-input" rows={2} value={note} onChange={e => setNote(e.target.value)} placeholder="How this estimate is worked out" />
-          </div>
-          {error && (
-            <div style={{ padding: '8px 12px', borderRadius: 6, fontSize: 11, background: 'var(--accent2-dim)', color: 'var(--accent2)' }}>{error}</div>
-          )}
-        </div>
-        <div className="ca-modal-footer">
-          <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={onClose}>Cancel</button>
-          <button className="ca-btn ca-btn-primary ca-btn-sm" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save proxy logic'}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// Proxy/composite ("derived") index management moved to the Index Library
+// (components/DerivedIndexesModal.jsx). Left here intentionally blank.
 
 
 function UserDetailPanel({ user, onClose, onNavigateToTeam, platformRoles,

@@ -4,6 +4,7 @@ import { useAuth } from '../../AuthContext';
 import { useToast } from '../../components/Toast';
 import IndexPopupModal from '../../components/IndexPopupModal';
 import AddIndexModal from '../../components/AddIndexModal';
+import DerivedIndexesModal from '../../components/DerivedIndexesModal';
 import EditCellModal from '../../components/EditCellModal';
 import FxCustomEditModal from '../../components/FxCustomEditModal';
 import exportCsv from '../../utils/exportCsv';
@@ -29,14 +30,15 @@ import { Sparkline, GroupHeader, useOpenSet } from './wsCharts';
 const CAT_COLOR = {
   Metal: 'var(--cat-metal)', Energy: 'var(--cat-energy)', Chemical: 'var(--cat-chemical)',
   Labor: 'var(--cat-labor)', PPI: 'var(--cat-ppi)', Freight: 'var(--cat-freight)',
-  FX: 'var(--cat-fx)', Other: 'var(--muted)',
+  FX: 'var(--cat-fx)', Composite: 'var(--accent4)', Other: 'var(--muted)',
 };
-const CANONICAL_CATEGORIES = ['Metal', 'Energy', 'Chemical', 'Labor', 'PPI', 'Freight', 'FX', 'Other'];
+const CANONICAL_CATEGORIES = ['Metal', 'Energy', 'Chemical', 'Labor', 'PPI', 'Freight', 'FX', 'Composite', 'Other'];
 
 // Exact matches for every category the seeders have actually produced. Checked
 // before the patterns below so the known vocabulary can't be mis-grouped by a
 // greedy regex, and so each judgement call is reviewable in one place.
 const CATEGORY_OVERRIDES = {
+  composite: 'Composite',
   chemical: 'Chemical',
   'agricultural commodities': 'Chemical',   // grain/oilseed feedstocks, not food retail
   'agricultural commodity': 'Chemical',
@@ -233,7 +235,9 @@ function SkeletonGrid({ periods = 8, rows = 8 }) {
 }
 
 export default function IndexLibraryArea() {
-  const { activeTeamId } = useAuth();
+  const { activeTeamId, user } = useAuth();
+  const isSuperAdmin = !!user?.is_super_admin;
+  const [showDerived, setShowDerived] = useState(false);
   const { addToast } = useToast();
   const [syncing, setSyncing] = useState(false);
   const [data, setData] = useState([]);
@@ -632,6 +636,10 @@ export default function IndexLibraryArea() {
               {syncingIdx ? 'Syncing…' : '⟳ Sync indexes'}
             </button>
           )}
+          {isSuperAdmin && (
+            <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={() => setShowDerived(true)}
+              title="Manage composite (calculated) and proxy indexes">Derived indexes</button>
+          )}
           <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={handleExport} disabled={!visibleRows.length}>Export CSV</button>
           <button className="ca-btn ca-btn-sm ca-btn-primary" onClick={() => setShowAddModal(true)}>+ Add Index</button>
         </div>
@@ -899,8 +907,13 @@ export default function IndexLibraryArea() {
         commodities={commodities}
         teamId={activeTeamId}
         canManagePairs={canManagePairs}
+        isSuperAdmin={isSuperAdmin}
         onAdded={fetchData}
       />
+
+      {showDerived && (
+        <DerivedIndexesModal onClose={() => { setShowDerived(false); fetchData(); }} />
+      )}
 
       <EditCellModal
         isOpen={!!editCell}

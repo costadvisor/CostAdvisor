@@ -231,7 +231,72 @@ def resolve_index_values(
                 q = 1
                 y += 1
 
+    # Composite / calculated indexes: synthesize a computed row per period from their
+    # components (live). Emitted for every requested period so the grid shows the curve.
+    comp_q = db.query(CommodityIndex).filter(CommodityIndex.composite_expression.isnot(None))
+    if commodity_name_filter:
+        comp_q = comp_q.filter(CommodityIndex.name == commodity_name_filter)
+    if commodity_ids is not None and commodity_ids:
+        comp_q = comp_q.filter(CommodityIndex.id.in_(commodity_ids))
+    comp_region = region or "GLOBAL"
+    for ci in comp_q.all():
+        if (ci.id, comp_region) in covered_pairs:
+            continue
+        y, q = _fy, _fq
+        while (y < _ty) or (y == _ty and q <= _tq):
+            val = get_single_index_value(db, team_id, ci.id, comp_region, y, q)
+            results.append(IndexValueOut(
+                commodity_id=ci.id,
+                commodity_name=ci.name,
+                region=comp_region,
+                year=y,
+                quarter=q,
+                value=val,
+                source="composite",
+                scraped_value=None,
+            ))
+            q += 1
+            if q > 4:
+                q = 1
+                y += 1
+
     return results
+
+
+def compute_composite_value(
+    db: Session,
+    team_id: uuid.UUID,
+    ci: CommodityIndex,
+    region: str,
+    year: int,
+    quarter: int,
+    _resolving: set,
+) -> float | None:
+    """Compute a composite/calculated index's value live from its component indexes.
+
+    Builds a {var: value} context (index vars resolved recursively via
+    get_single_index_value so team overrides on components are respected; fixed vars
+    use their constant), then evaluates the stored expression with the same safe
+    whitelist the advanced cost formulas use. Returns None (not computable) if any
+    index component has no value for the period — never fabricates a 0."""
+    from app.services.costing_engine import safe_eval_expr
+
+    context: dict[str, float] = {}
+    for var_name, var_def in (ci.composite_variables or {}).items():
+        if var_def.get("type") == "index" and var_def.get("commodity_id"):
+            val = get_single_index_value(
+                db, team_id, var_def["commodity_id"], region, year, quarter,
+                _resolving=_resolving,
+            )
+            if val is None:
+                return None  # a required component is missing → composite not computable
+            context[var_name] = float(val)
+        else:
+            context[var_name] = float(var_def.get("value", 0))
+    try:
+        return float(safe_eval_expr(ci.composite_expression, context))
+    except Exception:
+        return None
 
 
 def get_single_index_value(
@@ -241,8 +306,21 @@ def get_single_index_value(
     region: str,
     year: int,
     quarter: int,
+    _resolving: set | None = None,
 ) -> float | None:
-    """Get a single resolved index value (fixed source > override > scraped)."""
+    """Get a single resolved index value (composite > fixed source > override > scraped).
+
+    `_resolving` tracks the composite chain currently being computed to break cycles."""
+    # Composite / calculated index: compute live from its components (with cycle guard).
+    ci = db.query(CommodityIndex).filter(CommodityIndex.id == commodity_id).first()
+    if ci is not None and ci.composite_expression:
+        _resolving = _resolving or set()
+        if commodity_id in _resolving:
+            return None  # cycle — a composite (transitively) references itself
+        return compute_composite_value(
+            db, team_id, ci, region, year, quarter, _resolving | {commodity_id},
+        )
+
     # A "fixed" team source means the value is constant across all periods.
     fixed_source = db.query(TeamIndexSource).filter(
         TeamIndexSource.team_id == team_id,

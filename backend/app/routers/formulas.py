@@ -21,6 +21,7 @@ from app.schemas.formula_template import (
     FormulaTemplateCreate,
     FormulaTemplateUpdate,
     FormulaTemplateOut,
+    FormulaTemplateForkRequest,
     FormulaComponentsReplace,
     FormulaComponentOut,
     FormulaCoverageIn,
@@ -171,6 +172,79 @@ def update_formula(
     db.commit()
 
     refreshed = db.query(FormulaTemplate).filter(FormulaTemplate.id == template_id).first()
+    out = FormulaTemplateOut.model_validate(refreshed)
+    out.creator_email = current_user.email
+    return out
+
+
+@router.post("/{template_id}/fork", response_model=FormulaTemplateOut, status_code=201)
+def fork_formula(
+    template_id: uuid.UUID,
+    data: FormulaTemplateForkRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Copy a platform formula template into a team as an editable, private fork —
+    recipe (components) and per-region coverage included. `origin_id` keeps lineage
+    so the team can rename/retune its copy without losing the link to the original.
+    Only platform templates are forkable; one fork per team."""
+    require_permission(db, current_user, data.team_id, "formulas.edit")
+
+    source = db.query(FormulaTemplate).filter(FormulaTemplate.id == template_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Formula template not found")
+    if source.team_id is not None:
+        raise HTTPException(status_code=400, detail="Only platform formulas can be forked")
+
+    existing = (
+        db.query(FormulaTemplate)
+        .filter(FormulaTemplate.team_id == data.team_id, FormulaTemplate.origin_id == source.id)
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="This formula is already forked for the team")
+
+    fork = FormulaTemplate(
+        team_id=data.team_id,
+        origin_id=source.id,
+        created_by=current_user.id,
+        name=source.name,
+        code=source.code,
+        family_id=source.family_id,
+        subfamily_id=source.subfamily_id,
+        catalog_meta=source.catalog_meta,
+        description=source.description,
+        expression=source.expression,
+        variables=source.variables,
+    )
+    db.add(fork)
+    db.flush()
+
+    # Copy the weighted recipe. input_template_id chaining is left pointing at the
+    # platform originals (team formulas may chain platform templates — Scrum 58 scope).
+    for c in db.query(FormulaTemplateComponent).filter(FormulaTemplateComponent.template_id == source.id).all():
+        db.add(FormulaTemplateComponent(
+            template_id=fork.id, name=c.name, component_type=c.component_type,
+            commodity_id=c.commodity_id, input_template_id=c.input_template_id,
+            region=c.region, weight_pct=c.weight_pct, is_proxy=c.is_proxy, sort_order=c.sort_order,
+        ))
+    # Copy per-region coverage (base price / margin), resetting the review sign-off
+    # since it's a fresh team copy the team now owns.
+    for cov in db.query(FormulaRegionCoverage).filter(FormulaRegionCoverage.template_id == source.id).all():
+        db.add(FormulaRegionCoverage(
+            template_id=fork.id, region=cov.region, base_price=cov.base_price,
+            currency=cov.currency, margin_pct=cov.margin_pct,
+            base_year=cov.base_year, base_quarter=cov.base_quarter,
+            data_confidence=cov.data_confidence, coverage_tier=cov.coverage_tier,
+            needs_review=cov.needs_review, review_metadata=cov.review_metadata,
+        ))
+
+    log_event(db, data.team_id, current_user.id, "fork", "formula_template",
+              str(fork.id), new_value={"name": fork.name, "origin_id": str(source.id)})
+    db.expunge(fork)
+    db.commit()
+
+    refreshed = db.query(FormulaTemplate).filter(FormulaTemplate.id == fork.id).first()
     out = FormulaTemplateOut.model_validate(refreshed)
     out.creator_email = current_user.email
     return out

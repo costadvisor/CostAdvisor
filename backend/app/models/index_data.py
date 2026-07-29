@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
-    String, Integer, SmallInteger, Numeric, Boolean, DateTime,
+    String, Integer, SmallInteger, Numeric, Boolean, DateTime, Text,
     ForeignKey, UniqueConstraint, Index,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -39,6 +39,12 @@ class CommodityIndex(Base):
     proxy_for_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("commodity_indexes.id", ondelete="SET NULL"), nullable=True
     )
+    # Composite / calculated index: value is computed live from OTHER indexes via an
+    # advanced expression (e.g. "0.6*Graphite + 0.3*Wood + FC"). `composite_variables`
+    # maps each variable to an index or a fixed value, same shape as FormulaVersion.variables:
+    #   { "Graphite": {"type":"index","commodity_id":N}, "FC": {"type":"fixed","value":X} }
+    composite_expression: Mapped[str | None] = mapped_column(Text, nullable=True)
+    composite_variables: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Relationships
     values = relationship("IndexValue", back_populates="commodity", lazy="dynamic")

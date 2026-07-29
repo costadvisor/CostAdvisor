@@ -164,6 +164,7 @@ export default function Pricing() {
   };
 
   const sym = model?.currency === 'EUR' ? '\u20AC' : '$';
+  const unitLabel = model?.product_unit || '';  // product unit for price/quantity labels (no hardcoded 'kg')
 
   // Merge prices and volumes into unified rows keyed by year-quarter
   const mergedRows = (() => {
@@ -294,8 +295,8 @@ export default function Pricing() {
                   <thead>
                     <tr>
                       <th>Period</th>
-                      <th className="center">Price</th>
-                      <th className="center">Quantity</th>
+                      <th className="center">Price{unitLabel ? ` (${model.currency}/${unitLabel})` : ''}</th>
+                      <th className="center">Quantity{unitLabel ? ` (${unitLabel})` : ''}</th>
                       <th className="center" style={{ width: 100 }}>Actions</th>
                     </tr>
                   </thead>
@@ -337,7 +338,7 @@ export default function Pricing() {
                               />
                             ) : (
                               <span style={{ fontWeight: 500 }}>
-                                {row.volume != null ? `${Number(row.volume).toLocaleString()} ${row.unit || 'kg'}` : '\u2014'}
+                                {row.volume != null ? `${Number(row.volume).toLocaleString()}${(row.unit || unitLabel) ? ` ${row.unit || unitLabel}` : ''}` : '\u2014'}
                               </span>
                             )}
                           </td>

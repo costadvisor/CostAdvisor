@@ -56,3 +56,53 @@ def validate_proxy_logic(spec):
     if unit is not None and unit not in ("abs", "pct"):
         raise ValueError("proxy_logic.spread_unit must be 'abs' or 'pct'")
     return spec
+
+
+def detect_expression_vars(expression: str) -> set[str]:
+    """Return the identifier names referenced by an advanced expression, excluding
+    the whitelisted function names. Mirrors the frontend `detectVars`/`stripReservedFns`
+    and the evaluator's bracket→paren normalisation."""
+    import ast as _ast
+    from app.services.costing_engine import _SAFE_FUNCS
+
+    expr = (expression or "").replace("[", "(").replace("]", ")")
+    tree = _ast.parse(expr, mode="eval")  # raises SyntaxError on a malformed expression
+    names = {n.id for n in _ast.walk(tree) if isinstance(n, _ast.Name)}
+    return names - set(_SAFE_FUNCS)
+
+
+def validate_composite_structure(expression, variables):
+    """Validate a composite index's expression + variable map (structure only — DB
+    checks like 'commodity exists' / 'no self-reference' stay in the router).
+
+    Returns (expression, variables) normalised, or raises ValueError. A null/blank
+    expression clears the composite (returns (None, None))."""
+    if expression is None or not str(expression).strip():
+        return None, None
+    expression = str(expression).strip()
+    variables = variables or {}
+    if not isinstance(variables, dict):
+        raise ValueError("composite_variables must be an object")
+
+    try:
+        detected = detect_expression_vars(expression)
+    except SyntaxError as e:
+        raise ValueError(f"composite_expression is not a valid expression: {e}")
+
+    for name, spec in variables.items():
+        if not isinstance(spec, dict):
+            raise ValueError(f"variable '{name}' must be an object")
+        vtype = spec.get("type")
+        if vtype == "index":
+            if not isinstance(spec.get("commodity_id"), int):
+                raise ValueError(f"index variable '{name}' needs an integer commodity_id")
+        elif vtype == "fixed":
+            if not isinstance(spec.get("value"), (int, float)):
+                raise ValueError(f"fixed variable '{name}' needs a numeric value")
+        else:
+            raise ValueError(f"variable '{name}' type must be 'index' or 'fixed'")
+
+    missing = detected - set(variables)
+    if missing:
+        raise ValueError(f"expression references undefined variables: {sorted(missing)}")
+    return expression, variables
