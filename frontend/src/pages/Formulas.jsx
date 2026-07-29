@@ -5,6 +5,7 @@ import api from '../api';
 import exportCsv from '../utils/exportCsv';
 import FormulaDetailModal from '../components/FormulaDetailModal';
 import FileUpload from '../components/FileUpload';
+import { stripReservedFns } from '../utils/formulaFns';
 
 // data_confidence → badge treatment. CONF-LOW is a placeholder pending expert
 // review — it must read as a caution, not as fact.
@@ -709,7 +710,7 @@ function FormulaModal({ template, activeTeamId, canEditPlatform, canEditTeam, co
   const detectVars = () => {
     const expr = expression.replace(/[[\]]/g, '').replace(/\s/g, '');
     const tokens = expr.match(/[a-zA-Z_][a-zA-Z0-9_]*/g) || [];
-    const unique = [...new Set(tokens)];
+    const unique = stripReservedFns([...new Set(tokens)]);
     setVars(prev => {
       const next = { ...prev };
       unique.forEach(n => { if (!next[n]) next[n] = { type: 'fixed', value: 0 }; });

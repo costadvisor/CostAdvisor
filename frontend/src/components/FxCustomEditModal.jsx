@@ -75,9 +75,9 @@ export default function FxCustomEditModal({ pair, period, current, liveRate, ava
 
   const modeStyle = (m) => ({
     padding: '8px 14px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-    fontWeight: mode === m ? 600 : 400, border: `1px solid ${mode === m ? 'var(--accent1)' : 'var(--border)'}`,
-    background: mode === m ? 'var(--accent1-dim)' : 'transparent',
-    color: mode === m ? 'var(--accent1)' : 'var(--text-secondary)',
+    fontWeight: mode === m ? 600 : 400, border: `1px solid ${mode === m ? 'var(--accent)' : 'var(--border)'}`,
+    background: mode === m ? 'var(--accent-dim)' : 'transparent',
+    color: mode === m ? 'var(--accent)' : 'var(--text-secondary)',
   });
 
   return createPortal(
@@ -104,7 +104,7 @@ export default function FxCustomEditModal({ pair, period, current, liveRate, ava
           )}
 
           {mode === 'live' && (
-            <div style={{ background: 'var(--surface-hover)', borderRadius: 8, padding: 14 }}>
+            <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 14 }}>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
                 Always resolves to the latest daily scraped rate for this pair (refreshed once per day).
               </div>

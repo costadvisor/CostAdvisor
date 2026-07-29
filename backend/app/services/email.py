@@ -239,3 +239,32 @@ def send_invite_email(
     html = build_invite_html(team_name, role, invited_by_name, invited_by_email, requests_url)
     subject = f"{invited_by_name or invited_by_email} invited you to join {team_name} on CostAdvisor"
     return _send(to_email, subject, html)
+
+
+def send_mention_email(to_email: str, mentioner_name: str, product_name: str,
+                       note_snippet: str, link: str) -> bool:
+    """Scrum 25 — notify a teammate they were @mentioned in a note on a cost model."""
+    who = mentioner_name or "A teammate"
+    html = build_welcome_html(
+        display_name=to_email.split("@")[0],
+        app_url=link,
+        heading=f"{who} mentioned you",
+        body_lines=[
+            f"You were mentioned in a note on <strong>{product_name}</strong>:",
+            f'<em style="color:#3f3f46">“{note_snippet}”</em>',
+        ],
+        cta_label="Open in CostAdvisor →",
+    )
+    return _send(to_email, f"{who} mentioned you on {product_name}", html)
+
+
+def send_alert_email(to_email: str, message: str, link: str) -> bool:
+    """Scrum 24 — deliver a triggered alert (index move / gap / buy window) by email."""
+    html = build_welcome_html(
+        display_name=to_email.split("@")[0],
+        app_url=link,
+        heading="CostAdvisor alert",
+        body_lines=[message, "Open CostAdvisor to review and act."],
+        cta_label="Open CostAdvisor →",
+    )
+    return _send(to_email, "CostAdvisor alert", html)

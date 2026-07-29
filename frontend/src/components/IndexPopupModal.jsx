@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '../api';
 import { useToast } from './Toast';
 import SeriesChart from './SeriesChart';
@@ -29,6 +29,7 @@ export default function IndexPopupModal({
   onPairRemoved,   // close + refetch after pair delete
   onSourceChanged,
   onRemoved,
+  onEditPeriod,    // (period) => void — keyboard/pointer path to a per-quarter override
 }) {
   const { addToast } = useToast();
   const [impacts, setImpacts] = useState([]);
@@ -40,6 +41,41 @@ export default function IndexPopupModal({
   const [chartMode, setChartMode] = useState('default'); // 'default' | 'custom' | 'compare'
   const [showEditPair, setShowEditPair] = useState(false);
   const [pairBusy, setPairBusy] = useState(false);
+  const dialogRef = useRef(null);
+  const restoreFocusRef = useRef(null);
+
+  /* Escape / focus trap / focus restore.
+   *
+   * This modal hand-rolls its own backdrop rather than using the shared `Modal`
+   * component, so it inherited none of that behaviour: Escape did nothing, focus
+   * stayed behind on the page, and because the header isn't sticky the only close
+   * affordance scrolled out of view. A keyboard user had no exit at all. */
+  useEffect(() => {
+    if (!isOpen) return;
+    restoreFocusRef.current = document.activeElement;
+    dialogRef.current?.focus();
+
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
+      if (e.key !== 'Tab') return;
+      // Keep Tab inside the dialog.
+      const focusable = dialogRef.current?.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable?.length) return;
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      // Return focus to the row that opened this, so the grid doesn't lose place.
+      const el = restoreFocusRef.current;
+      if (el && typeof el.focus === 'function' && document.contains(el)) el.focus();
+    };
+  }, [isOpen, onClose]);
 
   const isFx = commodity?.category === 'FX';
   const [fxFrom, fxTo] = isFx && commodityName ? commodityName.split('/') : [null, null];
@@ -142,7 +178,12 @@ export default function IndexPopupModal({
   // shows only if at least one period has a team override.
   const histRows = [...periods].reverse().map((p) => {
     const c = cellAt(p);
-    return { label: p.label, def: c ? (c.scraped_value ?? c.value ?? null) : null, cust: c?.source === 'team_override' ? c.value : null };
+    return {
+      label: p.label,
+      period: p,   // carried so a row can open the override editor for that quarter
+      def: c ? (c.scraped_value ?? c.value ?? null) : null,
+      cust: c?.source === 'team_override' ? c.value : null,
+    };
   });
   const anyCustom = histRows.some(r => r.cust != null);
 
@@ -215,9 +256,18 @@ export default function IndexPopupModal({
 
   return (
     <div className="ca-modal-backdrop" onClick={onClose}>
-      <div className="ca-modal" style={{ maxWidth: 740, width: '95vw' }} onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div className="ca-modal-header" style={{ alignItems: 'flex-start' }}>
+      <div
+        className="ca-modal" style={{ maxWidth: 740, width: '95vw' }}
+        onClick={e => e.stopPropagation()}
+        ref={dialogRef} tabIndex={-1}
+        role="dialog" aria-modal="true" aria-label={`${commodityName || 'Index'} details`}
+      >
+        {/* Header — sticky so Export / Print / Close stay reachable. It used to
+            scroll away, leaving no way out of a 6-card modal. */}
+        <div
+          className="ca-modal-header"
+          style={{ alignItems: 'flex-start', position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}
+        >
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 15 }}>{commodityName}</span>
@@ -236,13 +286,17 @@ export default function IndexPopupModal({
               {region && <span>Region: <strong>{region}</strong></span>}
             </div>
             {commodity?.source_url && (
+              /* Label the provider, don't paste the endpoint. This showed the raw
+                 URL, so an FX pair rendered
+                 "https://api.frankfurter.app/latest?from=AUD&to=EUR" to a CPO. */
               <a href={commodity.source_url} target="_blank" rel="noopener noreferrer"
+                title={commodity.source_url}
                 style={{ fontSize: 10, color: 'var(--accent4)', textDecoration: 'underline', marginTop: 4, display: 'inline-block' }}>
-                {commodity.source_url.length > 70 ? commodity.source_url.slice(0, 70) + '...' : commodity.source_url}
+                {commodity.provider || commodity.free_source_name || 'View source'} ↗
               </a>
             )}
           </div>
-          <div className="ca-noprint" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="ca-no-print" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={exportHist} disabled={!histRows.length}>Export CSV</button>
             <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={printPopup}>Print</button>
             <button
@@ -263,7 +317,7 @@ export default function IndexPopupModal({
           .ca-modal-backdrop, .ca-modal-backdrop * { visibility: visible !important; }
           .ca-modal-backdrop { position: absolute !important; inset: 0 !important; background: #fff !important; display: block !important; padding: 0 !important; }
           .ca-modal { max-width: 100% !important; width: 100% !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; }
-          .ca-noprint { display: none !important; }
+          .ca-no-print { display: none !important; }
         }`}</style>
 
         <div className="ca-modal-body">
@@ -324,9 +378,9 @@ export default function IndexPopupModal({
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: 10 }}>
               {[
                 { lbl: 'Change', val: stats.changePct == null ? '—' : `${stats.changePct >= 0 ? '+' : ''}${stats.changePct.toFixed(1)}%`,
-                  color: stats.changePct == null ? 'var(--text)' : stats.changePct >= 0 ? 'var(--accent2)' : 'var(--danger)' },
+                  color: stats.changePct == null ? 'var(--text)' : stats.changePct >= 0 ? 'var(--accent2)' : 'var(--accent)' },
                 { lbl: 'Annualised', val: stats.cagrPct == null ? '—' : `${stats.cagrPct >= 0 ? '+' : ''}${stats.cagrPct.toFixed(1)}%`,
-                  color: stats.cagrPct == null ? 'var(--text)' : stats.cagrPct >= 0 ? 'var(--accent2)' : 'var(--danger)' },
+                  color: stats.cagrPct == null ? 'var(--text)' : stats.cagrPct >= 0 ? 'var(--accent2)' : 'var(--accent)' },
                 { lbl: 'Volatility', val: stats.volatilityPct == null ? '—' : `${stats.volatilityPct.toFixed(1)}%`, color: 'var(--text)' },
                 { lbl: 'Min', val: fmtStat(stats.min), color: 'var(--text)' },
                 { lbl: 'Mean', val: fmtStat(stats.mean), color: 'var(--text)' },
@@ -345,8 +399,8 @@ export default function IndexPopupModal({
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: 10 }}>
                 {[
                   { lbl: 'Periods changed', val: String(compareStats.count), color: 'var(--accent4)' },
-                  { lbl: 'Avg Δ', val: `${compareStats.avgDiff >= 0 ? '+' : ''}${fmtStat(compareStats.avgDiff)}`, color: compareStats.avgDiff >= 0 ? 'var(--accent2)' : 'var(--danger)' },
-                  { lbl: 'Avg Δ%', val: compareStats.avgPct == null ? '—' : `${compareStats.avgPct >= 0 ? '+' : ''}${compareStats.avgPct.toFixed(1)}%`, color: compareStats.avgPct == null ? 'var(--text)' : compareStats.avgPct >= 0 ? 'var(--accent2)' : 'var(--danger)' },
+                  { lbl: 'Avg Δ', val: `${compareStats.avgDiff >= 0 ? '+' : ''}${fmtStat(compareStats.avgDiff)}`, color: compareStats.avgDiff >= 0 ? 'var(--accent2)' : 'var(--accent)' },
+                  { lbl: 'Avg Δ%', val: compareStats.avgPct == null ? '—' : `${compareStats.avgPct >= 0 ? '+' : ''}${compareStats.avgPct.toFixed(1)}%`, color: compareStats.avgPct == null ? 'var(--text)' : compareStats.avgPct >= 0 ? 'var(--accent2)' : 'var(--accent)' },
                   { lbl: 'Max |Δ|', val: fmtStat(compareStats.maxAbs), color: 'var(--text)' },
                 ].map(s => (
                   <div key={s.lbl} className="ca-metric" style={{ padding: '8px 10px' }}>
@@ -362,28 +416,52 @@ export default function IndexPopupModal({
         {/* Historical data — Period | Default | Custom (custom column only if any override) */}
         {histRows.length > 0 && (
           <div className="ca-card" style={{ marginBottom: 16 }}>
-            <div className="ca-card-title" style={{ marginBottom: 8 }}>Historical Data</div>
-            <div className="ca-scroll-x" style={{ maxHeight: 260, overflowY: 'auto' }}>
+            <div className="ca-card-title" style={{ marginBottom: 8 }}>
+              Historical Data
+              {onEditPeriod && <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 11 }}> · select a period to override it</span>}
+            </div>
+            {/* No inner scroll. A 260px `overflow-y: auto` box here captured the
+                wheel, so scrolling with the pointer over this table left the AI
+                Analysis, Portfolio Impact and Source sections unreachable. The
+                modal is the single scroll plane. */}
+            <div>
               <table className="ca-table" style={{ fontSize: 11 }}>
                 <thead>
                   <tr>
-                    <th>{isFx ? 'Quarter' : 'Period'}</th>
-                    <th className="right">Default</th>
-                    {anyCustom && <th className="right">Custom</th>}
+                    <th scope="col">{isFx ? 'Quarter' : 'Period'}</th>
+                    {/* "Default" is internal shorthand for the platform-scraped value. */}
+                    <th scope="col" className="right">Platform value</th>
+                    {anyCustom && <th scope="col" className="right">Your override</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {histRows.map(r => (
-                    <tr key={r.label}>
-                      <td>{r.label}</td>
-                      <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{r.def == null ? '—' : fmtStat(r.def)}</td>
-                      {anyCustom && (
-                        <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.cust != null ? 'var(--accent4)' : 'var(--muted)' }}>
-                          {r.cust == null ? '—' : fmtStat(r.cust)}
-                        </td>
-                      )}
-                    </tr>
-                  ))}
+                  {histRows.map(r => {
+                    // This list is also the KEYBOARD path to per-period editing: the
+                    // grid's 28 clickable cells per row are pointer-only by design
+                    // (one tab stop per cell would mean thousands on the page).
+                    const editable = !!onEditPeriod;
+                    return (
+                      <tr
+                        key={r.label}
+                        {...(editable ? {
+                          role: 'button',
+                          tabIndex: 0,
+                          'aria-label': `Override ${commodityName} for ${r.label}`,
+                          onClick: () => onEditPeriod(r.period),
+                          onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onEditPeriod(r.period); } },
+                          style: { cursor: 'cell' },
+                        } : {})}
+                      >
+                        <td>{r.label}</td>
+                        <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{r.def == null ? '—' : fmtStat(r.def)}</td>
+                        {anyCustom && (
+                          <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.cust != null ? 'var(--accent4)' : 'var(--muted)' }}>
+                            {r.cust == null ? '—' : fmtStat(r.cust)}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -398,13 +476,21 @@ export default function IndexPopupModal({
           </div>
           {loadingAi ? (
             <p style={{ color: 'var(--muted)', fontSize: 11, fontStyle: 'italic', margin: 0 }}>
-              Generating analysis...
+              Generating analysis…
             </p>
-          ) : aiAnalysis ? (
+          ) : aiAnalysis?.analysis ? (
             <p style={{ fontSize: 12, lineHeight: 1.8, color: 'var(--text-secondary)', margin: 0 }}>
               {aiAnalysis.analysis}
             </p>
-          ) : null}
+          ) : (
+            /* Was `: null` — so a request that resolved without text rendered a
+               titled card with an empty body, which reads as a broken feature.
+               The model is Tailscale-only and disabled in prod, so "no narrative"
+               is a normal state and should say so. */
+            <p style={{ color: 'var(--muted)', fontSize: 11, margin: 0 }}>
+              No analysis available for this index yet.
+            </p>
+          )}
         </div>
 
         {/* Portfolio Impact */}

@@ -32,14 +32,44 @@ _SAFE_OPS: dict = {
     _ast.Mult: _op.mul,
     _ast.Div: _op.truediv,
     _ast.Pow: _op.pow,
+    _ast.Mod: _op.mod,
     _ast.USub: _op.neg,
     _ast.UAdd: _op.pos,
 }
 
+# Comparison operators — enable threshold / conditional formulas via `x if x < 100 else 100`.
+_SAFE_CMP: dict = {
+    _ast.Lt: _op.lt, _ast.LtE: _op.le,
+    _ast.Gt: _op.gt, _ast.GtE: _op.ge,
+    _ast.Eq: _op.eq, _ast.NotEq: _op.ne,
+}
 
-def _eval_node(node, ctx: dict) -> float:
+
+def _step(x, threshold, below, above):
+    """Step function: `below` when x < threshold, else `above`."""
+    return below if x < threshold else above
+
+
+def _clamp(x, lo, hi):
+    """Bound x to [lo, hi] — min/max bounds in one call."""
+    return max(lo, min(hi, x))
+
+
+# Whitelisted functions for advanced formulas (Scrum 28: bounds, steps, yield
+# factors). No builtins beyond these — the call node only accepts these names.
+_SAFE_FUNCS: dict = {
+    "min": min,
+    "max": max,
+    "abs": abs,
+    "round": round,
+    "clamp": _clamp,
+    "step": _step,
+}
+
+
+def _eval_node(node, ctx: dict):
     if isinstance(node, _ast.Constant):
-        return float(node.value)
+        return float(node.value) if isinstance(node.value, (int, float)) else node.value
     if isinstance(node, _ast.Name):
         if node.id not in ctx:
             raise ValueError(f"Undefined variable '{node.id}'")
@@ -50,10 +80,44 @@ def _eval_node(node, ctx: dict) -> float:
             raise ValueError(f"Unsupported operator: {type(node.op).__name__}")
         return fn(_eval_node(node.left, ctx), _eval_node(node.right, ctx))
     if isinstance(node, _ast.UnaryOp):
+        # `not` is boolean; the rest are numeric sign operators
+        if isinstance(node.op, _ast.Not):
+            return not _eval_node(node.operand, ctx)
         fn = _SAFE_OPS.get(type(node.op))
         if fn is None:
             raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
         return fn(_eval_node(node.operand, ctx))
+    if isinstance(node, _ast.Call):
+        # Only bare `name(...)` calls against the whitelist — no attributes, no kwargs.
+        if not isinstance(node.func, _ast.Name):
+            raise ValueError("Only direct function calls are allowed")
+        fn = _SAFE_FUNCS.get(node.func.id)
+        if fn is None:
+            raise ValueError(f"Unsupported function: {getattr(node.func, 'id', '?')}")
+        if node.keywords:
+            raise ValueError("Keyword arguments are not allowed")
+        return float(fn(*[_eval_node(a, ctx) for a in node.args]))
+    if isinstance(node, _ast.IfExp):
+        # ternary — `body if test else orelse` (threshold / conditional logic)
+        return _eval_node(node.body, ctx) if _eval_node(node.test, ctx) else _eval_node(node.orelse, ctx)
+    if isinstance(node, _ast.Compare):
+        left = _eval_node(node.left, ctx)
+        for op, comparator in zip(node.ops, node.comparators):
+            cmpfn = _SAFE_CMP.get(type(op))
+            if cmpfn is None:
+                raise ValueError(f"Unsupported comparison: {type(op).__name__}")
+            right = _eval_node(comparator, ctx)
+            if not cmpfn(left, right):
+                return False
+            left = right   # support chained comparisons (a < b < c)
+        return True
+    if isinstance(node, _ast.BoolOp):
+        vals = [_eval_node(v, ctx) for v in node.values]
+        if isinstance(node.op, _ast.And):
+            return all(vals)
+        if isinstance(node.op, _ast.Or):
+            return any(vals)
+        raise ValueError(f"Unsupported boolean operator: {type(node.op).__name__}")
     raise ValueError(f"Unsupported expression node: {type(node).__name__}")
 
 

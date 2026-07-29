@@ -32,7 +32,7 @@ export default function PriceChart({ series, color }) {
   const yScale = v => PAD.t + plotH * (1 - (v - minV) / (maxV - minV || 1));
 
   const up = vals[vals.length - 1] >= vals[0];
-  const stroke = color || (up ? 'var(--accent2)' : 'var(--danger)');
+  const stroke = color || (up ? 'var(--accent2)' : 'var(--accent)');
 
   // y grid
   const range = maxV - minV;
@@ -119,7 +119,7 @@ export default function PriceChart({ series, color }) {
           <div style={{ color: 'var(--text)', fontWeight: 600 }}>{Number(hp.rate).toFixed(4)}</div>
           <div style={{ color: 'var(--muted)', fontSize: 10 }}>{hp.date}</div>
           {dDelta != null && (
-            <div style={{ color: dDelta >= 0 ? 'var(--accent2)' : 'var(--danger)', fontSize: 10, marginTop: 2 }}>
+            <div style={{ color: dDelta >= 0 ? 'var(--accent2)' : 'var(--accent)', fontSize: 10, marginTop: 2 }}>
               {dDelta >= 0 ? '▲' : '▼'} {Math.abs(dDelta).toFixed(4)} ({dPct >= 0 ? '+' : ''}{dPct.toFixed(2)}%) vs prev
             </div>
           )}

@@ -19,6 +19,8 @@ from app.models.access_request import PlatformAccessRequest
 from app.models.rbac import Permission, Role, RolePermission, Plan, PlanPermission, TeamMemberRole, UserPlatformRole
 from app.models.formula_template import FormulaTemplate, FormulaTemplateComponent, FormulaRegionCoverage
 from app.models.demo import DemoHost, DemoBlockedSlot, DemoRequest
+from app.models.collaboration import CostModelNote
+from app.models.alerts import AlertSubscription, AlertEvent
 
 __all__ = [
     "User",

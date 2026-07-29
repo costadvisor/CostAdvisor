@@ -51,6 +51,7 @@ export default function Navbar() {
     { path: '/products', label: 'Products' },
     { path: '/suppliers', label: 'Suppliers' },
     { path: '/formulas', label: 'Formulas' },
+    { path: '/alerts', label: 'Alerts' },
   ];
 
   const goProfile = () => { setOpen(false); navigate('/profile'); };

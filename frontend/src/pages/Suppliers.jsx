@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../api';
+import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { useConfirm } from '../components/ConfirmDialog';
+import { DriftBar } from './workspace/wsCharts';
+import exportCsv from '../utils/exportCsv';
 
 export default function Suppliers() {
   const { activeTeamId } = useAuth();
@@ -16,6 +18,10 @@ export default function Suppliers() {
   const [country, setCountry] = useState('');
   const [saving, setSaving] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
+  const [view, setView] = useState('directory');   // 'directory' | 'benchmark'
+  const [benchmark, setBenchmark] = useState(null);
+  const [benchLoading, setBenchLoading] = useState(false);
+  const [benchErr, setBenchErr] = useState(null);
 
   const fetchData = () => {
     if (!activeTeamId) return;
@@ -33,6 +39,22 @@ export default function Suppliers() {
   };
 
   useEffect(fetchData, [activeTeamId]);
+
+  // Benchmarking is owner/admin-only (server-gated); fetch lazily on first open.
+  const fetchBenchmark = () => {
+    if (!activeTeamId) return;
+    setBenchLoading(true);
+    setBenchErr(null);
+    api.get('/api/suppliers/benchmark', { params: { team_id: activeTeamId } })
+      .then(res => setBenchmark(res.data.suppliers || []))
+      .catch(err => setBenchErr(formatApiError(err)))
+      .finally(() => setBenchLoading(false));
+  };
+
+  useEffect(() => {
+    if (view === 'benchmark' && benchmark === null && !benchLoading) fetchBenchmark();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, activeTeamId]);
 
   const handleCreate = () => {
     if (!name.trim()) return;
@@ -69,12 +91,26 @@ export default function Suppliers() {
     <div className="ca-page ca-fade-in">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <div className="ca-h1">Suppliers</div>
-        <button className="ca-btn ca-btn-primary" onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : '+ Add Supplier'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className={`ca-btn ${view === 'directory' ? 'ca-btn-primary' : 'ca-btn-ghost'}`} onClick={() => setView('directory')}>Directory</button>
+          <button className={`ca-btn ${view === 'benchmark' ? 'ca-btn-primary' : 'ca-btn-ghost'}`} onClick={() => setView('benchmark')}>Benchmarking</button>
+          {view === 'directory' && (
+            <button className="ca-btn ca-btn-primary" onClick={() => setShowForm(!showForm)}>
+              {showForm ? 'Cancel' : '+ Add Supplier'}
+            </button>
+          )}
+        </div>
       </div>
-      <p className="ca-subtitle">Manage suppliers for your team.</p>
+      <p className="ca-subtitle">
+        {view === 'directory'
+          ? 'Manage suppliers for your team.'
+          : 'How closely each supplier tracks your should-cost — who prices near it, who pads margin. Ranked by average gap, biggest opportunity first.'}
+      </p>
 
+      {view === 'benchmark' ? (
+        <BenchmarkView data={benchmark} loading={benchLoading} error={benchErr} />
+      ) : (
+      <>
       {showForm && (
         <div className="ca-card" style={{ marginBottom: 16 }}>
           <div className="ca-card-title">New Supplier</div>
@@ -207,6 +243,103 @@ export default function Suppliers() {
           </table>
         </div>
       )}
+      </>
+      )}
+    </div>
+  );
+}
+
+/* Benchmarking ranking table — how closely each supplier tracks should-cost.
+ * Data from GET /api/suppliers/benchmark (owner/admin only). A positive avg gap%
+ * means the supplier prices above should-cost (pads margin); negative means below. */
+function BenchmarkView({ data, loading, error }) {
+  if (loading) return <div style={{ padding: 20, color: 'var(--muted)' }}>Loading benchmarking…</div>;
+  if (error) return (
+    <div className="ca-card" style={{ textAlign: 'center', padding: 40 }}>
+      <div style={{ color: 'var(--accent2)', marginBottom: 6 }}>{error}</div>
+      <div style={{ color: 'var(--muted)', fontSize: 12 }}>Benchmarking is available to team owners and admins.</div>
+    </div>
+  );
+  if (!data) return null;
+
+  const priced = data.filter(s => s.avg_gap_pct !== null);
+  if (priced.length === 0) return (
+    <div className="ca-card" style={{ textAlign: 'center', padding: 48 }}>
+      <div style={{ color: 'var(--text-secondary)' }}>
+        No benchmarking data yet — add actual prices to your suppliers' cost models to compare them against should-cost.
+      </div>
+    </div>
+  );
+
+  const maxAbs = Math.max(5, ...priced.map(s => Math.abs(s.avg_gap_pct)));
+  const gapColor = (g) => (g > 1 ? 'var(--accent2)' : g < -1 ? 'var(--accent)' : 'var(--muted)');
+  const trendArrow = (t) => {
+    if (!t || t.length < 2) return null;
+    const d = t[t.length - 1].avg_gap_pct - t[0].avg_gap_pct;
+    if (Math.abs(d) < 0.5) return <span title="Stable" style={{ color: 'var(--muted)' }}>→</span>;
+    return d > 0
+      ? <span title={`Widening +${d.toFixed(1)} pts`} style={{ color: 'var(--accent2)' }}>↑</span>
+      : <span title={`Narrowing ${d.toFixed(1)} pts`} style={{ color: 'var(--accent)' }}>↓</span>;
+  };
+
+  const handleExport = () => exportCsv(
+    'supplier-benchmark.csv',
+    ['Rank', 'Supplier', 'Country', 'Cost Models', 'Priced Quarters', 'Avg Gap %', 'Latest Gap %', 'Exposure', 'Trend (first→last pts)'],
+    priced.map((s, i) => [
+      i + 1, s.supplier_name, s.country || '', s.n_models, s.n_quarters_priced,
+      s.avg_gap_pct, s.latest_gap_pct, s.exposure,
+      s.trend.length >= 2 ? (s.trend[s.trend.length - 1].avg_gap_pct - s.trend[0].avg_gap_pct).toFixed(1) : '',
+    ]),
+  );
+
+  return (
+    <div className="ca-card">
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={handleExport}>Export CSV</button>
+      </div>
+      <div className="ca-scroll-x">
+        <table className="ca-table" style={{ width: '100%' }}>
+          <thead>
+            <tr>
+              <th className="center" style={{ width: 40 }}>#</th>
+              <th>Supplier</th>
+              <th>Country</th>
+              <th className="center">Models</th>
+              <th className="center">Priced Qtrs</th>
+              <th>Avg Gap %</th>
+              <th className="center">Latest</th>
+              <th className="center">Trend</th>
+              <th className="center">Exposure</th>
+            </tr>
+          </thead>
+          <tbody>
+            {priced.map((s, i) => (
+              <tr key={s.supplier_id}>
+                <td className="center" style={{ color: 'var(--muted)', fontWeight: 600 }}>{i + 1}</td>
+                <td style={{ fontWeight: 600 }}>{s.supplier_name}</td>
+                <td style={{ color: 'var(--muted)' }}>{s.country || '—'}</td>
+                <td className="center">{s.n_models}</td>
+                <td className="center" style={{ color: 'var(--muted)' }}>{s.n_quarters_priced}</td>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, minWidth: 56, color: gapColor(s.avg_gap_pct) }}>
+                      {s.avg_gap_pct > 0 ? '+' : ''}{s.avg_gap_pct.toFixed(1)}%
+                    </span>
+                    <DriftBar value={Math.abs(s.avg_gap_pct)} max={maxAbs} color={gapColor(s.avg_gap_pct)} />
+                  </div>
+                </td>
+                <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: gapColor(s.latest_gap_pct) }}>
+                  {s.latest_gap_pct > 0 ? '+' : ''}{s.latest_gap_pct.toFixed(1)}%
+                </td>
+                <td className="center" style={{ fontSize: 16 }}>{trendArrow(s.trend)}</td>
+                <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: s.exposure > 0 ? 'var(--accent2)' : 'var(--muted)' }}>
+                  {s.exposure ? `$${Math.round(s.exposure).toLocaleString()}` : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

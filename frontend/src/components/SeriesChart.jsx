@@ -21,7 +21,14 @@ import { useState, useMemo, useEffect, useRef } from 'react';
  */
 export default function SeriesChart({ points, comparePoints, markedLabels, color, rangeOptions, valueDecimals, unit, onWindowChange }) {
   const opts = rangeOptions && rangeOptions.length ? rangeOptions : [['All', Infinity]];
-  const [rangeIdx, setRangeIdx] = useState(opts.length - 1); // default 'All'
+  // Default to a readable window, not 'All'. 'All' on an FX daily series plots
+  // ~1,660 points across ~660px — over-plotted to the point of being a smear.
+  // Prefer the largest preset at or under ~400 points, else the second-widest.
+  const [rangeIdx, setRangeIdx] = useState(() => {
+    const readable = opts.map(([, n]) => n).filter(n => n !== Infinity && n <= 400);
+    if (readable.length) return opts.findIndex(([, n]) => n === Math.max(...readable));
+    return Math.max(0, opts.length - 2);
+  });
   const [hover, setHover] = useState(null);
   const [selA, setSelA] = useState(null);
   const [selB, setSelB] = useState(null);
@@ -87,9 +94,13 @@ export default function SeriesChart({ points, comparePoints, markedLabels, color
     if (d.date) {
       const dt = new Date(d.date + 'T00:00:00');
       const spanDays = (new Date(windowed[N - 1].date) - new Date(windowed[0].date)) / 86400000;
-      return spanDays > 200
-        ? dt.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
-        : dt.toLocaleDateString(undefined, { day: '2-digit', month: 'short' });
+      // `{month:'short', year:'2-digit'}` renders "Dec 19", which on a multi-year
+      // axis is indistinguishable from 19 December. The apostrophe disambiguates
+      // year from day-of-month.
+      if (spanDays > 200) {
+        return `${dt.toLocaleDateString(undefined, { month: 'short' })} ’${String(dt.getFullYear()).slice(2)}`;
+      }
+      return dt.toLocaleDateString(undefined, { day: '2-digit', month: 'short' });
     }
     return d.label;
   };
@@ -255,7 +266,7 @@ export default function SeriesChart({ points, comparePoints, markedLabels, color
             <div style={{ color: 'var(--text)', fontWeight: 600 }}>{Number(hp.value).toFixed(dec)}{unit ? `/${unit}` : ''}</div>
             <div style={{ color: 'var(--muted)', fontSize: 10 }}>{hp.date || hp.label}</div>
             {dDelta != null && (
-              <div style={{ color: dDelta >= 0 ? 'var(--accent2)' : 'var(--danger)', fontSize: 10, marginTop: 2 }}>
+              <div style={{ color: dDelta >= 0 ? 'var(--accent2)' : 'var(--accent)', fontSize: 10, marginTop: 2 }}>
                 {dDelta >= 0 ? '▲' : '▼'} {Math.abs(dDelta).toFixed(dec)} ({dPct >= 0 ? '+' : ''}{dPct.toFixed(2)}%) vs prev
               </div>
             )}

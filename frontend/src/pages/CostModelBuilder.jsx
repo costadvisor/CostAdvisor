@@ -8,6 +8,7 @@ import api, { formatApiError } from '../api';
 import { useConfirm, useAlert } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../AuthContext';
+import { stripReservedFns } from '../utils/formulaFns';
 
 export default function CostModelBuilder() {
   const { costModelId } = useParams();
@@ -360,7 +361,7 @@ export default function CostModelBuilder() {
   const detectVars = () => {
     const expr = advancedExpression.replace(/[[\]]/g, '').replace(/\s/g, '');
     const tokens = expr.match(/[a-zA-Z_][a-zA-Z0-9_]*/g) || [];
-    const unique = [...new Set(tokens)];
+    const unique = stripReservedFns([...new Set(tokens)]);
     setAdvancedVars(prev => {
       const next = {};
       unique.forEach(name => { next[name] = prev[name] || { type: 'fixed', value: 0 }; });

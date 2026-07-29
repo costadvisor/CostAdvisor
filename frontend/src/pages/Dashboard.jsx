@@ -4,6 +4,14 @@ import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import exportCsv from '../utils/exportCsv';
 import { useConfirm, useAlert } from '../components/ConfirmDialog';
+import { DriftBar } from './workspace/wsCharts';
+import PriorityMatrix from '../components/PriorityMatrix';
+import BuyWindows from '../components/BuyWindows';
+
+// Severity colour tier mirrors the Monitor triage screen: price drift = alert,
+// index moved = watch, otherwise on-track.
+const severityColor = (m) =>
+  m.flag_price_drift ? 'var(--accent2)' : m.flag_index_moved ? 'var(--accent3)' : 'var(--accent)';
 
 export default function Dashboard() {
   const { activeTeamId } = useAuth();
@@ -13,6 +21,12 @@ export default function Dashboard() {
   const [sortKey, setSortKey] = useState('exposure');
   const [sortDir, setSortDir] = useState('desc');
   const [view, setView] = useState('table');
+  const [matrix, setMatrix] = useState(null);
+  const [matrixLoading, setMatrixLoading] = useState(false);
+  const [matrixErr, setMatrixErr] = useState(null);
+  const [buy, setBuy] = useState(null);
+  const [buyLoading, setBuyLoading] = useState(false);
+  const [buyErr, setBuyErr] = useState(null);
 
   const fetchPortfolio = () => {
     if (!activeTeamId) return;
@@ -24,6 +38,30 @@ export default function Dashboard() {
   };
 
   useEffect(fetchPortfolio, [activeTeamId]);
+
+  // Priority matrix (Scrum 20) — lazy-fetched on first open of the Matrix view.
+  useEffect(() => {
+    if (view !== 'matrix' || !activeTeamId || matrix !== null || matrixLoading) return;
+    setMatrixLoading(true);
+    setMatrixErr(null);
+    api.get('/api/portfolio/priority-matrix', { params: { team_id: activeTeamId } })
+      .then(res => setMatrix(res.data))
+      .catch(err => setMatrixErr(formatApiError(err)))
+      .finally(() => setMatrixLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, activeTeamId]);
+
+  // Buy windows (Scrum 22) — lazy-fetched on first open of the Buy Windows view.
+  useEffect(() => {
+    if (view !== 'buy' || !activeTeamId || buy !== null || buyLoading) return;
+    setBuyLoading(true);
+    setBuyErr(null);
+    api.get('/api/portfolio/buy-windows', { params: { team_id: activeTeamId } })
+      .then(res => setBuy(res.data))
+      .catch(err => setBuyErr(formatApiError(err)))
+      .finally(() => setBuyLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, activeTeamId]);
 
   const confirm = useConfirm();
   const showAlert = useAlert();
@@ -70,6 +108,10 @@ export default function Dashboard() {
     return sortDir === 'asc' ? va - vb : vb - va;
   }) : [];
 
+  // Shared scale so the severity bars are comparable across rows (min 25% so a
+  // portfolio with only small gaps doesn't render every bar near-full).
+  const maxAbsGap = Math.max(25, ...sortedModels.map(m => Math.abs(m.gap_pct || 0)));
+
   const SortHeader = ({ label, field }) => (
     <th className="center" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(field)}>
       {label} {sortKey === field ? (sortDir === 'asc' ? '\u25B2' : '\u25BC') : ''}
@@ -83,6 +125,8 @@ export default function Dashboard() {
         <div style={{ display: 'flex', gap: 8 }}>
           <button className={`ca-btn ${view === 'table' ? 'ca-btn-primary' : 'ca-btn-ghost'}`} onClick={() => setView('table')}>Table</button>
           <button className={`ca-btn ${view === 'cards' ? 'ca-btn-primary' : 'ca-btn-ghost'}`} onClick={() => setView('cards')}>Cards</button>
+          <button className={`ca-btn ${view === 'matrix' ? 'ca-btn-primary' : 'ca-btn-ghost'}`} onClick={() => setView('matrix')}>Matrix</button>
+          <button className={`ca-btn ${view === 'buy' ? 'ca-btn-primary' : 'ca-btn-ghost'}`} onClick={() => setView('buy')}>Buy Windows</button>
           <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => portfolio && exportCsv(
             'portfolio.csv',
             ['Supplier', 'Product Family', 'Product Reference', 'Region', 'Currency', 'Should-Cost', 'Actual', 'Gap %', 'Exposure', 'Index Flag', 'Drift Flag'],
@@ -93,7 +137,11 @@ export default function Dashboard() {
       </div>
       <p className="ca-subtitle">Q{Math.ceil((new Date().getMonth() + 1) / 3)} {new Date().getFullYear()} &mdash; All cost models for your team, ranked by exposure.</p>
 
-      {loading ? (
+      {view === 'matrix' ? (
+        <PriorityMatrix data={matrix} loading={matrixLoading} error={matrixErr} />
+      ) : view === 'buy' ? (
+        <BuyWindows data={buy} loading={buyLoading} error={buyErr} />
+      ) : loading ? (
         <div style={{ padding: 20, color: 'var(--muted)' }}>Loading...</div>
       ) : !portfolio || portfolio.models.length === 0 ? (
         <div className="ca-card" style={{ textAlign: 'center', padding: 48 }}>
@@ -119,6 +167,7 @@ export default function Dashboard() {
                       <SortHeader label="Should-Cost" field="should_cost" />
                       <th className="center">Actual</th>
                       <SortHeader label="Gap %" field="gap_pct" />
+                      <th>Severity</th>
                       <SortHeader label="Exposure" field="exposure" />
                       <th className="center">Flags</th>
                       <th className="center">Actions</th>
@@ -141,6 +190,11 @@ export default function Dashboard() {
                           </td>
                           <td className="center" style={{ color: m.gap_pct > 0 ? 'var(--accent2)' : m.gap_pct < 0 ? 'var(--accent)' : 'var(--muted)' }}>
                             {m.gap_pct !== null ? `${m.gap_pct > 0 ? '+' : ''}${m.gap_pct.toFixed(1)}%` : '\u2014'}
+                          </td>
+                          <td>
+                            {m.gap_pct !== null
+                              ? <DriftBar value={Math.abs(m.gap_pct)} max={maxAbsGap} color={severityColor(m)} />
+                              : <span style={{ color: 'var(--muted)' }}>{'\u2014'}</span>}
                           </td>
                           <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>
                             ${exposure.toLocaleString()}

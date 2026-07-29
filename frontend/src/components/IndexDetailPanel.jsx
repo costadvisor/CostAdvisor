@@ -286,7 +286,7 @@ export default function IndexDetailPanel({ commodity_id, commodity_name, region,
                     {uploadPreview.filename} &middot; {uploadPreview.rows_processed} row{uploadPreview.rows_processed !== 1 ? 's' : ''} ready
                   </div>
                   {uploadPreview.errors.length > 0 && (
-                    <div style={{ color: 'var(--warning, #92400e)' }}>
+                    <div style={{ color: 'var(--accent3)' }}>
                       <span style={{ fontWeight: 600 }}>{uploadPreview.errors.length} row{uploadPreview.errors.length !== 1 ? 's' : ''} skipped:</span>
                       <ul style={{ margin: '3px 0 0 14px', padding: 0 }}>
                         {uploadPreview.errors.slice(0, 4).map((e, i) => <li key={i}>{e.row ? `Row ${e.row}: ` : ''}{e.message}</li>)}

@@ -32,6 +32,8 @@ class CostModel(Base):
     region: Mapped[str] = mapped_column(String(20), ForeignKey("regions.code"), default="Europe")
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     incoterm: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # Scrum 25 — negotiation flag: none / in_negotiation / agreed / under_review
+    negotiation_state: Mapped[str] = mapped_column(String(20), default="none", server_default="none")
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
     )

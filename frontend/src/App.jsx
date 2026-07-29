@@ -17,6 +17,7 @@ import SupplierPurchases from './pages/SupplierPurchases';
 import Products from './pages/Products';
 import Admin from './pages/Admin';
 import Formulas from './pages/Formulas';
+import Alerts from './pages/Alerts';
 import Team from './pages/Team';
 import Privacy from './pages/Privacy';
 import Profile from './pages/Profile';
@@ -62,6 +63,7 @@ export default function App() {
             <Route path="/profile" element={<Profile />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/formulas" element={<Formulas />} />
+            <Route path="/alerts" element={<Alerts />} />
             <Route path="/fx-rates" element={<Navigate to="/index-library" replace />} />
             <Route path="/index-library" element={<IndexLibraryArea />} />
             <Route path="/portfolio" element={<PortfolioArea />} />

@@ -239,14 +239,14 @@ export default function Pricing() {
               </div>
             </div>
             {uploadPreview && (
-              <div style={{ marginBottom: 10, padding: '12px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-raised, var(--surface))', fontSize: 12 }}>
+              <div style={{ marginBottom: 10, padding: '12px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', fontSize: 12 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600, marginBottom: 4 }}>
                       {uploadPreview.filename} &middot; {uploadPreview.rows_processed} row{uploadPreview.rows_processed !== 1 ? 's' : ''} ready
                     </div>
                     {uploadPreview.errors.length > 0 && (
-                      <div style={{ color: 'var(--warning, #92400e)' }}>
+                      <div style={{ color: 'var(--accent3)' }}>
                         <span style={{ fontWeight: 600 }}>{uploadPreview.errors.length} row{uploadPreview.errors.length !== 1 ? 's' : ''} will be skipped:</span>
                         <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
                           {uploadPreview.errors.slice(0, 5).map((e, i) => <li key={i}>Row {e.row}: {e.message}</li>)}
@@ -274,7 +274,7 @@ export default function Pricing() {
               </div>
             )}
             {uploadErrors.length > 0 && (
-              <div style={{ fontSize: 12, color: 'var(--warning, #92400e)', background: 'var(--warning-bg, #fffbea)', border: '1px solid var(--warning, #d97706)', borderRadius: 6, padding: '8px 12px', marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: 'var(--accent3)', background: 'var(--warn-bg)', border: '1px solid var(--accent3)', borderRadius: 6, padding: '8px 12px', marginBottom: 10 }}>
                 <strong>{uploadErrors.length} row{uploadErrors.length > 1 ? 's' : ''} skipped:</strong>
                 <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
                   {uploadErrors.map((e, i) => <li key={i}>Row {e.row}: {e.message}</li>)}

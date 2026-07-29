@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import exportCsv from '../../utils/exportCsv';
+import { GroupHeader } from './wsCharts';
 
 /* ──────────────────────────────────────────────────────────────────────
  * Portfolio — the product as the central object. REAL data: every product
@@ -30,7 +31,28 @@ const GROUP_BY = [
 ];
 
 const curSym = (c) => (c === 'EUR' ? '€' : c === 'USD' ? '$' : c === 'GBP' ? '£' : c ? `${c} ` : '');
-const fmtMoney = (v) => (v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(3));
+
+/* Money formatting must never be ambiguous on this page — the number here is the
+ * one a buyer puts in front of a supplier.
+ *
+ * The previous version was `v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(3)`,
+ * which had two compounding faults: under 100 it emitted three decimals, so a
+ * $3/kg product rendered "$3.000"; and above 100 it called `toLocaleString()` with
+ * no locale, so it used the BROWSER's — rendering 1234.56 as "1.235" for a de-AT
+ * user (StaminaChem is Vienna-based). "$3.000" and "1.235" are indistinguishable
+ * from three thousand and one point two three five respectively.
+ *
+ * Fixed locale + magnitude-based decimals: 3 → "3.00", 89.5 → "89.50",
+ * 1234.56 → "1,235", 0.42 → "0.4200".
+ */
+const MONEY_LOCALE = 'en-US';
+const fmtMoney = (v) => {
+  if (v == null || !Number.isFinite(Number(v))) return '—';
+  const n = Number(v);
+  const abs = Math.abs(n);
+  const decimals = abs >= 100 ? 0 : abs >= 1 ? 2 : 4;
+  return n.toLocaleString(MONEY_LOCALE, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+};
 
 function StatusBadge({ status }) {
   const complete = status === 'complete';
@@ -155,6 +177,22 @@ export default function PortfolioArea() {
 
   const toggleGroup = (key) => setClosed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
+  // Only families the team actually owns products in, with counts. Derived from
+  // `rows` rather than /api/chemical-families so the list can't be 22 entries long
+  // for a 3-product portfolio.
+  const presentFamilies = useMemo(() => {
+    const counts = new Map();
+    rows.forEach(r => {
+      const k = r.familyId ?? null;
+      if (!counts.has(k)) counts.set(k, { id: k, name: r.familyLabel, count: 0 });
+      counts.get(k).count += 1;
+    });
+    return [...counts.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [rows]);
+
+  const filtersActive = familyFilter !== 'all' || statusFilter !== 'all' || !!search;
+  const clearFilters = () => { setFamilyFilter('all'); setStatusFilter('all'); setSearch(''); };
+
   const supplierCount = new Set(costModels.map(cm => cm.supplier_name).filter(Boolean)).size;
   const regionCount = new Set(costModels.map(cm => cm.region).filter(Boolean)).size;
   const draftCount = rows.filter(r => r.status === 'draft').length;
@@ -169,15 +207,25 @@ export default function PortfolioArea() {
   const filterBtn = (active) => (active ? 'ca-btn ca-btn-primary ca-btn-sm' : 'ca-btn ca-btn-ghost ca-btn-sm');
 
   const scCell = (r) => {
-    if (r.kind !== 'cm') return <span style={{ fontSize: 12, color: 'var(--muted)' }}>—</span>;
+    // Right-aligned to match the column header, and each state says which it is —
+    // "loading", "not modelled" and "failed" all used to render as a bare dash or
+    // ellipsis distinguished only by a title attribute.
+    const wrap = (node) => (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>{node}</div>
+    );
+    if (r.kind !== 'cm') return wrap(<span style={{ fontSize: 12, color: 'var(--muted)' }} title="No formula yet">—</span>);
     const s = sc[r.costModelId];
-    if (!s || s.status === 'loading') return <span style={{ fontSize: 12, color: 'var(--muted)' }}>…</span>;
-    if (s.status === 'err' || s.value == null) return <span style={{ fontSize: 12, color: 'var(--muted)' }} title="Could not compute">—</span>;
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+    if (!s || s.status === 'loading') {
+      return wrap(<span className="ca-skeleton" style={{ display: 'inline-block', width: 68, height: 11 }} role="status" aria-label="Calculating should-cost" />);
+    }
+    if (s.status === 'err' || s.value == null) {
+      return wrap(<span style={{ fontSize: 12, color: 'var(--accent3)' }} title="Should-cost could not be computed — check the formula's indices have data">Unavailable</span>);
+    }
+    return wrap(
+      <>
         <span style={{ fontWeight: 500, color: 'var(--accent)', fontFamily: "'JetBrains Mono', monospace" }}>{curSym(s.currency)}{fmtMoney(s.value)}/{s.unit}</span>
         <span className="ca-badge" style={{ background: 'var(--success-bg)', color: 'var(--accent)' }}>live</span>
-      </div>
+      </>,
     );
   };
 
@@ -190,7 +238,7 @@ export default function PortfolioArea() {
         r.ref === '—' ? '' : r.ref, r.name, r.supplier || '', r.shipFrom || '', r.shipTo || '', r.familyLabel,
         r.status === 'complete' ? 'Complete' : 'Draft',
         s && s.status === 'ok' && s.value != null ? s.value : '',
-        s && s.status === 'ok' ? s.currency : (r.fv ? '' : ''),
+        s && s.status === 'ok' ? (s.currency || '') : '',
         r.fv ? r.fv.base_price : '',
         r.fv ? `Q${r.fv.base_quarter}-${r.fv.base_year}` : '',
       ];
@@ -223,55 +271,77 @@ export default function PortfolioArea() {
         </div>
       ) : (
         <>
-          {/* Filter bar */}
+          {/* Filter bar — a select for families, chips only where the option set is
+              small. This used to render one chip per platform family: 23 chips
+              across 3 rows to filter 3 products, 21 of them matching nothing,
+              because the list came from /api/chemical-families rather than from
+              the products actually present. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '14px 0', flexWrap: 'wrap' }}>
-            <input className="ca-input" style={{ width: 200 }} placeholder="Search product, ref or supplier…" value={search} onChange={e => setSearch(e.target.value)} />
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              <button className={filterBtn(familyFilter === 'all')} onClick={() => setFamilyFilter('all')}>All families</button>
-              {families.map(f => (
-                <button key={f.id} className={filterBtn(familyFilter === String(f.id))} onClick={() => setFamilyFilter(String(f.id))}>{f.name}</button>
+            <input
+              className="ca-input" style={{ width: 220 }} type="search"
+              aria-label="Search products by name, reference or supplier"
+              placeholder="Search products…"
+              value={search} onChange={e => setSearch(e.target.value)}
+            />
+            <label className="ca-label" htmlFor="pf-family" style={{ margin: 0 }}>Family</label>
+            <select id="pf-family" className="ca-select" style={{ width: 'auto' }} value={familyFilter} onChange={e => setFamilyFilter(e.target.value)}>
+              <option value="all">All families ({rows.length})</option>
+              {presentFamilies.map(f => (
+                <option key={f.id ?? 'none'} value={String(f.id)}>{f.name} ({f.count})</option>
               ))}
-            </div>
+            </select>
             <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 2px' }} />
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }} role="group" aria-label="Filter by formula status">
               {STATUS_FILTERS.map(s => (
-                <button key={s.key} className={filterBtn(statusFilter === s.key)} onClick={() => setStatusFilter(s.key)}>{s.label}</button>
+                <button key={s.key} className={filterBtn(statusFilter === s.key)} aria-pressed={statusFilter === s.key} onClick={() => setStatusFilter(s.key)}>{s.label}</button>
               ))}
             </div>
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+            {filtersActive && (
+              <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={clearFilters}>Clear filters</button>
+            )}
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }} role="group" aria-label="Group rows by">
               <span style={{ fontSize: 11, color: 'var(--muted)' }}>Group by</span>
               {GROUP_BY.map(g => (
-                <button key={g.key} className={filterBtn(groupBy === g.key)} onClick={() => setGroupBy(g.key)}>{g.label}</button>
+                <button key={g.key} className={filterBtn(groupBy === g.key)} aria-pressed={groupBy === g.key} onClick={() => setGroupBy(g.key)}>{g.label}</button>
               ))}
             </div>
           </div>
 
-          {/* Stat tiles */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 14 }}>
+          {/* Stat tiles. `repeat(4, 1fr)` was locked to four columns at any width;
+              auto-fit lets them reflow. Value-before-label and mono numerals match
+              every other page and DESIGN.md's rule that data values use the mono. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 14 }}>
             {stats.map(s => (
               <div key={s.lbl} className="ca-metric">
+                <div className="ca-metric-val" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{s.val}</div>
                 <div className="ca-metric-lbl">{s.lbl}</div>
-                <div className="ca-metric-val">{s.val}</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.sub}</div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{s.sub}</div>
               </div>
             ))}
           </div>
 
           {/* Grouped table */}
-          <div className="ca-card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div className="ca-scroll-x">
-              <table className="ca-table" style={{ width: '100%' }}>
+          <div className="ca-card" style={{ padding: 0 }}>
+            {/* `ca-scroll-x` capped this at 440px — a porthole over a table that
+                doesn't even fill it — and as a scroll container it would also stop
+                the sticky header reaching the viewport. Page scrolls instead. */}
+            <div className="ca-grid-scroll">
+              <table className="ca-table ca-table-sticky" style={{ width: '100%' }}>
+                <caption className="ca-sr-only">
+                  Products grouped by {groupBy}, each with its supplier, route, formula status and
+                  live should-cost for the current quarter.
+                </caption>
                 <thead>
                   <tr>
-                    <th style={{ width: 20 }} />
-                    <th>Ref</th>
-                    <th>Product</th>
-                    <th>Supplier</th>
-                    <th>Ship-from</th>
-                    <th>Ship-to</th>
-                    <th>Formula</th>
-                    <th>Should-cost today</th>
-                    <th style={{ width: 180 }} />
+                    <th style={{ width: 20 }}><span className="ca-sr-only">Expand</span></th>
+                    <th scope="col">Ref</th>
+                    <th scope="col">Product</th>
+                    <th scope="col">Supplier</th>
+                    <th scope="col">Ship-from</th>
+                    <th scope="col">Ship-to</th>
+                    <th scope="col">Formula</th>
+                    <th scope="col" className="right" style={{ whiteSpace: 'nowrap' }}>Should-cost today</th>
+                    <th scope="col" style={{ width: 180 }}><span className="ca-sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -284,16 +354,22 @@ export default function PortfolioArea() {
                     const open = !closed.has(group.key);
                     const completeCount = group.rows.filter(r => r.status === 'complete').length;
                     return (
-                      <FragmentGroup key={group.key}>
-                        <tr style={{ cursor: 'pointer' }} onClick={() => toggleGroup(group.key)}>
-                          <td colSpan={9} style={{ background: 'var(--surface2)', padding: '7px 14px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)' }}>
-                              <span style={{ fontSize: 11, display: 'inline-block', transition: 'transform .15s', transform: open ? 'none' : 'rotate(-90deg)' }}>▾</span>
-                              {group.label}
-                              <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>
-                                {group.rows.length} {group.rows.length === 1 ? 'product' : 'products'} · {completeCount} {completeCount === 1 ? 'formula' : 'formulas'} complete
-                              </span>
-                            </div>
+                      <Fragment key={group.key}>
+                        {/* Shared GroupHeader — carries role/aria-expanded and an
+                            Enter/Space toggle. The hand-rolled <tr onClick> this
+                            replaces had no keyboard path, so a collapsed group
+                            could not be reopened without a mouse. */}
+                        <tr>
+                          <td colSpan={9} style={{ background: 'var(--surface2)', padding: '0 14px' }}>
+                            <GroupHeader
+                              label={group.label}
+                              count={group.rows.length}
+                              open={open}
+                              onToggle={() => toggleGroup(group.key)}
+                              /* Pluralise on the total, not the completed count —
+                                 otherwise "0 of 1 formulas complete". */
+                              meta={`${completeCount} of ${group.rows.length} ${group.rows.length === 1 ? 'formula' : 'formulas'} complete`}
+                            />
                           </td>
                         </tr>
                         {open && group.rows.map(r => (
@@ -321,7 +397,7 @@ export default function PortfolioArea() {
                             </td>
                           </tr>
                         ))}
-                      </FragmentGroup>
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -332,10 +408,4 @@ export default function PortfolioArea() {
       )}
     </div>
   );
-}
-
-/* Thin wrapper so a group's header + rows share one keyed parent without
- * inserting an invalid element inside <tbody>. */
-function FragmentGroup({ children }) {
-  return <>{children}</>;
 }

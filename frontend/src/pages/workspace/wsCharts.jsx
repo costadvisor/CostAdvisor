@@ -15,17 +15,26 @@ import { useState } from 'react';
 const AXIS = { fill: 'var(--muted)', fontSize: 9, fontFamily: "'JetBrains Mono', monospace" };
 
 /* ── Sparkline — tiny inline trend line ─────────────────────────────── */
-export function Sparkline({ data = [], color, width = 84, height = 26 }) {
-  if (!data || data.length < 2) return <svg width={width} height={height} />;
+// `label` is required for anything user-facing: an unlabelled <svg> is announced
+// as nothing, so a whole trend column was invisible to assistive tech.
+export function Sparkline({ data = [], color, width = 84, height = 26, label }) {
+  const a11y = label
+    ? { role: 'img', 'aria-label': label }
+    : { role: 'presentation', 'aria-hidden': true };
+  if (!data || data.length < 2) return <svg width={width} height={height} {...a11y} />;
   const min = Math.min(...data), max = Math.max(...data), span = max - min || 1;
-  const stroke = color || (data[data.length - 1] >= data[0] ? 'var(--accent2)' : 'var(--accent)');
+  // A series that ends where it started is FLAT, not up. `last >= first` painted
+  // pegged FX pairs as a solid danger-red rule that read like an error underline.
+  const first = data[0], last = data[data.length - 1];
+  const flat = first !== 0 && Math.abs(last / first - 1) < 0.0005;
+  const stroke = color || (flat ? 'var(--muted)' : last > first ? 'var(--accent2)' : 'var(--accent)');
   const pts = data.map((v, i) => {
     const x = (i / (data.length - 1)) * (width - 2) + 1;
     const y = height - 2 - ((v - min) / span) * (height - 4);
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
   return (
-    <svg width={width} height={height} style={{ display: 'block' }}>
+    <svg width={width} height={height} style={{ display: 'block' }} {...a11y}>
       <polyline points={pts} fill="none" stroke={stroke} strokeWidth={1.4} strokeLinecap="round" />
     </svg>
   );
@@ -113,15 +122,27 @@ export function StackedBar({ segments = [], height = 14 }) {
 }
 
 /* ── Collapsible group header (shared interaction) ──────────────────── */
-export function GroupHeader({ label, count, open, onToggle }) {
+// `color` optionally shows a category dot; `meta` is an optional trailing line of
+// secondary detail (e.g. "3 products · 1 formula complete"). Was a div with onClick
+// and no keyboard path, so collapsed groups could not be reopened without a mouse.
+export function GroupHeader({ label, count, open, onToggle, color, meta }) {
   return (
-    <div onClick={onToggle} style={{
-      display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
-      padding: '8px 4px', userSelect: 'none', borderBottom: '1px solid var(--border)',
-    }}>
-      <span style={{ fontSize: 11, color: 'var(--muted)', transition: 'transform .15s', transform: open ? 'none' : 'rotate(-90deg)' }}>▾</span>
+    <div
+      onClick={onToggle}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+        padding: '8px 4px', userSelect: 'none', borderBottom: '1px solid var(--border)',
+      }}
+    >
+      <span aria-hidden style={{ fontSize: 11, color: 'var(--muted)', transition: 'transform .15s', transform: open ? 'none' : 'rotate(-90deg)' }}>▾</span>
+      {color && <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />}
       <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>{label}</span>
       {count != null && <span className="ca-badge" style={{ background: 'var(--neutral-bg)', color: 'var(--muted)' }}>{count}</span>}
+      {meta && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>{meta}</span>}
     </div>
   );
 }

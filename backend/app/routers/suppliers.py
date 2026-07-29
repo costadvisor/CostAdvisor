@@ -12,11 +12,33 @@ from app.models.cost_model import CostModel
 from app.models.price_data import ActualPrice
 from app.models.actual_volume import ActualVolume
 from app.routers.auth import get_current_user
+from app.routers.teams import require_team_role
 from app.schemas.supplier import SupplierCreate, SupplierOut
 from app.services.audit import log_event
 from app.services.permissions import require_permission
 
 router = APIRouter()
+
+
+def _should_cost_for_period(db, model, year, quarter):
+    """Should-cost for one cost model at one quarter, using the formula active that
+    period (same pipeline as the Excel export / costing engine). Returns None if the
+    model has no formula. Kept here so benchmarking uses the identical gap math."""
+    from app.services.costing_engine import _compute_indexed_cost, _apply_margin
+
+    period_fv = model.formula_for_period(year, quarter)
+    if not period_fv:
+        return None
+    pbp = float(period_fv.base_price)
+    indexed_cost = _compute_indexed_cost(
+        db, period_fv, model, model.region,
+        period_fv.base_year, period_fv.base_quarter,
+        year, quarter, pbp,
+    )
+    theoretical, _margin = _apply_margin(
+        indexed_cost, period_fv.margin_type, period_fv.margin_value, pbp,
+    )
+    return theoretical
 
 
 @router.get("/", response_model=list[SupplierOut])
@@ -71,6 +93,91 @@ def update_supplier(
     db.expunge(supplier)
     db.commit()
     return supplier
+
+
+@router.get("/benchmark")
+def benchmark_suppliers(
+    team_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Per-supplier benchmarking: how closely each supplier's actual prices track
+    should-cost. Owner/admin only (Scrum 23 — seeds Wave-3 trust grading).
+
+    For every priced quarter of every cost model a supplier holds, gap% =
+    (actual − should_cost) / should_cost × 100. We report the mean gap% (positive
+    = pads margin above should-cost), the latest quarter's gap%, per-quarter trend,
+    and volume-weighted exposure. Ranked by mean gap% desc so the biggest
+    margin-padder (largest negotiation opportunity) is first."""
+    require_team_role(db, current_user, team_id, ["owner", "admin"])
+
+    suppliers = db.query(Supplier).filter(Supplier.team_id == team_id).order_by(Supplier.name).all()
+    results = []
+    for s in suppliers:
+        models = db.query(CostModel).filter(CostModel.supplier_id == s.id).all()
+        model_ids = [m.id for m in models]
+        prices = (
+            db.query(ActualPrice)
+            .filter(ActualPrice.cost_model_id.in_(model_ids))
+            .order_by(ActualPrice.year, ActualPrice.quarter)
+            .all()
+        ) if model_ids else []
+        volumes = (
+            db.query(ActualVolume).filter(ActualVolume.cost_model_id.in_(model_ids)).all()
+        ) if model_ids else []
+        vol_map = {(str(v.cost_model_id), v.year, v.quarter): float(v.volume) for v in volumes}
+        model_by_id = {str(m.id): m for m in models}
+
+        # should-cost cache per (model, year, quarter) — avoids recompute across price rows
+        sc_cache = {}
+        gaps = []                       # every priced-quarter gap%
+        by_period = defaultdict(list)   # (year, quarter) -> [gap% across models]
+        exposure = 0.0                  # Σ (actual − should_cost) × volume, positive = overpay
+        for p in prices:
+            m = model_by_id.get(str(p.cost_model_id))
+            if not m:
+                continue
+            key = (str(p.cost_model_id), p.year, p.quarter)
+            if key not in sc_cache:
+                sc_cache[key] = _should_cost_for_period(db, m, p.year, p.quarter)
+            sc = sc_cache[key]
+            if not sc:
+                continue
+            gap_pct = (float(p.price) - sc) / sc * 100
+            gaps.append(gap_pct)
+            by_period[(p.year, p.quarter)].append(gap_pct)
+            vol = vol_map.get(key)
+            if vol is not None:
+                exposure += (float(p.price) - sc) * vol
+
+        if not gaps:
+            results.append({
+                "supplier_id": s.id, "supplier_name": s.name, "country": s.country,
+                "n_models": len(models), "n_quarters_priced": 0,
+                "avg_gap_pct": None, "latest_gap_pct": None, "exposure": 0.0, "trend": [],
+            })
+            continue
+
+        trend = [
+            {"year": y, "quarter": q, "period": f"Q{q} {y}",
+             "avg_gap_pct": round(sum(v) / len(v), 2)}
+            for (y, q), v in sorted(by_period.items())
+        ]
+        results.append({
+            "supplier_id": s.id,
+            "supplier_name": s.name,
+            "country": s.country,
+            "n_models": len(models),
+            "n_quarters_priced": len(gaps),
+            "avg_gap_pct": round(sum(gaps) / len(gaps), 2),
+            "latest_gap_pct": trend[-1]["avg_gap_pct"],
+            "exposure": round(exposure, 2),
+            "trend": trend,
+        })
+
+    # Rank: biggest average margin over should-cost first (priced suppliers before empty ones)
+    results.sort(key=lambda r: (r["avg_gap_pct"] is None, -(r["avg_gap_pct"] or 0)))
+    return {"suppliers": results}
 
 
 @router.get("/{supplier_id}/purchase-history")

@@ -5,6 +5,16 @@ import { useAlert } from '../../components/ConfirmDialog';
 import { QUARTER_OPTS, qLabel } from '../../utils/quarters';
 import { PIE_COLORS } from '../../utils/constants';
 import { StackedBar } from './wsCharts';
+import { BuySignalBadge } from '../../components/BuyWindows';
+import NotesPanel from '../../components/NotesPanel';
+
+// Scrum 25 — negotiation flag states
+const NEG_STATES = [
+  { key: 'none', label: 'No flag', color: 'var(--muted)' },
+  { key: 'in_negotiation', label: 'In negotiation', color: 'var(--accent3)' },
+  { key: 'under_review', label: 'Under review', color: 'var(--accent4)' },
+  { key: 'agreed', label: 'Agreed', color: 'var(--accent)' },
+];
 
 /* ──────────────────────────────────────────────────────────────────────
  * Product detail — a product opens to its formula, its starting point, and
@@ -29,6 +39,8 @@ export default function ProductDetailArea() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sc, setSc] = useState({ status: 'loading' });   // live should-cost
+  const [buySignal, setBuySignal] = useState(null);       // buy-window signal
+  const [flagSaving, setFlagSaving] = useState(false);    // negotiation flag save
 
   // Starting-point editor
   const [editing, setEditing] = useState(false);
@@ -52,7 +64,27 @@ export default function ProductDetailArea() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadCm(); loadSc(); /* eslint-disable-next-line */ }, [costModelId]);
+  // Buy-window signal (Scrum 22) — best-effort; absent for models without history.
+  const loadBuy = () => {
+    api.get(`/api/portfolio/buy-windows/${costModelId}`)
+      .then(({ data }) => setBuySignal(data))
+      .catch(() => setBuySignal(null));
+  };
+
+  useEffect(() => { loadCm(); loadSc(); loadBuy(); /* eslint-disable-next-line */ }, [costModelId]);
+
+  // Scrum 25 — set the negotiation flag (needs costing.edit; backend enforces).
+  const setNegotiation = async (state) => {
+    setFlagSaving(true);
+    try {
+      await api.put(`/api/cost-models/${costModelId}/flag`, { negotiation_state: state });
+      setCm(prev => ({ ...prev, negotiation_state: state }));
+    } catch (e) {
+      showAlert({ title: 'Could not update flag', message: formatApiError(e) });
+    } finally {
+      setFlagSaving(false);
+    }
+  };
 
   const fv = cm?.formula_versions?.[0] || null;
 
@@ -145,6 +177,26 @@ export default function ProductDetailArea() {
         <button className="ca-btn ca-btn-primary" onClick={() => navigate(`/cost-models/${costModelId}`)}>Edit formula</button>
       </div>
 
+      {/* Negotiation flag (Scrum 25) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1 }}>Status</span>
+        {NEG_STATES.map(s => {
+          const active = (cm.negotiation_state || 'none') === s.key;
+          return (
+            <button key={s.key} disabled={flagSaving} onClick={() => setNegotiation(s.key)}
+              className="ca-btn ca-btn-sm"
+              style={{
+                borderColor: active ? s.color : 'var(--border)',
+                color: active ? s.color : 'var(--text-secondary)',
+                background: active ? 'var(--surface2)' : 'transparent',
+                fontWeight: active ? 700 : 400,
+              }}>
+              {s.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Live should-cost + starting point */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, margin: '16px 0' }}>
         <div className="ca-result">
@@ -159,6 +211,11 @@ export default function ProductDetailArea() {
               {deltaPct != null && (
                 <div style={{ marginTop: 4, fontSize: 12, color: deltaPct > 0 ? 'var(--accent2)' : deltaPct < 0 ? 'var(--accent)' : 'var(--muted)' }}>
                   {deltaPct > 0 ? '+' : ''}{deltaPct.toFixed(1)}% since starting point
+                </div>
+              )}
+              {buySignal && buySignal.signal !== 'insufficient' && (
+                <div style={{ marginTop: 8 }} title="Current should-cost vs the trailing 4-quarter average">
+                  <BuySignalBadge signal={buySignal.signal} deviationPct={buySignal.deviation_pct} />
                 </div>
               )}
               <hr className="ca-sep" />
@@ -267,6 +324,11 @@ export default function ProductDetailArea() {
         <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/brief`)}>Brief</button>
         <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/squeeze`)}>Squeeze</button>
         <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/negotiate/${costModelId}`)}>Negotiate</button>
+      </div>
+
+      {/* Team notes (Scrum 25) */}
+      <div style={{ marginTop: 16 }}>
+        <NotesPanel costModelId={costModelId} />
       </div>
     </div>
   );

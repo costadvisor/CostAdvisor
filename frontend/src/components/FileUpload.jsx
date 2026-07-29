@@ -89,7 +89,7 @@ export default function FileUpload({ endpoint, onSuccess, accept = '.csv,.xlsx,.
       {preview && (
         <div style={{
           marginTop: 10, padding: '12px 14px', borderRadius: 8,
-          border: '1px solid var(--border)', background: 'var(--surface-raised, var(--surface))',
+          border: '1px solid var(--border)', background: 'var(--surface)',
           fontSize: 12,
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
@@ -98,7 +98,7 @@ export default function FileUpload({ endpoint, onSuccess, accept = '.csv,.xlsx,.
                 {preview.filename} &middot; {preview.rows_processed} row{preview.rows_processed !== 1 ? 's' : ''} ready
               </div>
               {preview.errors.length > 0 && (
-                <div style={{ color: 'var(--warning, #92400e)', marginBottom: 6 }}>
+                <div style={{ color: 'var(--accent3)', marginBottom: 6 }}>
                   <span style={{ fontWeight: 600 }}>{preview.errors.length} row{preview.errors.length !== 1 ? 's' : ''} will be skipped:</span>
                   <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
                     {preview.errors.slice(0, 5).map((e, i) => (

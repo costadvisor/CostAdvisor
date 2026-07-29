@@ -179,6 +179,7 @@ class CostModelOut(BaseModel):
     region: str
     currency: str
     incoterm: str | None = None
+    negotiation_state: str = "none"   # Scrum 25 collaboration flag
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime

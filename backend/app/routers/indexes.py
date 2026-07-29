@@ -1138,3 +1138,39 @@ def get_index_impact(
         source_url=commodity.source_url,
         impacts=impacts,
     )
+
+
+@router.post("/scrape-all")
+async def scrape_all_indexes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """On-demand refresh of every scrape-enabled commodity index via its registered
+    scraper (the same set the nightly Celery `scrape_all` runs). Super-admin only —
+    platform data. Runs synchronously and returns per-run counts (mirrors the FX
+    `/scrape` action). FX pairs are refreshed separately via /api/fx-rates/scrape."""
+    require_super_admin(current_user)
+    current_user_id_var.set(str(current_user.id))
+    bypass_rls_var.set(True)
+
+    from app.services.scraper import SCRAPER_REGISTRY
+    commodities = db.query(CommodityIndex).filter(
+        CommodityIndex.scrape_enabled == True,  # noqa: E712
+        (CommodityIndex.category != "FX") | (CommodityIndex.category.is_(None)),
+    ).all()
+
+    scraped, updated, no_scraper = [], 0, 0
+    for c in commodities:
+        scraper_cls = SCRAPER_REGISTRY.get(c.name)
+        if not scraper_cls:
+            no_scraper += 1
+            continue
+        try:
+            updated += await scraper_cls().run(db)
+            scraped.append(c.name)
+        except Exception:
+            # Data ingestion, not a calc path — one bad feed must not abort the batch.
+            pass
+    db.commit()
+    return {"scrapers_run": len(scraped), "values_updated": updated,
+            "commodities_without_scraper": no_scraper}

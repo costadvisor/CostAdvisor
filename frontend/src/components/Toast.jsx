@@ -29,9 +29,10 @@ function Toast({ id, message, type = 'info', onDismiss }) {
         padding: '12px 14px',
         borderRadius: 'var(--radius, 8px)',
         background: 'var(--surface, #fff)',
-        border: `1px solid var(--border, #e2e8f0)`,
-        borderLeft: `4px solid ${style.bg}`,
-        boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+        // Status colour carried by a full border + the coloured icon, not a thick
+        // left stripe (a side-stripe accent is a house-style ban).
+        border: `1px solid ${style.bg}`,
+        boxShadow: 'var(--shadow-popover, 0 4px 12px rgba(0,0,0,0.12))',
         minWidth: 260,
         maxWidth: 380,
         fontSize: 13,

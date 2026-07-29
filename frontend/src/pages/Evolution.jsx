@@ -171,7 +171,7 @@ export default function Evolution() {
         </div>
       </div>
       {!hasAnyActual && (
-        <div style={{ background: 'var(--accent-bg, #f0faf4)', border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--accent)' }}>
+        <div style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--accent)' }}>
           No actual prices yet — add them in the{' '}
           <button className="ca-btn-link" onClick={() => navigate(`/cost-models/${costModelId}/pricing`)}>
             Pricing tab
@@ -180,7 +180,7 @@ export default function Evolution() {
         </div>
       )}
       {gapComponents.length > 0 && (
-        <div style={{ background: 'var(--warning-bg, #fffbea)', border: '1px solid var(--warning, #d97706)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--warning, #92400e)' }}>
+        <div style={{ background: 'var(--warn-bg)', border: '1px solid var(--accent3)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--accent3)' }}>
           Missing index data for: <strong>{gapComponents.join(', ')}</strong>. Those components use their base-period value as a fallback.{' '}
           <button className="ca-btn-link" onClick={() => navigate('/index-library')}>Configure in Index Library →</button>
         </div>
