@@ -73,7 +73,7 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
             name: commodityQuery.trim(),
             unit: customUnit.trim() || null,
             currency: customCurrency.trim() || null,
-            category: 'Composite',
+            category: customCategory || null,   // keep the real family; composite-ness shows in the status tag
           });
           resolvedId = res.data.id;
         }

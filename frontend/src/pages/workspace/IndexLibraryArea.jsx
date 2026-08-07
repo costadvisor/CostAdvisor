@@ -133,13 +133,16 @@ const STATUS = {
   blocked: { key: 'blocked', label: 'Blocked', color: 'var(--accent2)', bg: 'var(--danger-bg)',  hint: 'Only published behind a paywall — no free source exists for this feed.' },
   stale:   { key: 'stale',   label: 'Stale',   color: 'var(--accent3)', bg: 'var(--warn-bg)',    hint: 'Has history, but nothing in the last four quarters.' },
   nodata:  { key: 'nodata',  label: 'No data', color: 'var(--muted)',   bg: 'var(--neutral-bg)', hint: 'Tracked, but no source is configured and no values have loaded yet.' },
+  composite: { key: 'composite', label: 'Live (proxy)', color: 'var(--accent4)', bg: 'var(--info-bg)', hint: 'Composite / calculated — computed live from other indexes via a formula. A derived value, not a direct feed.' },
 };
 
 // Feed provenance wins when it is the more important caveat (blocked), otherwise
 // data presence does, then proxy fidelity, then staleness.
-function dataStatus({ retrievalStatus, hasValues, staleQuarters = 0 }) {
+function dataStatus({ retrievalStatus, hasValues, staleQuarters = 0, isComposite = false }) {
   if (retrievalStatus === 'blocked') return STATUS.blocked;
   if (!hasValues) return STATUS.nodata;
+  // A composite value is derived from other indexes — flag it as a computed/proxy value.
+  if (isComposite) return STATUS.composite;
   if (retrievalStatus === 'weak_proxy') return STATUS.weak;
   if (retrievalStatus === 'good_proxy') return STATUS.proxy;
   if (staleQuarters >= 4) return STATUS.stale;
@@ -436,6 +439,7 @@ export default function IndexLibraryArea() {
           retrievalStatus: meta.retrieval_status,
           hasValues: nums.length > 0,
           staleQuarters: trailingGap(cells),
+          isComposite: !!meta.composite_expression,
         }),
       };
     });
