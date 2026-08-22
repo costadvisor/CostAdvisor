@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import Modal from './Modal';
 import RegionSelect from './RegionSelect';
-import VariableMapEditor from './VariableMapEditor';
+import VariableMapEditor, { normalizeVarMap } from './VariableMapEditor';
 import api, { formatApiError } from '../api';
 
 export default function AddIndexModal({ isOpen, onClose, commodities, teamId, onAdded, canManagePairs = false, isSuperAdmin = false }) {
@@ -11,6 +11,9 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
   const [commodityId, setCommodityId] = useState(null); // null = custom (not yet created)
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  // Currencies the platform can actually convert — i.e. those with an FX pair.
+  // Offering anything else would promise a conversion `fx_converter` can't do.
+  const [pairCurrencies, setPairCurrencies] = useState([]);
   const [customUnit, setCustomUnit] = useState('');
   const [customCurrency, setCustomCurrency] = useState('');
   const [customCategory, setCustomCategory] = useState('');
@@ -22,6 +25,8 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
   const [uploadFile, setUploadFile] = useState(null);
   const [compositeExpr, setCompositeExpr] = useState('');
   const [compositeVars, setCompositeVars] = useState({});
+  // Region the composite is computed for; '' = region-agnostic (reports as GLOBAL).
+  const [compositeRegion, setCompositeRegion] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
   const [detectedSource, setDetectedSource] = useState(null);
@@ -42,6 +47,43 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
     }
   }, [isOpen]);
 
+  // Load the convertible currency set once the modal opens. Failure is non-fatal:
+  // the list falls back to whatever currencies existing indexes already use, so the
+  // field degrades to "reuse an existing code" rather than becoming unusable.
+  useEffect(() => {
+    if (!isOpen) return;
+    let alive = true;
+    api.get('/api/fx-rates/pairs')
+      .then(res => {
+        if (!alive) return;
+        const set = new Set();
+        (res.data || []).forEach(p => {
+          if (p.from_currency) set.add(String(p.from_currency).toUpperCase());
+          if (p.to_currency) set.add(String(p.to_currency).toUpperCase());
+        });
+        setPairCurrencies([...set]);
+      })
+      .catch(() => { if (alive) setPairCurrencies([]); });
+    return () => { alive = false; };
+  }, [isOpen]);
+
+  // Units already in use — the suggestion list for the unit combobox.
+  const unitOptions = useMemo(() => {
+    const set = new Set();
+    (commodities || []).forEach(c => { if (c.unit) set.add(c.unit); });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [commodities]);
+
+  /* Currency options: the convertible set, plus any code existing indexes already
+   * carry, plus the current value — so editing a record with a legacy code doesn't
+   * silently blank it just because that code has no FX pair. */
+  const currencyOptions = useMemo(() => {
+    const set = new Set(pairCurrencies);
+    (commodities || []).forEach(c => { if (c.currency) set.add(String(c.currency).toUpperCase()); });
+    if (customCurrency) set.add(customCurrency.toUpperCase());
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [pairCurrencies, commodities, customCurrency]);
+
   // Detect source type when URL changes
   useEffect(() => {
     if (!scrapeUrl || scrapeUrl.length < 5) {
@@ -60,8 +102,9 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
   }, [scrapeUrl]);
 
   const handleAdd = async () => {
-    // Composite (calculated) index — platform-level, region-agnostic (computed live
-    // from other indexes). Create the commodity, then attach the composite formula.
+    // Composite (calculated) index — platform-level, computed live from other
+    // indexes. Create the commodity, then attach the formula (and its region, if
+    // one was chosen; blank keeps it region-agnostic).
     if (sourceType === 'composite') {
       if (!commodityQuery.trim()) { setMessage({ type: 'error', text: 'Enter a name for the composite index.' }); return; }
       if (!compositeExpr.trim()) { setMessage({ type: 'error', text: 'Enter a formula (e.g. 0.6*Graphite + 0.3*Wood).' }); return; }
@@ -79,10 +122,12 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
         }
         await api.put(`/api/indexes/${resolvedId}/composite`, {
           composite_expression: compositeExpr.trim(),
-          composite_variables: compositeVars,
+          composite_variables: normalizeVarMap(compositeVars),
+          composite_region: compositeRegion || null,
         });
         setMessage({ type: 'success', text: 'Composite index created.' });
-        setCommodityQuery(''); setCommodityId(null); setCompositeExpr(''); setCompositeVars({}); setSourceType('manual');
+        setCommodityQuery(''); setCommodityId(null); setCompositeExpr(''); setCompositeVars({});
+        setCompositeRegion(''); setSourceType('manual');
         onAdded();
         setTimeout(() => onClose(), 600);
       } catch (err) {
@@ -342,23 +387,43 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <div style={{ flex: 1 }}>
-                      <label className="ca-label" style={{ marginBottom: 4 }}>Unit <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(optional)</span></label>
+                      <label className="ca-label" style={{ marginBottom: 4 }} htmlFor="ca-unit">Unit <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(optional)</span></label>
+                      {/* Combobox, not a dropdown: units are compound and open-ended
+                          ($/mt, EUR/kWh, $/40ft, $/bbl…), so the list can't be closed.
+                          Suggesting the units already in use is what stops the same
+                          unit being spelled three ways ($/mt vs $/MT vs USD/mt).
+                          A native <datalist> is used deliberately — the browser renders
+                          the popup outside the DOM, so it can't be clipped by the
+                          modal's `overflow-y: auto` and needs no portal. */}
                       <input
+                        id="ca-unit"
                         className="ca-input"
+                        list="ca-unit-options"
                         value={customUnit}
                         onChange={e => setCustomUnit(e.target.value)}
                         placeholder="e.g. $/mt, €/kg"
+                        autoComplete="off"
                       />
+                      <datalist id="ca-unit-options">
+                        {unitOptions.map(u => <option key={u} value={u} />)}
+                      </datalist>
                     </div>
                     <div style={{ flex: 1 }}>
-                      <label className="ca-label" style={{ marginBottom: 4 }}>Currency <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(optional)</span></label>
-                      <input
-                        className="ca-input"
+                      <label className="ca-label" style={{ marginBottom: 4 }} htmlFor="ca-currency">Currency <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(optional)</span></label>
+                      {/* Closed dropdown. `currency` is an ISO 4217 code (String(3)) and
+                          `fx_converter.convert_price` consumes it, so a value with no FX
+                          pair can't be converted — free text let a typo like "S" through
+                          and silently broke conversion downstream. Options are the
+                          currencies that actually have pairs. */}
+                      <select
+                        id="ca-currency"
+                        className="ca-select"
                         value={customCurrency}
                         onChange={e => setCustomCurrency(e.target.value)}
-                        placeholder="e.g. USD, EUR"
-                        maxLength={3}
-                      />
+                      >
+                        <option value="">— none —</option>
+                        {currencyOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
                     </div>
                     <div style={{ flex: 1 }}>
                       <label className="ca-label" style={{ marginBottom: 4 }}>Category <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(optional)</span></label>
@@ -381,12 +446,20 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
           );
         })()}
 
-        {sourceType !== 'composite' && (
-          <div style={{ marginBottom: 14 }}>
-            <label className="ca-label">Region</label>
+        {/* Region sits here for EVERY source type, directly under the commodity, so
+            the form has one shape. Composite binds its own optional field
+            (`composite_region` — a label, not a required source region). */}
+        <div style={{ marginBottom: 14 }}>
+          <label className="ca-label">Region</label>
+          {sourceType === 'composite' ? (
+            <RegionSelect
+              value={compositeRegion} onChange={setCompositeRegion}
+              includeEmpty emptyLabel="Any region"
+            />
+          ) : (
             <RegionSelect value={region} onChange={setRegion} includeEmpty emptyLabel="Select a region…" />
-          </div>
-        )}
+          )}
+        </div>
 
         <div style={{ marginBottom: 14 }}>
           <label className="ca-label">Source Type</label>
@@ -407,9 +480,6 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
               commodities={commodities}
               exprLabel="Formula (computed live from other indexes)"
             />
-            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
-              Platform-wide, region-agnostic — computed from the mapped indexes' values each period.
-            </div>
           </div>
         )}
 

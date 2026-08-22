@@ -26,6 +26,14 @@ class CommodityIndexOut(BaseModel):
     # Composite / calculated index (computed live from other indexes)
     composite_expression: str | None = None
     composite_variables: dict | None = None
+    # Region a composite is computed for; None = follow the requested region.
+    composite_region: str | None = None
+
+    # Regions this index actually holds values for. NOT a column — the index itself
+    # is deliberately region-agnostic (Scrum 57); region lives on `index_values`.
+    # Surfaced so pickers can tell apart the many indexes whose names differ only
+    # by the region they cover. Populated by the list endpoint; empty elsewhere.
+    regions: list[str] = []
 
     model_config = {"from_attributes": True}
 
@@ -44,6 +52,8 @@ class CompositeUpdate(BaseModel):
     or empty expression clears the composite (turns it back into a normal index)."""
     composite_expression: str | None = None
     composite_variables: dict | None = None
+    # Region the composite is computed for. None keeps it region-agnostic.
+    composite_region: str | None = None
 
 
 class IndexValueOut(BaseModel):

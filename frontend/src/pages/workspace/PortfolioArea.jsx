@@ -4,6 +4,8 @@ import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import exportCsv from '../../utils/exportCsv';
 import { GroupHeader } from './wsCharts';
+import ProductFormModal from '../../components/ProductFormModal';
+import { useConfirm, useAlert } from '../../components/ConfirmDialog';
 
 /* ──────────────────────────────────────────────────────────────────────
  * Portfolio — the product as the central object. REAL data: every product
@@ -66,21 +68,50 @@ function StatusBadge({ status }) {
 export default function PortfolioArea() {
   const { activeTeamId } = useAuth();
   const navigate = useNavigate();
+  const confirm = useConfirm();
+  const showAlert = useAlert();
 
   const [costModels, setCostModels] = useState([]);
   const [products, setProducts] = useState([]);
   const [families, setFamilies] = useState([]);
+  const [templates, setTemplates] = useState([]);   // catalog formula templates, for the add-product modal
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sc, setSc] = useState({});           // { [costModelId]: { status: 'loading'|'ok'|'err', value, currency, unit } }
+  const [loadingExample, setLoadingExample] = useState(false);
+
+  // Scrum 16 — self-serve onboarding: seed a runnable demo for a brand-new team.
+  const handleLoadExampleData = async () => {
+    const ok = await confirm({
+      title: 'Load example data?',
+      message: 'This adds 5 sample products, suppliers, cost models and 3 years of prices/volumes to your team so you can explore CostAdvisor immediately. Safe to run more than once.',
+      confirmLabel: 'Load example data',
+    });
+    if (!ok) return;
+    setLoadingExample(true);
+    try {
+      await api.post(`/api/teams/${activeTeamId}/load-example-data`);
+      fetchData();
+    } catch (err) {
+      showAlert({ title: 'Could not load example data', message: formatApiError(err) });
+    } finally {
+      setLoadingExample(false);
+    }
+  };
 
   const [search, setSearch] = useState('');
   const [familyFilter, setFamilyFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [groupBy, setGroupBy] = useState('family');
   const [closed, setClosed] = useState(() => new Set());   // groups are open unless closed
+  // Add-product modal — embedded here so a new product shows up in this page's own
+  // table immediately, with no navigation to /products and back.
+  const [showAddProduct, setShowAddProduct] = useState(false);
 
-  useEffect(() => {
+  // Named (not an anonymous effect body) so the add-product modal can call it
+  // after a save to refresh the table in place, mirroring Products.jsx's own
+  // fetchData/onSaved pattern.
+  const fetchData = () => {
     if (!activeTeamId) return;
     setLoading(true);
     setError(null);
@@ -88,15 +119,19 @@ export default function PortfolioArea() {
       api.get('/api/cost-models', { params: { team_id: activeTeamId } }),
       api.get('/api/products', { params: { team_id: activeTeamId } }),
       api.get('/api/chemical-families'),
+      api.get('/api/formulas/', { params: { team_id: activeTeamId } }),
     ])
-      .then(([cmRes, pRes, fRes]) => {
+      .then(([cmRes, pRes, fRes, tRes]) => {
         setCostModels(cmRes.data);
         setProducts(pRes.data);
         setFamilies(fRes.data);
+        setTemplates(tRes.data);
       })
       .catch(err => setError(formatApiError(err)))
       .finally(() => setLoading(false));
-  }, [activeTeamId]);
+  };
+
+  useEffect(fetchData, [activeTeamId]);
 
   const familyName = (fid) => families.find(f => f.id === fid)?.name || null;
   const productById = useMemo(() => Object.fromEntries(products.map(p => [p.id, p])), [products]);
@@ -164,14 +199,24 @@ export default function PortfolioArea() {
     return true;
   });
 
+  const NO_GROUP_LABEL = { family: 'No family', supplier: 'No supplier', region: 'No region' };
+
   const groups = useMemo(() => {
     const keyOf = (r) => groupBy === 'supplier' ? (r.supplier || 'No supplier')
       : groupBy === 'region' ? (r.shipFrom || 'No region')
         : (r.familyLabel || 'No family');
     const map = new Map();
     filtered.forEach(r => { const k = keyOf(r); if (!map.has(k)) map.set(k, []); map.get(k).push(r); });
+    // The "no X" bucket (products with nothing assigned) sorts last regardless of
+    // where its label would otherwise fall alphabetically — it's a catch-all, not
+    // a real category, so it shouldn't interrupt the alphabetical list of real ones.
+    const noLabel = NO_GROUP_LABEL[groupBy];
     return [...map.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
+      .sort((a, b) => {
+        if (a[0] === noLabel) return 1;
+        if (b[0] === noLabel) return -1;
+        return a[0].localeCompare(b[0]);
+      })
       .map(([label, rs]) => ({ key: `${groupBy}:${label}`, label, rows: rs }));
   }, [filtered, groupBy]);
 
@@ -187,7 +232,13 @@ export default function PortfolioArea() {
       if (!counts.has(k)) counts.set(k, { id: k, name: r.familyLabel, count: 0 });
       counts.get(k).count += 1;
     });
-    return [...counts.values()].sort((a, b) => a.name.localeCompare(b.name));
+    // "No family" is a catch-all, not a real family — keep it last rather than
+    // wherever "N" happens to fall among real family names.
+    return [...counts.values()].sort((a, b) => {
+      if (a.name === 'No family') return 1;
+      if (b.name === 'No family') return -1;
+      return a.name.localeCompare(b.name);
+    });
   }, [rows]);
 
   const filtersActive = familyFilter !== 'all' || statusFilter !== 'all' || !!search;
@@ -247,18 +298,39 @@ export default function PortfolioArea() {
 
   return (
     <div className="ca-page ca-fade-in">
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <div className="ca-h1">Product portfolio</div>
-          <p className="ca-subtitle">Every product you buy, its supplier and route, and its live should-cost — evolved to Q{CUR_Q} {CUR_Y} by your linked indices.</p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+      {/* Heading and actions share one row; the subtitle moves to its own
+          full-width line below. Title+subtitle together were wide enough that
+          the button block wouldn't fit beside them at normal desktop widths and
+          wrapped below — putting only the (much narrower) heading on that row
+          instead is what actually keeps the buttons beside it. */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div className="ca-h1" style={{ marginBottom: 0 }}>Product portfolio</div>
+        {/* marginLeft: 'auto' hugs the right edge even if this ever wraps onto its
+            own line — same fix already used for "Group by" in this page's own
+            filter bar below. */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 'auto' }}>
           {filtered.length > 0 && <button className="ca-btn ca-btn-ghost" onClick={exportRows}>Export CSV</button>}
-          <button className="ca-btn ca-btn-ghost" onClick={() => navigate('/cost-models/new')}>+ New cost model</button>
-          {/* Product-centric primary action (mockup): the product is the thing you add first. */}
-          <button className="ca-btn ca-btn-primary" onClick={() => navigate('/products')}>+ Add product</button>
+          {/* /products is still where editing full details or deleting a product
+              lives — this is its one visible link from Portfolio. */}
+          <button className="ca-btn ca-btn-ghost" onClick={() => navigate('/products')}>Manage products</button>
+          <span style={{ width: 1, height: 24, background: 'var(--border)' }} />
+          {/* Product-centric primary action (mockup): the product is the thing you
+              add first. Opens in place — this used to navigate to /products and
+              force a second click there just to reveal the create form. */}
+          <button className="ca-btn ca-btn-primary" onClick={() => setShowAddProduct(true)}>+ Add product</button>
         </div>
       </div>
+      <p className="ca-subtitle" style={{ marginTop: 4 }}>Every product you buy, its supplier and route, and its live should-cost — evolved to Q{CUR_Q} {CUR_Y} by your linked indices.</p>
+
+      <ProductFormModal
+        isOpen={showAddProduct}
+        editing={null}
+        families={families}
+        templates={templates}
+        activeTeamId={activeTeamId}
+        onClose={() => setShowAddProduct(false)}
+        onSaved={() => { setShowAddProduct(false); fetchData(); }}
+      />
 
       {loading ? (
         <div style={{ padding: 20, color: 'var(--muted)' }}>Loading…</div>
@@ -267,7 +339,12 @@ export default function PortfolioArea() {
       ) : products.length === 0 && costModels.length === 0 ? (
         <div className="ca-card" style={{ textAlign: 'center', padding: 48 }}>
           <div style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>No products yet — add one to start building should-cost models.</div>
-          <button className="ca-btn ca-btn-primary" onClick={() => navigate('/products')}>Add your first product</button>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+            <button className="ca-btn ca-btn-primary" onClick={() => setShowAddProduct(true)}>Add your first product</button>
+            <button className="ca-btn ca-btn-ghost" onClick={handleLoadExampleData} disabled={loadingExample}>
+              {loadingExample ? 'Loading…' : 'Load example data'}
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -372,8 +449,29 @@ export default function PortfolioArea() {
                             />
                           </td>
                         </tr>
-                        {open && group.rows.map(r => (
-                          <tr key={r.key}>
+                        {open && group.rows.map(r => {
+                          // Complete rows (kind === 'cm') open the cost model on a
+                          // row click instead of a dedicated "Open" button — same
+                          // pattern as the Index Library grid: the row is the single
+                          // tab stop, Enter/Space activates it, and the remaining
+                          // action buttons (Evolution/Brief) stop propagation so
+                          // clicking them doesn't also fire the row's own navigate.
+                          // Draft rows have no cost model to open, so they're left as
+                          // plain rows with just their "Complete formula" button.
+                          const openable = r.kind === 'cm';
+                          const openRow = () => navigate(`/portfolio/${r.costModelId}`);
+                          return (
+                          <tr
+                            key={r.key}
+                            {...(openable ? {
+                              tabIndex: 0,
+                              role: 'button',
+                              'aria-label': `Open ${r.name}`,
+                              onClick: openRow,
+                              onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRow(); } },
+                              style: { cursor: 'pointer' },
+                            } : {})}
+                          >
                             <td />
                             <td style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: 'var(--muted)' }}>{r.ref}</td>
                             <td><div style={{ fontWeight: 500 }}>{r.name}</div></td>
@@ -388,15 +486,15 @@ export default function PortfolioArea() {
                                   <button className="ca-btn ca-btn-primary ca-btn-sm" onClick={() => navigate('/cost-models/new', { state: { productId: r.productId } })}>Complete formula</button>
                                 ) : (
                                   <>
-                                    <button className="ca-btn ca-btn-primary ca-btn-sm" onClick={() => navigate(`/portfolio/${r.costModelId}`)}>Open</button>
-                                    <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => navigate(`/cost-models/${r.costModelId}/evolution`)}>Evolution</button>
-                                    <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => navigate(`/cost-models/${r.costModelId}/brief`)}>Brief</button>
+                                    <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={(e) => { e.stopPropagation(); navigate(`/cost-models/${r.costModelId}/evolution`); }}>Evolution</button>
+                                    <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={(e) => { e.stopPropagation(); navigate(`/cost-models/${r.costModelId}/brief`); }}>Brief</button>
                                   </>
                                 )}
                               </div>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </Fragment>
                     );
                   })}

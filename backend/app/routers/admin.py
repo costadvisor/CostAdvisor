@@ -11,6 +11,7 @@ from app.database import get_db, bypass_rls_var
 from app.models.user import User
 from app.models.team import Team, TeamMembership
 from app.models.audit_log import AuditLog
+from app.models.auth_event import AuthEvent
 from app.models.access_request import PlatformAccessRequest
 from app.models.rbac import Plan, Role, TeamMemberRole, UserPlatformRole
 from app.models.demo import DemoHost, DemoBlockedSlot, DemoRequest
@@ -18,6 +19,7 @@ from app.config import get_settings
 from app.routers.auth import get_current_user, create_jwt
 from app.schemas.user import UserOut
 from app.schemas.audit_log import AuditLogOut
+from app.schemas.auth_event import AuthEventOut
 from app.schemas.access_request import AccessRequestOut
 from app.schemas.demo import (
     DemoHostCreate, DemoHostUpdate, DemoHostOut,
@@ -759,6 +761,26 @@ def list_admin_audit_logs(
         )
         for log in logs
     ]
+
+
+# ── Auth events (login/logout audit trail, Scrum 10) ──────────────────────────
+
+@router.get("/auth-events", response_model=list[AuthEventOut])
+def list_auth_events(
+    event_type: str | None = Query(None),
+    email: str | None = Query(None),
+    limit: int = Query(100, le=500),
+    offset: int = Query(0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    """Return login/logout/failed-login events (super-admin only)."""
+    query = db.query(AuthEvent)
+    if event_type:
+        query = query.filter(AuthEvent.event_type == event_type)
+    if email:
+        query = query.filter(AuthEvent.email == email)
+    return query.order_by(AuthEvent.created_at.desc()).offset(offset).limit(limit).all()
 
 
 # ── Demo Hosts ────────────────────────────────────────────────────────────────

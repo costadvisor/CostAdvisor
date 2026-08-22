@@ -257,11 +257,11 @@ ACTUAL_VOLUMES = {
 }
 
 
-def run():
+def run(team_id: str = TEAM_ID, created_by: str = CREATED_BY):
     with engine.begin() as conn:
         # Bypass RLS for seed scripts (same pattern as Celery tasks)
         conn.execute(text("SELECT set_config('app.bypass_rls', 'on', true)"))
-        conn.execute(text("SELECT set_config('app.current_team_id', :tid, true)"), {"tid": TEAM_ID})
+        conn.execute(text("SELECT set_config('app.current_team_id', :tid, true)"), {"tid": team_id})
 
         # ── 1. Backfill index values ─────────────────────────────────────
         print("=== Backfilling index values ===")
@@ -292,7 +292,7 @@ def run():
         for s in SUPPLIERS:
             row = conn.execute(text(
                 "SELECT id FROM suppliers WHERE name = :name AND team_id = :tid"
-            ), {"name": s["name"], "tid": TEAM_ID}).fetchone()
+            ), {"name": s["name"], "tid": team_id}).fetchone()
             if row:
                 supplier_ids[s["name"]] = str(row[0])
                 print(f"  Exists: {s['name']} (id={row[0]})")
@@ -300,7 +300,7 @@ def run():
                 sid = conn.execute(text(
                     "INSERT INTO suppliers (team_id, name, country, created_at) "
                     "VALUES (:tid, :name, :country, :now) RETURNING id"
-                ), {"tid": TEAM_ID, "name": s["name"], "country": s["country"], "now": now}).scalar()
+                ), {"tid": team_id, "name": s["name"], "country": s["country"], "now": now}).scalar()
                 supplier_ids[s["name"]] = str(sid)
                 print(f"  Created: {s['name']} (id={sid})")
 
@@ -310,7 +310,7 @@ def run():
         for cm in COST_MODELS:
             row = conn.execute(text(
                 "SELECT id FROM products WHERE name = :name AND team_id = :tid"
-            ), {"name": cm["product"], "tid": TEAM_ID}).fetchone()
+            ), {"name": cm["product"], "tid": team_id}).fetchone()
             if row:
                 product_ids[cm["product"]] = str(row[0])
                 print(f"  Exists: {cm['product']} (id={row[0]})")
@@ -320,7 +320,7 @@ def run():
                     "INSERT INTO products (id, team_id, created_by, name, formula, unit, chemical_family_id, created_at, updated_at) "
                     "VALUES (:id, :tid, :uid, :name, :formula, :unit, :fid, :now, :now)"
                 ), {
-                    "id": pid, "tid": TEAM_ID, "uid": CREATED_BY,
+                    "id": pid, "tid": team_id, "uid": created_by,
                     "name": cm["product"], "formula": cm["product"],
                     "unit": cm["unit"], "fid": family_id, "now": now,
                 })
@@ -336,7 +336,7 @@ def run():
                 supplier_id = supplier_ids[sup["name"]]
                 row = conn.execute(text(
                     "SELECT id FROM cost_models WHERE product_id = :pid AND supplier_id = :sid AND team_id = :tid"
-                ), {"pid": product_id, "sid": supplier_id, "tid": TEAM_ID}).fetchone()
+                ), {"pid": product_id, "sid": supplier_id, "tid": team_id}).fetchone()
 
                 if row:
                     cm_id = str(row[0])
@@ -347,9 +347,9 @@ def run():
                         "INSERT INTO cost_models (id, team_id, product_id, supplier_id, region, currency, created_by, created_at, updated_at) "
                         "VALUES (:id, :tid, :pid, :sid, :region, :currency, :uid, :now, :now)"
                     ), {
-                        "id": cm_id, "tid": TEAM_ID, "pid": product_id,
+                        "id": cm_id, "tid": team_id, "pid": product_id,
                         "sid": supplier_id, "region": cm["region"], "currency": cm["currency"],
-                        "uid": CREATED_BY, "now": now,
+                        "uid": created_by, "now": now,
                     })
                     print(f"  Created: {cm['product']} / {sup['name']} (id={cm_id})")
 
@@ -387,7 +387,7 @@ def run():
                     "VALUES (:cmid, :uid, :year, :quarter, :price, :source, :now) "
                     "ON CONFLICT (cost_model_id, year, quarter) DO UPDATE SET price = :price, uploaded_by = :uid"
                 ), {
-                    "cmid": cm_id, "uid": CREATED_BY,
+                    "cmid": cm_id, "uid": created_by,
                     "year": year, "quarter": quarter, "price": prices[i],
                     "source": "staminachem_demo.csv", "now": now,
                 })
@@ -409,7 +409,7 @@ def run():
                     "VALUES (:cmid, :uid, :year, :quarter, :volume, :unit, :source, :now) "
                     "ON CONFLICT (cost_model_id, year, quarter) DO UPDATE SET volume = :volume, unit = :unit, uploaded_by = :uid"
                 ), {
-                    "cmid": cm_id, "uid": CREATED_BY,
+                    "cmid": cm_id, "uid": created_by,
                     "year": year, "quarter": quarter, "volume": vols[i],
                     "unit": "mt", "source": "staminachem_demo.csv", "now": now,
                 })

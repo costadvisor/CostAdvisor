@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.cost_model import CostModel
 from app.models.price_data import ActualPrice
 from app.models.actual_volume import ActualVolume
-from app.services.data_resolver import get_single_index_value
+from app.services.data_resolver import get_single_index_value, get_single_index_value_detailed
 from app.services.volume_projector import project_volumes
 from app.services.narrative import generate_narrative
 from app.services.fx_converter import convert_price
@@ -328,9 +328,12 @@ def _apply_margin(indexed_cost: float, margin_type: str, margin_value: float | N
 # ── Should-Cost ────────────────────────────────────────────────
 
 def _resolve_basis(cost_model: CostModel, fv) -> tuple[str | None, dict | None]:
-    """The Incoterm a price is *quoted under* and the price-level adjustments."""
+    """The Incoterm a price is *quoted under* and the price-level adjustments.
+    `landed_cost_adjustments` lives only on FormulaVersion — CostModel has no such
+    column, so there is no model-level fallback (previously crashed with
+    AttributeError whenever fv had no adjustments of its own)."""
     incoterm = (fv.incoterm if fv and fv.incoterm else cost_model.incoterm)
-    adjustments = (fv.landed_cost_adjustments if fv else None) or cost_model.landed_cost_adjustments
+    adjustments = fv.landed_cost_adjustments if fv else None
     return _norm_incoterm(incoterm), adjustments
 
 
@@ -1027,6 +1030,178 @@ def _compute_indexed_cost(
             ratio = 1.0
         indexed_cost += comp_base * weight * ratio
     return indexed_cost
+
+
+def _period_label(year: int, quarter: int) -> str:
+    return f"Q{quarter}-{str(year)[-2:]}"
+
+
+def _compute_indexed_cost_detailed(
+    db: Session,
+    fv,
+    cost_model: CostModel,
+    region: str,
+    ref_year: int,
+    ref_quarter: int,
+    target_year: int,
+    target_quarter: int,
+    base_price: float,
+) -> tuple[float, list, list]:
+    """Scrum 17 — per-component breakdown alongside the indexed-cost total. Mirrors
+    `_compute_indexed_cost`'s simple-mode loop exactly (same comp_base/weight/ratio
+    math), but also records base/current index values, ratio, contribution and
+    provenance per component, plus a DataGap entry for any component riding flat for
+    want of data. Advanced-mode formulas have no discrete components to break down —
+    callers should check `fv.formula_type` and fall back to a single opaque line."""
+    from app.schemas.costing import ComponentBreakdown, DataGap
+
+    comp_base = _component_base(base_price, fv.margin_type, fv.margin_value)
+    indexed_cost = 0.0
+    components: list[ComponentBreakdown] = []
+    data_gaps: list[DataGap] = []
+    ref_label = _period_label(ref_year, ref_quarter)
+    cur_label = _period_label(target_year, target_quarter)
+
+    for comp in fv.components:
+        weight = float(comp.weight)
+        ref_val = cur_val = None
+        source = None
+        has_data = True
+        if comp.commodity_id:
+            ref_val, _ = get_single_index_value_detailed(
+                db, cost_model.team_id, comp.commodity_id, region, ref_year, ref_quarter
+            )
+            cur_val, source = get_single_index_value_detailed(
+                db, cost_model.team_id, comp.commodity_id, region, target_year, target_quarter
+            )
+            ratio = (cur_val / ref_val) if (ref_val and cur_val) else 1.0
+            if not ref_val or not cur_val:
+                has_data = False
+                data_gaps.append(DataGap(
+                    component_label=comp.label, period=cur_label,
+                    reason="no index value found",
+                ))
+        else:
+            ratio = 1.0
+        contribution = comp_base * weight * ratio
+        indexed_cost += contribution
+        components.append(ComponentBreakdown(
+            label=comp.label,
+            commodity_id=comp.commodity_id,
+            commodity_name=comp.commodity.name if comp.commodity_id and comp.commodity else None,
+            weight_pct=round(weight * 100, 4),
+            base_value=round(ref_val, 4) if ref_val is not None else None,
+            current_value=round(cur_val, 4) if cur_val is not None else None,
+            ratio=round(ratio, 6),
+            contribution=round(contribution, 4),
+            source=source,
+            base_period=ref_label,
+            current_period=cur_label,
+            has_data=has_data,
+        ))
+    return indexed_cost, components, data_gaps
+
+
+def calculate_should_cost_breakdown(
+    db: Session,
+    cost_model: CostModel,
+    target_year: int | None = None,
+    target_quarter: int | None = None,
+    normalize_to_incoterm: str | None = None,
+    display_currency: str | None = None,
+    display_unit: str | None = None,
+):
+    """Scrum 17 — the should-cost, itemized: per-component index name/weight/base/
+    current/ratio/contribution, plus margin, FX, unit and Incoterm adjustments — all
+    numbers summing exactly to the displayed should-cost. Mirrors calculate_should_cost's
+    orchestration exactly but calls the *_detailed variants to keep the per-component
+    math alongside the total, rather than recomputing it."""
+    from app.schemas.costing import ShouldCostBreakdown
+
+    if target_year and target_quarter:
+        fv = _get_period_formula(cost_model, target_year, target_quarter)
+    else:
+        fv = cost_model.current_formula
+
+    if not fv:
+        return ShouldCostBreakdown(
+            should_cost=0, cost_before_margin=0, margin_amount=0, margin_type="unknown",
+            components=[], data_gaps=[], currency=cost_model.currency,
+            unit=cost_model.product.unit,
+        )
+
+    base_price = _effective_base_price(db, cost_model.id, fv)
+    region = cost_model.region
+    ref_year = fv.base_year
+    ref_quarter = fv.base_quarter
+    t_year = target_year or ref_year
+    t_quarter = target_quarter or ref_quarter
+
+    formula_type = getattr(fv, 'formula_type', 'simple') or 'simple'
+    if formula_type == 'advanced':
+        # Advanced (expression-based) formulas have no discrete weighted components —
+        # report the whole result as a single opaque line rather than fabricating a
+        # per-component split that doesn't exist in the formula's own definition.
+        indexed_cost = _compute_advanced_cost(db, fv, cost_model, region, t_year, t_quarter)
+        components, data_gaps = [], []
+        should_cost = indexed_cost
+        margin_amount = 0.0
+    else:
+        indexed_cost, components, data_gaps = _compute_indexed_cost_detailed(
+            db, fv, cost_model, region, ref_year, ref_quarter, t_year, t_quarter, base_price
+        )
+        should_cost, margin_amount = _apply_margin(
+            indexed_cost, fv.margin_type, fv.margin_value, base_price
+        )
+
+    should_cost_pre_incoterm = should_cost
+    target_inc = _norm_incoterm(normalize_to_incoterm)
+    if target_inc:
+        should_cost = _normalize_to(db, cost_model, fv, should_cost, target_inc)
+    incoterm_adjustment = (
+        round(should_cost - should_cost_pre_incoterm, 4) if target_inc else None
+    )
+
+    # Display currency/unit — applied to the total AND proportionally to each
+    # component's contribution, so the breakdown still sums exactly in the
+    # requested display units (ShouldCostRequest carries these fields but they were
+    # previously never wired through to the engine).
+    out_ccy = cost_model.currency
+    out_unit = cost_model.product.unit
+    fx_rate_used = None
+    unit_factor_used = None
+    if display_currency and display_currency != cost_model.currency:
+        converted = _apply_fx(db, should_cost, cost_model.currency, display_currency, t_year, t_quarter, team_id=cost_model.team_id)
+        fx_rate_used = (converted / should_cost) if should_cost else None
+        if fx_rate_used is not None:
+            for c in components:
+                c.contribution = round(c.contribution * fx_rate_used, 4)
+            should_cost = round(converted, 4)
+            out_ccy = display_currency
+    if display_unit and display_unit != cost_model.product.unit:
+        converted = _apply_unit(should_cost, cost_model.product.unit, display_unit)
+        unit_factor_used = (converted / should_cost) if should_cost else None
+        if unit_factor_used is not None:
+            for c in components:
+                c.contribution = round(c.contribution * unit_factor_used, 4)
+            should_cost = round(converted, 4)
+            out_unit = display_unit
+
+    return ShouldCostBreakdown(
+        should_cost=round(should_cost, 4),
+        cost_before_margin=round(indexed_cost, 4),
+        margin_amount=round(margin_amount, 4),
+        margin_type=getattr(fv, 'margin_type', 'unknown') or 'unknown',
+        components=components,
+        data_gaps=data_gaps,
+        incoterm_adjustment=incoterm_adjustment,
+        fx_rate_used=round(fx_rate_used, 6) if fx_rate_used is not None else None,
+        unit_factor_used=round(unit_factor_used, 6) if unit_factor_used is not None else None,
+        currency=out_ccy,
+        unit=out_unit,
+        incoterm=(fv.incoterm if fv and fv.incoterm else cost_model.incoterm),
+        normalized_to_incoterm=target_inc,
+    )
 
 
 def _compute_advanced_cost(

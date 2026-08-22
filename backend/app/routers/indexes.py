@@ -197,15 +197,42 @@ def update_composite(
             comp = db.query(CommodityIndex).filter(CommodityIndex.id == cid).first()
             if not comp:
                 raise HTTPException(status_code=422, detail=f"variable '{name}' references unknown index id {cid}")
+            # A pinned region must be a real region. Validated explicitly here rather
+            # than trusting the free-text auto-register net, so a typo fails loudly
+            # instead of silently pinning to a region that will never resolve.
+            pinned = spec.get("region")
+            if pinned:
+                from app.models.region import Region
+                if not db.query(Region).filter(Region.code == pinned).first():
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"variable '{name}' pins unknown region '{pinned}'",
+                    )
             # Direct cycle: a composite component that references this index back.
             if comp.composite_expression and comp.composite_variables:
                 back = {v.get("commodity_id") for v in comp.composite_variables.values() if v.get("type") == "index"}
                 if commodity_id in back:
                     raise HTTPException(status_code=422, detail=f"cyclic reference between '{ci.name}' and '{comp.name}'")
 
-    old = {"composite_expression": ci.composite_expression, "composite_variables": ci.composite_variables}
+    # The composite's own region. Validated against the real regions table for the
+    # same reason a variable's pin is: a typo would otherwise silently produce an
+    # index that never resolves. Clearing it (None/"") restores region-agnostic.
+    comp_region = (body.composite_region or "").strip() or None
+    if comp_region:
+        from app.models.region import Region
+        if not db.query(Region).filter(Region.code == comp_region).first():
+            raise HTTPException(status_code=422, detail=f"unknown region '{comp_region}'")
+
+    old = {
+        "composite_expression": ci.composite_expression,
+        "composite_variables": ci.composite_variables,
+        "composite_region": ci.composite_region,
+    }
     ci.composite_expression = expr
     ci.composite_variables = variables
+    # Clearing the expression clears the region with it — a non-composite index has
+    # no business carrying one.
+    ci.composite_region = comp_region if expr is not None else None
     out = CommodityIndexOut.model_validate(ci)
     name = ci.name
     db.commit()
@@ -235,7 +262,26 @@ def list_commodities(
             .filter(IndexValue.commodity_id == CommodityIndex.id)
             .exists()
         )
-    return q.order_by(CommodityIndex.name).all()
+    rows = q.order_by(CommodityIndex.name).all()
+
+    # Attach the regions each index carries values for. One grouped DISTINCT rather
+    # than a per-row query, so this stays a single extra round trip regardless of
+    # catalog size. The index table itself has no region column by design (Scrum 57)
+    # — region lives on index_values — but pickers need it to tell apart entries
+    # whose names differ only by the region they cover.
+    region_map: dict[int, set[str]] = {}
+    for commodity_id, region in (
+        db.query(IndexValue.commodity_id, IndexValue.region).distinct().all()
+    ):
+        if region:
+            region_map.setdefault(commodity_id, set()).add(region)
+
+    out = []
+    for row in rows:
+        item = CommodityIndexOut.model_validate(row)
+        item.regions = sorted(region_map.get(row.id, ()))
+        out.append(item)
+    return out
 
 
 @router.post("/commodities", response_model=CommodityIndexOut)

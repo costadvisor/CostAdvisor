@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { useConfirm } from '../components/ConfirmDialog';
+import RoleBadge from '../components/RoleBadge';
 
 export default function Team() {
   const { pendingInviteCount } = useAuth();
@@ -39,22 +40,6 @@ export default function Team() {
       {tab === 'taxonomy' && <TaxonomyTab />}
       {tab === 'settings' && <SettingsTab />}
     </div>
-  );
-}
-
-const ROLE_COLORS = {
-  owner:  { bg: 'var(--accent-dim)',  color: 'var(--accent)' },
-  admin:  { bg: 'var(--info-bg)',     color: 'var(--accent3)' },
-  member: { bg: 'var(--neutral-bg)',  color: 'var(--muted)' },
-};
-
-function RoleBadge({ role }) {
-  const s = ROLE_COLORS[role] || ROLE_COLORS.member;
-  return (
-    <span style={{
-      display: 'inline-block', padding: '1px 8px', borderRadius: 4,
-      fontSize: 10, fontWeight: 600, background: s.bg, color: s.color,
-    }}>{role}</span>
   );
 }
 

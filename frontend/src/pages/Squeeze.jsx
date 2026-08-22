@@ -61,7 +61,9 @@ export default function Squeeze() {
           )}>Export CSV</button>
         </div>
       </div>
-      <p className="ca-subtitle">{product_name}{supplier_name ? ` \u00B7 ${supplier_name}` : ''} \u00B7 {region}</p>
+      {/* Built from parts: a bare \u00B7 in JSX text renders literally, and an empty
+          segment would otherwise leave a dangling separator. */}
+      <p className="ca-subtitle">{[product_name, supplier_name, region].filter(Boolean).join(' \u00B7 ')}</p>
 
       {/* Controls */}
       <div className="ca-card" style={{ marginBottom: 16 }}>

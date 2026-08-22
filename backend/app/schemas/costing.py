@@ -24,6 +24,39 @@ class ShouldCostResult(BaseModel):
     normalized_to_incoterm: str | None = None
 
 
+# ── Should-cost breakdown (Scrum 17 — inspectable numbers) ─────────────────────
+
+class ComponentBreakdown(BaseModel):
+    label: str
+    commodity_id: int | None
+    commodity_name: str | None
+    weight_pct: float          # component weight, as a percent (0-100)
+    base_value: float | None   # index value at the formula's base period
+    current_value: float | None  # index value at the target period
+    ratio: float               # current_value / base_value, or 1.0 if riding flat
+    contribution: float        # comp_base * weight * ratio — sums exactly to cost_before_margin
+    source: str | None         # "composite"|"fixed"|"team_override"|"scraped_*"|None
+    base_period: str           # e.g. "Q1 2024"
+    current_period: str
+    has_data: bool             # False if either base_value or current_value is missing
+
+
+class ShouldCostBreakdown(BaseModel):
+    should_cost: float
+    cost_before_margin: float
+    margin_amount: float
+    margin_type: str
+    components: list[ComponentBreakdown]
+    data_gaps: list["DataGap"]
+    incoterm_adjustment: float | None = None   # should_cost(after) - should_cost(before normalization)
+    fx_rate_used: float | None = None          # target_ccy per 1 unit of model currency, if display_currency requested
+    unit_factor_used: float | None = None      # conversion factor applied, if display_unit requested
+    currency: str
+    unit: str
+    incoterm: str | None = None
+    normalized_to_incoterm: str | None = None
+
+
 class EvolutionRequest(BaseModel):
     cost_model_id: uuid.UUID
     reference_year: int | None = None

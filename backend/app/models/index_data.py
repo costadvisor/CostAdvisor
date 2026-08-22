@@ -45,6 +45,11 @@ class CommodityIndex(Base):
     #   { "Graphite": {"type":"index","commodity_id":N}, "FC": {"type":"fixed","value":X} }
     composite_expression: Mapped[str | None] = mapped_column(Text, nullable=True)
     composite_variables: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Region this composite is computed for. NULL = region-agnostic: follow the
+    # region the caller asked for, defaulting to GLOBAL (the original behaviour).
+    # Not a FK — this table is otherwise region-free by design (region lives on
+    # index_values, Scrum 57), so the code is validated at the API layer.
+    composite_region: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # Relationships
     values = relationship("IndexValue", back_populates="commodity", lazy="dynamic")

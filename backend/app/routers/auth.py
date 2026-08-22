@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
-import logging
+import hashlib
+import secrets
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, Request
@@ -7,7 +8,6 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from jose import jwt
 from authlib.integrations.httpx_client import AsyncOAuth2Client
-from authlib.integrations.base_client.errors import OAuthError
 
 from app.config import get_settings
 from app.database import get_db, current_user_id_var, bypass_rls_var, impersonating_admin_email_var
@@ -15,27 +15,47 @@ from app.models.user import User
 from app.models.invite import TeamInvite
 from app.models.access_request import PlatformAccessRequest
 from app.models.demo import DemoHost
+from app.models.refresh_token import RefreshToken
 from app.rate_limit import limiter
 from app.schemas.user import UserOut, UserWithTeams
 from app.services.email import send_welcome_email
+from app.services.audit import log_auth_event
 
 router = APIRouter()
 settings = get_settings()
-logger = logging.getLogger("app.auth")
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
 
-def create_jwt(user_id: uuid.UUID) -> str:
-    """Create a JWT token for a user."""
+def create_jwt(user_id: uuid.UUID, expiry_hours: float | None = None) -> str:
+    """Create a JWT token for a user. Defaults to `jwt_expiry_hours` (used by admin
+    impersonation tokens, unchanged); /login passes a short `access_token_minutes`
+    override instead (Scrum 9 — short-lived access token + rotating refresh token)."""
+    hours = expiry_hours if expiry_hours is not None else settings.jwt_expiry_hours
     payload = {
         "sub": str(user_id),
-        "exp": datetime.now(timezone.utc) + timedelta(hours=settings.jwt_expiry_hours),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=hours),
         "iat": datetime.now(timezone.utc),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def _hash_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _issue_refresh_token(db: Session, user_id: uuid.UUID) -> str:
+    """Mint a new opaque refresh token, store only its hash, return the raw value
+    (only ever sent once, as the ca_refresh cookie)."""
+    raw = secrets.token_urlsafe(48)
+    db.add(RefreshToken(
+        user_id=user_id,
+        token_hash=_hash_token(raw),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_days),
+    ))
+    return raw
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
@@ -98,49 +118,62 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
 @router.get("/login")
 @limiter.limit("10/minute")
 async def login(request: Request):
-    """Redirect user to Google OAuth consent screen."""
+    """Redirect user to Google OAuth consent screen.
+
+    Scrum 9 — PKCE (S256) + a real per-request `state`, both verified in
+    /callback. Previously `state` was generated then discarded (bound to `_state`)
+    and never checked against anything, and no PKCE verifier was used at all."""
     client = AsyncOAuth2Client(
         client_id=settings.google_client_id,
         client_secret=settings.google_client_secret,
         redirect_uri=f"{settings.api_url}/auth/callback",
         scope="openid email profile",
+        code_challenge_method="S256",
     )
-    uri, _state = client.create_authorization_url(GOOGLE_AUTH_URL)
-    return RedirectResponse(url=uri)
+    verifier = secrets.token_urlsafe(64)
+    uri, state = client.create_authorization_url(GOOGLE_AUTH_URL, code_verifier=verifier)
+
+    response = RedirectResponse(url=uri)
+    is_prod = settings.environment != "development"
+    response.set_cookie(
+        "oauth_state",
+        f"{state}:{verifier}",
+        httponly=True,
+        secure=is_prod,
+        samesite="none" if is_prod else "lax",
+        max_age=600,
+    )
+    return response
 
 
 @router.get("/callback")
 @limiter.limit("10/minute")
 async def callback(request: Request, db: Session = Depends(get_db)):
-    """Handle Google OAuth callback."""
+    """Handle Google OAuth callback.
+
+    Scrum 9 — validates `state` against the cookie /login set (previously not
+    read or checked at all) and completes the PKCE exchange with the matching
+    `code_verifier`."""
     code = request.query_params.get("code")
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
 
-    redirect_uri = f"{settings.api_url}/auth/callback"
+    state_param = request.query_params.get("state")
+    oauth_state_cookie = request.cookies.get("oauth_state", "")
+    if not state_param or not oauth_state_cookie or ":" not in oauth_state_cookie:
+        raise HTTPException(status_code=400, detail="Missing state")
+    stored_state, verifier = oauth_state_cookie.split(":", 1)
+    if state_param != stored_state:
+        raise HTTPException(status_code=400, detail="State mismatch")
+
     client = AsyncOAuth2Client(
         client_id=settings.google_client_id,
         client_secret=settings.google_client_secret,
-        redirect_uri=redirect_uri,
+        redirect_uri=f"{settings.api_url}/auth/callback",
     )
 
     # Exchange code for tokens
-    try:
-        token = await client.fetch_token(GOOGLE_TOKEN_URL, code=code)
-    except OAuthError as e:
-        # Temporary diagnostic: surface exactly what we sent and what Google said.
-        cid = settings.google_client_id
-        logger.error(
-            "Google token exchange failed: error=%r description=%r | "
-            "redirect_uri=%r client_id=%s…(len=%d) secret_len=%d",
-            getattr(e, "error", None),
-            getattr(e, "description", None),
-            redirect_uri,
-            cid[:14],
-            len(cid),
-            len(settings.google_client_secret),
-        )
-        raise
+    token = await client.fetch_token(GOOGLE_TOKEN_URL, code=code, code_verifier=verifier)
 
     # Get user info from Google
     client.token = token
@@ -173,6 +206,8 @@ async def callback(request: Request, db: Session = Depends(get_db)):
 
     if user is None:
         if not settings.allow_signup:
+            log_auth_event(db, email, "login_failed", reason="signup_disabled", request=request)
+            db.commit()
             bypass_rls_var.set(False)
             return RedirectResponse(
                 url=f"{settings.app_url}?login_error=signup_disabled", status_code=302
@@ -206,6 +241,8 @@ async def callback(request: Request, db: Session = Depends(get_db)):
                 error = "access_rejected"
             else:
                 error = "access_needed"
+            log_auth_event(db, email, "login_failed", reason=error, request=request)
+            db.commit()
             bypass_rls_var.set(False)
             return RedirectResponse(
                 url=f"{settings.app_url}?login_error={error}", status_code=302
@@ -234,11 +271,16 @@ async def callback(request: Request, db: Session = Depends(get_db)):
             user.display_name = display_name
         user.avatar_url = avatar_url
 
+    log_auth_event(db, email, "login_success", user_id=user.id, request=request)
     db.commit()
     bypass_rls_var.set(False)
 
-    # Issue JWT cookie and redirect to frontend
-    token_str = create_jwt(user.id)
+    # Issue a short-lived access token (ca_token) + a rotating refresh token
+    # (ca_refresh, scoped to /auth/refresh) and redirect to the frontend.
+    token_str = create_jwt(user.id, expiry_hours=settings.access_token_minutes / 60)
+    refresh_raw = _issue_refresh_token(db, user.id)
+    db.commit()
+
     response = RedirectResponse(url=settings.app_url, status_code=302)
     is_prod = settings.environment != "development"
     response.set_cookie(
@@ -247,8 +289,18 @@ async def callback(request: Request, db: Session = Depends(get_db)):
         httponly=True,
         secure=is_prod,
         samesite="none" if is_prod else "lax",
-        max_age=settings.jwt_expiry_hours * 3600,
+        max_age=settings.access_token_minutes * 60,
     )
+    response.set_cookie(
+        key="ca_refresh",
+        value=refresh_raw,
+        httponly=True,
+        secure=is_prod,
+        samesite="none" if is_prod else "lax",
+        max_age=settings.refresh_token_days * 86400,
+        path="/auth/refresh",
+    )
+    response.delete_cookie("oauth_state", secure=is_prod, samesite="none" if is_prod else "lax")
     return response
 
 
@@ -303,10 +355,88 @@ def set_my_theme(
     return current_user
 
 
+@router.post("/refresh")
+@limiter.limit("30/minute")
+def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
+    """Scrum 9 — exchange the ca_refresh cookie for a new short-lived ca_token,
+    rotating the refresh token itself (the old one is revoked and cannot be reused).
+    Called by the frontend's api.js on a 401, transparently to the user."""
+    raw = request.cookies.get("ca_refresh")
+    if not raw:
+        raise HTTPException(status_code=401, detail="No refresh token")
+
+    bypass_rls_var.set(True)
+    try:
+        row = db.query(RefreshToken).filter(RefreshToken.token_hash == _hash_token(raw)).first()
+        if not row or row.revoked_at is not None or row.expires_at < datetime.now(timezone.utc):
+            raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+
+        row.revoked_at = datetime.now(timezone.utc)
+        new_raw = _issue_refresh_token(db, row.user_id)
+        db.flush()
+        new_row = db.query(RefreshToken).filter(RefreshToken.token_hash == _hash_token(new_raw)).first()
+        row.replaced_by_id = new_row.id
+        db.commit()
+        user_id = row.user_id
+    finally:
+        bypass_rls_var.set(False)
+
+    is_prod = settings.environment != "development"
+    token_str = create_jwt(user_id, expiry_hours=settings.access_token_minutes / 60)
+    response.set_cookie(
+        key="ca_token", value=token_str, httponly=True, secure=is_prod,
+        samesite="none" if is_prod else "lax", max_age=settings.access_token_minutes * 60,
+    )
+    response.set_cookie(
+        key="ca_refresh", value=new_raw, httponly=True, secure=is_prod,
+        samesite="none" if is_prod else "lax", max_age=settings.refresh_token_days * 86400,
+        path="/auth/refresh",
+    )
+    return {"status": "refreshed"}
+
+
 @router.post("/logout")
-def logout(response: Response):
-    """Clear the auth cookie."""
-    response.delete_cookie("ca_token")
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    """Clear the auth cookies and revoke the current refresh token so it can't be
+    replayed after logout.
+
+    Deliberately does NOT depend on get_current_user — logout must succeed even
+    with an already-expired/invalid ca_token, so the audit-event user lookup is
+    best-effort (via ca_refresh's stored user_id, else a soft ca_token decode)."""
+    raw = request.cookies.get("ca_refresh")
+    logout_user_id = None
+    bypass_rls_var.set(True)
+    try:
+        if raw:
+            row = db.query(RefreshToken).filter(RefreshToken.token_hash == _hash_token(raw)).first()
+            if row and row.revoked_at is None:
+                row.revoked_at = datetime.now(timezone.utc)
+                logout_user_id = row.user_id
+                db.commit()
+        if logout_user_id is None:
+            token = request.cookies.get("ca_token")
+            if token:
+                try:
+                    payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+                    logout_user_id = uuid.UUID(payload["sub"])
+                except Exception:
+                    pass
+        if logout_user_id is not None:
+            user = db.query(User).filter(User.id == logout_user_id).first()
+            if user:
+                log_auth_event(db, user.email, "logout", user_id=user.id, request=request)
+                db.commit()
+    finally:
+        bypass_rls_var.set(False)
+
+    is_prod = settings.environment != "development"
+    same_site = "none" if is_prod else "lax"
+    # Matching attributes to how the cookies were set — a mismatched Secure/SameSite
+    # on delete_cookie can leave the browser holding onto the original cookie.
+    response.delete_cookie("ca_token", httponly=True, secure=is_prod, samesite=same_site)
+    response.delete_cookie("ca_refresh", httponly=True, secure=is_prod, samesite=same_site, path="/auth/refresh")
+    from app.observability import clear_user_context
+    clear_user_context()
     return {"status": "logged out"}
 
 

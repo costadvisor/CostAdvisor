@@ -238,8 +238,10 @@ def resolve_index_values(
         comp_q = comp_q.filter(CommodityIndex.name == commodity_name_filter)
     if commodity_ids is not None and commodity_ids:
         comp_q = comp_q.filter(CommodityIndex.id.in_(commodity_ids))
-    comp_region = region or "GLOBAL"
     for ci in comp_q.all():
+        # A composite pinned to a region reports under that region; an unpinned one
+        # follows the requested region and falls back to GLOBAL, as before.
+        comp_region = ci.composite_region or region or "GLOBAL"
         if (ci.id, comp_region) in covered_pairs:
             continue
         y, q = _fy, _fq
@@ -284,8 +286,24 @@ def compute_composite_value(
     context: dict[str, float] = {}
     for var_name, var_def in (ci.composite_variables or {}).items():
         if var_def.get("type") == "index" and var_def.get("commodity_id"):
+            # WHERE an input is read from is decided per input, NOT by the label on
+            # the composite.
+            #
+            # `composite_region` says what this composite IS (a European index); it
+            # must not dictate where its inputs come from. A European product
+            # legitimately depends on global feedstocks — Brent has no European
+            # series — and letting the label force every unpinned input to Europe
+            # silently changed which number the maths used for any commodity that
+            # happens to carry both a Europe and a GLOBAL series.
+            #
+            # So: an explicit pin wins; otherwise a pinned composite reads the
+            # neutral GLOBAL series, and only an UNPINNED composite (a polymorphic
+            # formula shape) follows the region it was asked for.
+            var_region = var_def.get("region") or (
+                "GLOBAL" if ci.composite_region else region
+            )
             val = get_single_index_value(
-                db, team_id, var_def["commodity_id"], region, year, quarter,
+                db, team_id, var_def["commodity_id"], var_region, year, quarter,
                 _resolving=_resolving,
             )
             if val is None:
@@ -311,15 +329,36 @@ def get_single_index_value(
     """Get a single resolved index value (composite > fixed source > override > scraped).
 
     `_resolving` tracks the composite chain currently being computed to break cycles."""
+    value, _source = get_single_index_value_detailed(
+        db, team_id, commodity_id, region, year, quarter, _resolving=_resolving,
+    )
+    return value
+
+
+def get_single_index_value_detailed(
+    db: Session,
+    team_id: uuid.UUID,
+    commodity_id: int,
+    region: str,
+    year: int,
+    quarter: int,
+    _resolving: set | None = None,
+) -> tuple[float | None, str | None]:
+    """Same resolution as `get_single_index_value`, but also returns which branch of
+    the priority chain produced the value — for surfacing index provenance in a
+    should-cost breakdown (Scrum 17). Source labels: "composite", "fixed",
+    "team_override", "scraped_region", "scraped_global", "scraped_any_region",
+    "scraped_temporal_carry_forward", or None if nothing resolved."""
     # Composite / calculated index: compute live from its components (with cycle guard).
     ci = db.query(CommodityIndex).filter(CommodityIndex.id == commodity_id).first()
     if ci is not None and ci.composite_expression:
         _resolving = _resolving or set()
         if commodity_id in _resolving:
-            return None  # cycle — a composite (transitively) references itself
-        return compute_composite_value(
+            return None, None  # cycle — a composite (transitively) references itself
+        val = compute_composite_value(
             db, team_id, ci, region, year, quarter, _resolving | {commodity_id},
         )
+        return val, ("composite" if val is not None else None)
 
     # A "fixed" team source means the value is constant across all periods.
     fixed_source = db.query(TeamIndexSource).filter(
@@ -329,7 +368,7 @@ def get_single_index_value(
         TeamIndexSource.source_type == "fixed",
     ).first()
     if fixed_source and fixed_source.fixed_value is not None:
-        return float(fixed_source.fixed_value)
+        return float(fixed_source.fixed_value), "fixed"
 
     # Check override first (exact region, then GLOBAL fallback)
     override = db.query(IndexOverride).filter(
@@ -351,7 +390,9 @@ def get_single_index_value(
 
     if override:
         # Null override = intentional blank (team source doesn't cover this period)
-        return float(override.value) if override.value is not None else None
+        if override.value is not None:
+            return float(override.value), "team_override"
+        return None, None
 
     # Fall back to scraped
     iv = db.query(IndexValue).filter(
@@ -362,7 +403,7 @@ def get_single_index_value(
     ).first()
 
     if iv:
-        return float(iv.value)
+        return float(iv.value), "scraped_region"
 
     # Fall back to GLOBAL region if region-specific value not found
     if region != "GLOBAL":
@@ -373,7 +414,7 @@ def get_single_index_value(
             IndexValue.quarter == quarter,
         ).first()
         if iv:
-            return float(iv.value)
+            return float(iv.value), "scraped_global"
 
     # Fall back to any region that has data for this commodity/period
     iv = db.query(IndexValue).filter(
@@ -382,7 +423,7 @@ def get_single_index_value(
         IndexValue.quarter == quarter,
     ).first()
     if iv:
-        return float(iv.value)
+        return float(iv.value), "scraped_any_region"
 
     # Temporal fallback: carry forward the most recent available value.
     # This handles cases where the requested period (e.g. a future reference
@@ -400,6 +441,6 @@ def get_single_index_value(
         IndexValue.quarter.desc(),
     ).first()
     if iv:
-        return float(iv.value)
+        return float(iv.value), "scraped_temporal_carry_forward"
 
-    return None
+    return None, None

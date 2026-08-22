@@ -9,6 +9,9 @@ import { useConfirm, useAlert } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../AuthContext';
 import { stripReservedFns } from '../utils/formulaFns';
+import NumberInput from '../components/NumberInput';
+import { normalizeVarMap } from '../components/VariableMapEditor';
+import IndexCombo from '../components/IndexCombo';
 
 export default function CostModelBuilder() {
   const { costModelId } = useParams();
@@ -301,7 +304,7 @@ export default function CostModelBuilder() {
         landed_cost_adjustments: landedCostAdjustments,
         ...(formulaMode === 'advanced' ? {
           expression: advancedExpression,
-          variables: advancedVars,
+          variables: normalizeVarMap(advancedVars),
         } : {
           margin_type: marginType,
           margin_value: marginValue,
@@ -733,9 +736,9 @@ export default function CostModelBuilder() {
                           <option value="">None</option>
                           {commodities.map(ci => <option key={ci.id} value={ci.name}>{ci.name}</option>)}
                         </select>
-                        <input className="ca-input" type="number" value={c.parts || 0} min={0}
+                        <NumberInput value={c.parts} allowNegative={false}
                           style={{ textAlign: 'right', padding: '7px 6px' }}
-                          onChange={e => updateComp(i, 'parts', +e.target.value)} />
+                          onChange={v => updateComp(i, 'parts', v ?? 0)} />
                         <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>
                           {(compWeight(c) * 100).toFixed(1)}%
                         </span>
@@ -855,16 +858,16 @@ export default function CostModelBuilder() {
                               <option value="index">Index</option>
                             </select>
                             {def.type === 'index' ? (
-                              <select className="ca-select" value={def.commodity_id || ''} style={{ fontSize: 11, padding: '6px 8px' }}
-                                onChange={e => updateAdvancedVar(name, 'commodity_id', e.target.value ? Number(e.target.value) : null)}>
-                                <option value="">— select index —</option>
-                                {commodities.map(ci => <option key={ci.id} value={ci.id}>{ci.name}</option>)}
-                              </select>
+                              <IndexCombo
+                                value={def.commodity_id ?? null}
+                                commodities={commodities}
+                                onChange={id => updateAdvancedVar(name, 'commodity_id', id)}
+                              />
                             ) : (
-                              <input className="ca-input" type="number" step="any"
+                              <NumberInput
                                 style={{ padding: '6px 8px', fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
-                                value={def.value ?? 0}
-                                onChange={e => updateAdvancedVar(name, 'value', +e.target.value)} />
+                                value={def.value}
+                                onChange={v => updateAdvancedVar(name, 'value', v)} />
                             )}
                             <button className="ca-btn-danger" onClick={() => removeAdvancedVar(name)}>x</button>
                           </div>
@@ -1206,7 +1209,7 @@ function SaveTemplateModal({ expression, variables, activeTeamId, canEditPlatfor
         name: name.trim(),
         description: description.trim() || null,
         expression,
-        variables: Object.keys(variables).length > 0 ? variables : null,
+        variables: Object.keys(variables).length > 0 ? normalizeVarMap(variables) : null,
       });
       addToast('Saved to Formula Library', 'success');
       onSaved(res.data);

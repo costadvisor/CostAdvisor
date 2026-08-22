@@ -96,6 +96,19 @@ def validate_composite_structure(expression, variables):
         if vtype == "index":
             if not isinstance(spec.get("commodity_id"), int):
                 raise ValueError(f"index variable '{name}' needs an integer commodity_id")
+            # Optional region pin. The same commodity commonly carries different
+            # values per region (Iron has both a Europe and a GLOBAL series), and
+            # without a pin every variable resolved at whatever region the composite
+            # was asked for — so the two were indistinguishable and unselectable.
+            # Omitted/None keeps the original behaviour: follow the requested region,
+            # then the resolver's Europe → GLOBAL → any fallback.
+            region = spec.get("region")
+            if region is not None:
+                if not isinstance(region, str) or not region.strip():
+                    raise ValueError(f"index variable '{name}' region must be a non-empty string")
+                if len(region.strip()) > 32:
+                    raise ValueError(f"index variable '{name}' region is too long")
+                spec["region"] = region.strip()
         elif vtype == "fixed":
             if not isinstance(spec.get("value"), (int, float)):
                 raise ValueError(f"fixed variable '{name}' needs a numeric value")

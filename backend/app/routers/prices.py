@@ -1,5 +1,8 @@
+import csv
+import io
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -32,6 +35,61 @@ def get_actual_prices(
         .all()
     )
     return [ActualPriceOut.model_validate(p) for p in prices]
+
+
+@router.get("/{cost_model_id}/template")
+def download_price_template(
+    cost_model_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return a CSV template pre-populated with existing price rows (or last 4 quarters blank).
+
+    Mirrors the volumes template endpoint. The frontend previously served this one
+    from an inline data: URI, so the template never reflected the model's own
+    incoterm or the periods already on record.
+    """
+    cm = db.query(CostModel).filter(CostModel.id == cost_model_id).first()
+    if not cm:
+        raise HTTPException(status_code=404, detail="Cost model not found")
+    require_permission(db, current_user, cm.team_id, "prices.view")
+
+    existing = (
+        db.query(ActualPrice)
+        .filter(ActualPrice.cost_model_id == cost_model_id)
+        .order_by(ActualPrice.year, ActualPrice.quarter)
+        .all()
+    )
+
+    default_incoterm = cm.incoterm or ""
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["period", "price", "incoterm"])
+    if existing:
+        for p in existing:
+            writer.writerow([f"Q{p.quarter}-{p.year}", p.price, p.incoterm or default_incoterm])
+    else:
+        from datetime import date
+
+        today = date.today()
+        y, q = today.year, (today.month - 1) // 3 + 1
+        quarters = []
+        for _ in range(4):
+            quarters.append((y, q))
+            q -= 1
+            if q == 0:
+                q = 4
+                y -= 1
+        for yr, qt in reversed(quarters):
+            writer.writerow([f"Q{qt}-{yr}", "", default_incoterm])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=prices_template.csv"},
+    )
 
 
 @router.post("/{cost_model_id}/upload")

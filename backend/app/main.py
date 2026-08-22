@@ -7,7 +7,7 @@ from slowapi import _rate_limit_exceeded_handler
 
 from app.config import get_settings
 from app.database import engine, Base
-from app.observability import init_sentry
+from app.observability import init_sentry, _SDK_AVAILABLE, SentryAsgiMiddleware
 from app.rate_limit import limiter
 
 init_sentry()
@@ -39,6 +39,12 @@ settings = get_settings()
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+# Scrum 11 — actually wire the Sentry ASGI middleware (previously imported in
+# observability.py but never applied to the app at all, even when the SDK was
+# available and a DSN configured).
+if _SDK_AVAILABLE and settings.sentry_dsn:
+    app.add_middleware(SentryAsgiMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

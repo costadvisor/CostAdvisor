@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
-    jwt_expiry_hours: int = 72
+    jwt_expiry_hours: int = 72          # used by admin impersonation tokens (create_jwt default)
+    access_token_minutes: int = 15      # short-lived ca_token issued at /login; refreshed via /auth/refresh
+    refresh_token_days: int = 7
 
     # URLs
     app_url: str = "http://localhost:5173"

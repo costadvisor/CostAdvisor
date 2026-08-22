@@ -43,6 +43,13 @@ export default function PriceChart({ series, color }) {
   if (range / step > 8) step *= 2;
   for (let v = Math.ceil(minV / step) * step; v <= maxV; v += step) gridLines.push(v);
 
+  // Abbreviate to "k" only when the gridline step is coarse enough for one decimal
+  // to still separate adjacent labels. A 1042–1110 price series steps by 10, and
+  // blanket `(v/1000).toFixed(1)` rendered every single gridline as "1.1k".
+  const useK = step >= 100;
+  const kDec = step >= 1000 ? 0 : 1;
+  const fmtY = v => (v >= 1000 && useK ? `${(v / 1000).toFixed(kDec)}k` : v.toFixed(dec));
+
   const linePath = series.map((d, i) => `${i === 0 ? 'M' : 'L'}${xScale(i).toFixed(1)},${yScale(Number(d.rate)).toFixed(1)}`).join(' ');
   const fillPath = `${linePath} L${xScale(N - 1).toFixed(1)},${(H - PAD.b).toFixed(1)} L${xScale(0).toFixed(1)},${(H - PAD.b).toFixed(1)} Z`;
 
@@ -84,7 +91,7 @@ export default function PriceChart({ series, color }) {
           <g key={i}>
             <line x1={PAD.l} y1={yScale(v)} x2={W - PAD.r} y2={yScale(v)} stroke="var(--chart-grid, var(--border))" strokeWidth={0.5} />
             <text x={PAD.l - 6} y={yScale(v) + 3} textAnchor="end" fill="var(--muted)" fontSize={9} fontFamily="'JetBrains Mono', monospace">
-              {v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(dec)}
+              {fmtY(v)}
             </text>
           </g>
         ))}
@@ -100,13 +107,18 @@ export default function PriceChart({ series, color }) {
           </g>
         )}
 
-        {series.map((d, i) => (
-          i % labelStep === 0 && (
-            <text key={i} x={xScale(i)} y={H - 6} textAnchor="middle" fill="var(--muted)" fontSize={9} fontFamily="'JetBrains Mono', monospace">
+        {series.map((d, i) => {
+          if (i % labelStep !== 0) return null;
+          const x = xScale(i);
+          // A centred label on the first/last point hangs outside the viewBox and
+          // gets clipped — anchor the edge labels inward instead.
+          const anchor = x <= PAD.l + 1 ? 'start' : x >= W - PAD.r - 1 ? 'end' : 'middle';
+          return (
+            <text key={i} x={x} y={H - 6} textAnchor={anchor} fill="var(--muted)" fontSize={9} fontFamily="'JetBrains Mono', monospace">
               {fmt(d.date)}
             </text>
-          )
-        ))}
+          );
+        })}
       </svg>
 
       {hp && (

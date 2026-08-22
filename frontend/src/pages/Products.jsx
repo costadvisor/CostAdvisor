@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { useConfirm, useAlert } from '../components/ConfirmDialog';
+import ProductFormModal from '../components/ProductFormModal';
 import exportCsv from '../utils/exportCsv';
 
 export default function Products() {
   const { activeTeamId } = useAuth();
-  const navigate = useNavigate();
   const confirm = useConfirm();
   const showAlert = useAlert();
   const [products, setProducts] = useState([]);
@@ -16,15 +15,6 @@ export default function Products() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [saving, setSaving] = useState(false);
-
-  // Form fields
-  const [name, setName] = useState('');
-  const [formula, setFormula] = useState('');
-  const [activeContent, setActiveContent] = useState(1.0);
-  const [unit, setUnit] = useState('kg');
-  const [chemicalFamilyId, setChemicalFamilyId] = useState('');
-  const [formulaTemplateId, setFormulaTemplateId] = useState('');
 
   const fetchData = () => {
     if (!activeTeamId) return;
@@ -46,46 +36,14 @@ export default function Products() {
   useEffect(fetchData, [activeTeamId]);
 
   const resetForm = () => {
-    setName(''); setFormula(''); setActiveContent(1.0); setUnit('kg'); setChemicalFamilyId('');
-    setFormulaTemplateId('');
     setEditing(null); setShowForm(false);
   };
 
+  // `editing` now holds the full product (ProductFormModal prefills from it
+  // directly) rather than just its id.
   const startEdit = (p) => {
-    setName(p.name);
-    setFormula(p.formula || '');
-    setActiveContent(p.active_content ?? 1.0);
-    setUnit(p.unit || 'kg');
-    setChemicalFamilyId(p.chemical_family_id ?? '');
-    setFormulaTemplateId(p.formula_template_id ?? '');
-    setEditing(p.id);
+    setEditing(p);
     setShowForm(true);
-  };
-
-  const handleSave = async () => {
-    if (!name.trim()) return;
-    setSaving(true);
-    const body = {
-      name: name.trim(),
-      formula: formula.trim() || null,
-      active_content: activeContent,
-      unit,
-      chemical_family_id: chemicalFamilyId ? Number(chemicalFamilyId) : null,
-      formula_template_id: formulaTemplateId || null,
-    };
-    try {
-      if (editing) {
-        await api.put(`/api/products/${editing}`, body);
-      } else {
-        await api.post(`/api/products?team_id=${activeTeamId}`, body);
-      }
-      resetForm();
-      fetchData();
-    } catch (err) {
-      showAlert({ title: 'Error', message: formatApiError(err) });
-    } finally {
-      setSaving(false);
-    }
   };
 
   const handleDelete = async (id) => {
@@ -131,67 +89,22 @@ export default function Products() {
               Export CSV
             </button>
           )}
-          <button className="ca-btn ca-btn-primary" onClick={() => { resetForm(); setShowForm(!showForm); }}>
-            {showForm && !editing ? 'Cancel' : '+ Add Product'}
+          <button className="ca-btn ca-btn-primary" onClick={() => { setEditing(null); setShowForm(true); }}>
+            + Add Product
           </button>
         </div>
       </div>
       <p className="ca-subtitle">Manage products for your team. Products are linked to cost models.</p>
 
-      {showForm && (
-        <div className="ca-card" style={{ marginBottom: 16 }}>
-          <div className="ca-card-title">{editing ? 'Edit Product' : 'New Product'}</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <label className="ca-label">Name *</label>
-              <input className="ca-input" value={name} onChange={e => setName(e.target.value)} placeholder="Product name" />
-            </div>
-            <div>
-              <label className="ca-label">Chemical Formula</label>
-              <input className="ca-input" value={formula} onChange={e => setFormula(e.target.value)} placeholder="e.g. NaOH" />
-            </div>
-            <div>
-              <label className="ca-label">Chemical Family</label>
-              <select className="ca-select" value={chemicalFamilyId} onChange={e => setChemicalFamilyId(e.target.value)}>
-                <option value="">None</option>
-                {families.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="ca-label">Unit</label>
-              <select className="ca-select" value={unit} onChange={e => setUnit(e.target.value)}>
-                {['kg', 't', 'lb'].map(u => <option key={u} value={u}>{u}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="ca-label">Active Content (0-1)</label>
-              <input className="ca-input" type="number" value={activeContent} min={0} max={1} step={0.01}
-                onChange={e => setActiveContent(+e.target.value)} />
-            </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <label className="ca-label">Catalog Formula</label>
-              <select className="ca-select" value={formulaTemplateId}
-                onChange={e => setFormulaTemplateId(e.target.value)}>
-                <option value="">None — model by hand</option>
-                {templates.map(t => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}{t.code ? ` (${t.code})` : ''}{t.team_id ? ' · team' : ''}
-                  </option>
-                ))}
-              </select>
-              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
-                New cost models for this product auto-load the linked recipe at their region.
-              </div>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="ca-btn ca-btn-primary" onClick={handleSave} disabled={saving || !name.trim()}>
-              {saving ? 'Saving...' : (editing ? 'Update' : 'Create')}
-            </button>
-            {editing && <button className="ca-btn ca-btn-ghost" onClick={resetForm}>Cancel</button>}
-          </div>
-        </div>
-      )}
+      <ProductFormModal
+        isOpen={showForm}
+        editing={editing}
+        families={families}
+        templates={templates}
+        activeTeamId={activeTeamId}
+        onClose={resetForm}
+        onSaved={() => { resetForm(); fetchData(); }}
+      />
 
       {loading ? (
         <div style={{ padding: 20, color: 'var(--muted)' }}>Loading...</div>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import TeamSelector from './TeamSelector';
 
@@ -9,20 +9,39 @@ export default function Navbar() {
   const location = useLocation();
   const { user, logout, pendingInviteCount } = useAuth();
   const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
   const menuRef = useRef(null);
+  const triggerRef = useRef(null);
+  const itemRefs = useRef([]);
+
+  const closeMenu = (restoreFocus = false) => {
+    setOpen(false);
+    if (restoreFocus) triggerRef.current?.focus();
+  };
 
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false);
     };
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    // Escape returns focus to the trigger — without this the menu closes and
+    // focus is dropped on <body>, stranding keyboard users at the top of the page.
+    const onKey = (e) => { if (e.key === 'Escape') closeMenu(true); };
     document.addEventListener('mousedown', onDocClick);
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('mousedown', onDocClick);
       document.removeEventListener('keydown', onKey);
     };
+  }, [open]);
+
+  // role="menu" promises arrow-key navigation under WAI-ARIA; move focus into
+  // the menu on open so that contract is actually honoured.
+  useEffect(() => {
+    if (!open) return;
+    setActiveIdx(0);
+    const id = requestAnimationFrame(() => itemRefs.current[0]?.focus());
+    return () => cancelAnimationFrame(id);
   }, [open]);
 
   // The 8-tab journey shell (Scrum 61/UI-1): raw index feeds → portfolio →
@@ -42,11 +61,11 @@ export default function Navbar() {
     ...(user?.is_super_admin ? [{ path: '/admin', label: 'Admin' }] : []),
   ];
 
-  // Old flat-nav pages that don't have a slot in the 8-tab journey shell but
-  // are still functional and still linked-to from within it (e.g. Portfolio's
-  // "+ Add product" goes to /products) — kept one click away in the account
-  // menu instead of dropped outright, so nothing becomes a dead end.
-  const moreLinks = [
+  // Old flat-nav pages with no slot in the 8-tab journey shell. This is not a
+  // leftovers list — /formulas and /alerts have no other inbound link anywhere
+  // in the app, and /suppliers' only one is a back-button from its own child,
+  // so for three of these five this menu is the sole entry point.
+  const goToLinks = [
     { path: '/dashboard', label: 'Dashboard' },
     { path: '/products', label: 'Products' },
     { path: '/suppliers', label: 'Suppliers' },
@@ -54,8 +73,56 @@ export default function Navbar() {
     { path: '/alerts', label: 'Alerts' },
   ];
 
-  const goProfile = () => { setOpen(false); navigate('/profile'); };
   const handleLogout = async () => { setOpen(false); await logout(); };
+
+  // Flat list backing the roving tabindex; the two rendered groups slice it, so
+  // arrow keys traverse the whole menu while the group labels stay unfocusable.
+  const menuItems = [
+    ...goToLinks,
+    { path: '/profile', label: 'Profile' },
+    { label: 'Logout', onClick: handleLogout },
+  ];
+
+  const focusItem = (i) => {
+    const next = (i + menuItems.length) % menuItems.length;
+    setActiveIdx(next);
+    itemRefs.current[next]?.focus();
+  };
+
+  const onMenuKeyDown = (e) => {
+    switch (e.key) {
+      case 'ArrowDown': e.preventDefault(); focusItem(activeIdx + 1); break;
+      case 'ArrowUp': e.preventDefault(); focusItem(activeIdx - 1); break;
+      case 'Home': e.preventDefault(); focusItem(0); break;
+      case 'End': e.preventDefault(); focusItem(menuItems.length - 1); break;
+      case 'Tab': closeMenu(); break;
+      default: break;
+    }
+  };
+
+  const renderItem = (item, idx) => {
+    const shared = {
+      ref: el => { itemRefs.current[idx] = el; },
+      role: 'menuitem',
+      className: 'ca-menu-item',
+      tabIndex: idx === activeIdx ? 0 : -1,
+      onFocus: () => setActiveIdx(idx),
+    };
+    if (!item.path) {
+      return <button key={item.label} type="button" {...shared} onClick={item.onClick}>{item.label}</button>;
+    }
+    return (
+      <Link
+        key={item.path}
+        to={item.path}
+        {...shared}
+        aria-current={location.pathname.startsWith(item.path) ? 'page' : undefined}
+        onClick={() => setOpen(false)}
+      >
+        {item.label}
+      </Link>
+    );
+  };
 
   return (
     <nav className="ca-nav">
@@ -86,23 +153,18 @@ export default function Navbar() {
       ))}
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
         <TeamSelector />
-        {user?.company && (
-          <span style={{
-            fontSize: 10, fontWeight: 600, letterSpacing: '0.4px',
-            padding: '3px 10px', borderRadius: 999,
-            background: 'var(--surface2)', border: '1px solid var(--border)',
-            color: 'var(--muted)', whiteSpace: 'nowrap', maxWidth: 160,
-            overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>
-            {user.company}
-          </span>
-        )}
+        {/* The company used to be a pill here, up to 160px wide. `.ca-nav` has no
+            wrap or overflow handling, and a super-admin with 8 tabs + the team
+            selector was already close to overflowing at 1280px — so it moved into
+            the menu's identity block, where it reads better anyway. */}
         <div ref={menuRef} style={{ position: 'relative' }}>
           <button
+            ref={triggerRef}
             type="button"
             onClick={() => setOpen(o => !o)}
             aria-haspopup="menu"
             aria-expanded={open}
+            aria-controls="ca-account-menu"
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
               background: 'transparent', border: '1px solid transparent',
@@ -132,32 +194,40 @@ export default function Navbar() {
           </button>
           {open && (
             <div
+              id="ca-account-menu"
+              className="ca-menu"
               role="menu"
-              style={{
-                position: 'absolute', top: 'calc(100% + 6px)', right: 0,
-                minWidth: 200, background: 'var(--surface)',
-                border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.18)', padding: 6, zIndex: 50,
-              }}
+              aria-label="Account and navigation"
+              onKeyDown={onMenuKeyDown}
             >
-              <div style={{
-                padding: '8px 10px', borderBottom: '1px solid var(--border)',
-                marginBottom: 4,
-              }}>
+              <div className="ca-menu-identity">
                 <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>
                   {user?.display_name}
                 </div>
-                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2, wordBreak: 'break-all' }}>
                   {user?.email}
                 </div>
+                {user?.company && (
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+                    {user.company}
+                  </div>
+                )}
               </div>
-              <div style={{ padding: '4px 10px 2px', fontSize: 9, fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase', color: 'var(--muted)' }}>More</div>
-              {moreLinks.map(l => (
-                <MenuItem key={l.path} onClick={() => { setOpen(false); navigate(l.path); }} label={l.label} />
-              ))}
-              <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
-              <MenuItem onClick={goProfile} label="Profile" />
-              <MenuItem onClick={handleLogout} label="Logout" />
+
+              {/* Two named groups rather than one heading called "More" — these are
+                  destinations, and the account actions are not simply what's left
+                  after the divider. role=group gives screen readers the same split. */}
+              <div role="group" aria-labelledby="ca-menu-goto">
+                <div className="ca-menu-label" id="ca-menu-goto">Go to</div>
+                {goToLinks.map((l, i) => renderItem(l, i))}
+              </div>
+
+              <div className="ca-menu-sep" />
+
+              <div role="group" aria-labelledby="ca-menu-account">
+                <div className="ca-menu-label" id="ca-menu-account">Account</div>
+                {menuItems.slice(goToLinks.length).map((item, i) => renderItem(item, goToLinks.length + i))}
+              </div>
             </div>
           )}
         </div>
@@ -166,22 +236,3 @@ export default function Navbar() {
   );
 }
 
-function MenuItem({ onClick, label }) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      style={{
-        display: 'block', width: '100%', textAlign: 'left',
-        background: 'transparent', border: 'none', cursor: 'pointer',
-        padding: '8px 10px', borderRadius: 6, fontSize: 11,
-        color: 'var(--text)',
-      }}
-      onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface2)'; }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-    >
-      {label}
-    </button>
-  );
-}

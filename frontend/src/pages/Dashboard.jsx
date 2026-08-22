@@ -65,6 +65,26 @@ export default function Dashboard() {
 
   const confirm = useConfirm();
   const showAlert = useAlert();
+  const [loadingExample, setLoadingExample] = useState(false);
+
+  // Scrum 16 — self-serve onboarding: seed a runnable demo for a brand-new team.
+  const handleLoadExampleData = async () => {
+    const ok = await confirm({
+      title: 'Load example data?',
+      message: 'This adds 5 sample products, suppliers, cost models and 3 years of prices/volumes to your team so you can explore CostAdvisor immediately. Safe to run more than once.',
+      confirmLabel: 'Load example data',
+    });
+    if (!ok) return;
+    setLoadingExample(true);
+    try {
+      await api.post(`/api/teams/${activeTeamId}/load-example-data`);
+      fetchPortfolio();
+    } catch (err) {
+      showAlert({ title: 'Could not load example data', message: formatApiError(err) });
+    } finally {
+      setLoadingExample(false);
+    }
+  };
 
   const handleDelete = async (id) => {
     const ok = await confirm({
@@ -148,9 +168,14 @@ export default function Dashboard() {
           <div style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
             No cost models yet. Create your first one.
           </div>
-          <button className="ca-btn ca-btn-primary" onClick={() => navigate('/cost-models/new')}>
-            New Cost Model
-          </button>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+            <button className="ca-btn ca-btn-primary" onClick={() => navigate('/cost-models/new')}>
+              New Cost Model
+            </button>
+            <button className="ca-btn ca-btn-ghost" onClick={handleLoadExampleData} disabled={loadingExample}>
+              {loadingExample ? 'Loading…' : 'Load example data'}
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -231,7 +256,7 @@ export default function Dashboard() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                       <div>
                         <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 15 }}>{m.product_name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{m.supplier_name || 'No supplier'} \u00B7 {m.region}</div>
+                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{[m.supplier_name || 'No supplier', m.region].filter(Boolean).join(' \u00B7 ')}</div>
                       </div>
                       <div style={{ display: 'flex', gap: 4 }}>
                         {m.flag_index_moved && <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 9, background: 'var(--info-bg)', color: 'var(--accent3)' }}>IDX</span>}

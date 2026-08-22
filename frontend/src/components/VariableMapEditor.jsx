@@ -1,11 +1,42 @@
 import { Fragment } from 'react';
 import { stripReservedFns } from '../utils/formulaFns';
+import NumberInput from './NumberInput';
+import IndexCombo from './IndexCombo';
 
 /* Reusable advanced-expression + variable-map editor. Same shape and behaviour as
  * the advanced-formula editors in CostModelBuilder/Formulas: an expression textarea,
  * a "Detect variables" action, and per-variable rows binding each name to either a
  * commodity index or a fixed value. Var map shape:
  *   { "Graphite": {type:"index", commodity_id:N}, "FC": {type:"fixed", value:X} } */
+/**
+ * Blank fixed values mean zero. New variables start EMPTY rather than pre-filled
+ * with `0` — a box showing "0" is what made users type in front of it and get
+ * "052" — so the zero is applied here, at the point of submission, instead of
+ * being shown as a value the user never chose. The backend requires a real
+ * number (`isinstance(value, (int, float))`), so this must run before any POST/PUT
+ * carrying a variable map.
+ */
+export function normalizeVarMap(vars) {
+  const out = {};
+  Object.entries(vars || {}).forEach(([name, def]) => {
+    if (def?.type === 'fixed') {
+      const v = def.value;
+      // Drop any region left behind by switching a variable from index to fixed.
+      const { region, ...rest } = def;
+      out[name] = { ...rest, value: v == null || v === '' ? 0 : Number(v) };
+    } else if (def?.type === 'index') {
+      // Omit `region` entirely when unpinned — the backend treats absent/None as
+      // "follow the requested region", and sending null says the same thing less
+      // clearly. Everything else on the spec is passed through untouched.
+      const { region, ...rest } = def;
+      out[name] = region ? { ...rest, region } : rest;
+    } else {
+      out[name] = def;
+    }
+  });
+  return out;
+}
+
 export default function VariableMapEditor({
   expression, setExpression, vars, setVars, commodities = [],
   exprLabel = 'Expression', exprPlaceholder = 'e.g. 0.6*Graphite + 0.3*Wood + FC',
@@ -16,7 +47,8 @@ export default function VariableMapEditor({
     const unique = stripReservedFns([...new Set(tokens)]);
     setVars(prev => {
       const next = {};
-      unique.forEach(n => { next[n] = prev[n] || { type: 'fixed', value: 0 }; });
+      // value: null (not 0) so the box renders empty with a "0" placeholder.
+      unique.forEach(n => { next[n] = prev[n] || { type: 'fixed', value: null }; });
       return next;
     });
   };
@@ -42,7 +74,7 @@ export default function VariableMapEditor({
       {names.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 84px 1.4fr 24px', gap: 8, alignItems: 'center' }}>
           {names.map(name => {
-            const def = vars[name] || { type: 'fixed', value: 0 };
+            const def = vars[name] || { type: 'fixed', value: null };
             return (
               <Fragment key={name}>
                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600 }}>{name}</div>
@@ -51,14 +83,21 @@ export default function VariableMapEditor({
                   <option value="index">index</option>
                 </select>
                 {def.type === 'index' ? (
-                  <select className="ca-select" value={def.commodity_id || ''}
-                    onChange={e => updateVar(name, 'commodity_id', e.target.value ? Number(e.target.value) : null)}>
-                    <option value="">Select index…</option>
-                    {commodities.map(ci => <option key={ci.id} value={ci.id}>{ci.name}</option>)}
-                  </select>
+                  /* byRegion — a composite variable CAN store a region, so
+                     "Iron · Europe" and "Iron · GLOBAL" are picked separately. */
+                  <IndexCombo
+                    byRegion
+                    value={def.commodity_id ?? null}
+                    region={def.region ?? null}
+                    commodities={commodities}
+                    onChange={(id, reg) => setVars(prev => ({
+                      ...prev,
+                      [name]: { ...prev[name], commodity_id: id, region: reg },
+                    }))}
+                  />
                 ) : (
-                  <input className="ca-input" type="number" value={def.value ?? 0}
-                    onChange={e => updateVar(name, 'value', Number(e.target.value))} />
+                  <NumberInput value={def.value}
+                    onChange={v => updateVar(name, 'value', v)} />
                 )}
                 <button type="button" className="ca-btn-link" title="Remove"
                   style={{ color: 'var(--accent2)' }} onClick={() => removeVar(name)}>×</button>

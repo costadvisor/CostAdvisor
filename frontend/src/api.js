@@ -12,12 +12,37 @@ const api = axios.create({
   withCredentials: true,  // Send cookies (JWT) with every request
 });
 
+// Scrum 9 — silent refresh: on a 401, try POST /auth/refresh (the browser attaches
+// the HttpOnly ca_refresh cookie automatically — nothing to read in JS) once before
+// giving up and redirecting to /login. Concurrent 401s share one in-flight refresh
+// call instead of each firing their own.
+let _refreshPromise = null;
+function silentRefresh() {
+  if (!_refreshPromise) {
+    _refreshPromise = api.post('/auth/refresh', null, { _isRefreshCall: true })
+      .then(() => true)
+      .catch(() => false)
+      .finally(() => { _refreshPromise = null; });
+  }
+  return _refreshPromise;
+}
+
 // Response interceptor: redirect to login on 401, surface 429 rate limits, handle 403
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     const status = error.response?.status;
+    const config = error.config || {};
     if (status === 401) {
+      // Don't try to refresh off the refresh call's own 401, and only retry once
+      // per original request (avoids a refresh-retry-refresh loop).
+      if (!config._isRefreshCall && !config._retriedAfterRefresh) {
+        const refreshed = await silentRefresh();
+        if (refreshed) {
+          config._retriedAfterRefresh = true;
+          return api(config);
+        }
+      }
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }

@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import api, { formatApiError } from '../api';
 
-export default function FileUpload({ endpoint, onSuccess, accept = '.csv,.xlsx,.xls' }) {
+export default function FileUpload({ endpoint, onSuccess, accept = '.csv,.xlsx,.xls', label = 'Upload File' }) {
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState(null); // { filename, rows_processed, errors }
   const [confirming, setConfirming] = useState(false);
@@ -83,7 +83,7 @@ export default function FileUpload({ endpoint, onSuccess, accept = '.csv,.xlsx,.
         onClick={() => { setResult(null); fileRef.current?.click(); }}
         disabled={uploading || confirming}
       >
-        {uploading ? 'Reading…' : 'Upload File'}
+        {uploading ? 'Reading…' : label}
       </button>
 
       {preview && (

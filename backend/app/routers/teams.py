@@ -17,6 +17,7 @@ from app.schemas.rbac import (
 )
 from app.services.audit import log_event
 from app.services.email import send_invite_email
+from app.services.permissions import require_permission
 
 router = APIRouter()
 
@@ -48,6 +49,71 @@ def create_team(
     db.commit()
     db.refresh(team)
     return team
+
+
+# ── Scrum 16: self-serve onboarding ────────────────────────────────────────────
+
+@router.post("/{team_id}/load-example-data")
+def load_example_data(
+    team_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Seed a runnable demo (products, suppliers, cost models, actuals) into ANY
+    team, not just the hardcoded staminachem team seed_all.py provisions. Idempotent —
+    seed_staminachem.run()'s existing name-based lookups skip rows that already exist
+    for this team_id, so re-clicking the button is safe."""
+    require_permission(db, current_user, team_id, "products.edit")
+
+    import seed_staminachem
+    seed_staminachem.run(team_id=str(team_id), created_by=str(current_user.id))
+
+    log_event(db, team_id, current_user.id, "load_example_data", "team", str(team_id))
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.get("/{team_id}/onboarding-status")
+def onboarding_status(
+    team_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Four real-progress signals for the onboarding checklist, computed live from
+    existing data — no new persisted state. `has_brief` reads the existing
+    "brief_generated" AuditLog event (routers/costing.py) as an aggregate boolean,
+    not raw audit rows, so it doesn't need the admin-only audit endpoint."""
+    require_permission(db, current_user, team_id, "products.view")
+
+    from app.models.product import Product
+    from app.models.cost_model import CostModel, FormulaVersion
+    from app.models.price_data import ActualPrice
+    from app.models.audit_log import AuditLog
+
+    has_product = db.query(Product.id).filter(Product.team_id == team_id).first() is not None
+    has_priced_model = (
+        db.query(CostModel.id)
+        .join(FormulaVersion, FormulaVersion.cost_model_id == CostModel.id)
+        .filter(CostModel.team_id == team_id)
+        .first() is not None
+    )
+    has_actual_price = (
+        db.query(ActualPrice.id)
+        .join(CostModel, CostModel.id == ActualPrice.cost_model_id)
+        .filter(CostModel.team_id == team_id)
+        .first() is not None
+    )
+    has_brief = (
+        db.query(AuditLog.id)
+        .filter(AuditLog.team_id == team_id, AuditLog.event_type == "brief_generated")
+        .first() is not None
+    )
+    return {
+        "has_product": has_product,
+        "has_priced_model": has_priced_model,
+        "has_actual_price": has_actual_price,
+        "has_brief": has_brief,
+    }
 
 
 @router.get("/", response_model=list[TeamOut])

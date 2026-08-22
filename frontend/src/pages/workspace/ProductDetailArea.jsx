@@ -41,6 +41,9 @@ export default function ProductDetailArea() {
   const [sc, setSc] = useState({ status: 'loading' });   // live should-cost
   const [buySignal, setBuySignal] = useState(null);       // buy-window signal
   const [flagSaving, setFlagSaving] = useState(false);    // negotiation flag save
+  const [showBreakdown, setShowBreakdown] = useState(false);  // Scrum 17 — inspectable numbers
+  const [breakdown, setBreakdown] = useState(null);
+  const [breakdownErr, setBreakdownErr] = useState(null);
 
   // Starting-point editor
   const [editing, setEditing] = useState(false);
@@ -72,6 +75,17 @@ export default function ProductDetailArea() {
   };
 
   useEffect(() => { loadCm(); loadSc(); loadBuy(); /* eslint-disable-next-line */ }, [costModelId]);
+
+  // Scrum 17 — should-cost breakdown, fetched lazily on first expand.
+  const toggleBreakdown = () => {
+    const next = !showBreakdown;
+    setShowBreakdown(next);
+    if (next && !breakdown && !breakdownErr) {
+      api.post('/api/costing/should-cost/breakdown', { cost_model_id: costModelId, target_year: CUR_Y, target_quarter: CUR_Q })
+        .then(({ data }) => setBreakdown(data))
+        .catch(err => setBreakdownErr(formatApiError(err)));
+    }
+  };
 
   // Scrum 25 — set the negotiation flag (needs costing.edit; backend enforces).
   const setNegotiation = async (state) => {
@@ -224,6 +238,12 @@ export default function ProductDetailArea() {
                 <Metric label="Margin" value={`${sym}${fmtMoney(sc.margin_amount)}`} color="var(--accent2)" />
                 <Metric label={`Per active ${unit}`} value={sc.per_active_unit != null ? `${sym}${fmtMoney(sc.per_active_unit)}` : '—'} color="var(--accent4)" />
               </div>
+              <button className="ca-btn-link" style={{ fontSize: 11, marginTop: 10 }} onClick={toggleBreakdown}>
+                {showBreakdown ? '▾ Hide breakdown' : '▸ Show breakdown'}
+              </button>
+              {showBreakdown && (
+                <ShouldCostBreakdownTable breakdown={breakdown} error={breakdownErr} sym={sym} />
+              )}
             </>
           )}
         </div>
@@ -339,6 +359,98 @@ function Metric({ label, value, color }) {
     <div style={{ textAlign: 'center' }}>
       <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 18, fontWeight: 700, color }}>{value}</div>
       <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>{label}</div>
+    </div>
+  );
+}
+
+const SOURCE_LABEL = {
+  composite: 'composite', fixed: 'fixed', team_override: 'override',
+  scraped_region: 'scraped', scraped_global: 'scraped (global)',
+  scraped_any_region: 'scraped (other region)', scraped_temporal_carry_forward: 'scraped (carried)',
+};
+
+// Scrum 17 — itemized should-cost: index name, weight, base/current value, ratio,
+// contribution, and source, with a footer that sums to exactly the should-cost shown
+// above (mirrors FormulaDetailModal's resolved-recipe table pattern).
+function ShouldCostBreakdownTable({ breakdown, error, sym }) {
+  if (error) return <div className="ca-card" style={{ marginTop: 10, color: 'var(--accent2)', fontSize: 12 }}>Error: {error}</div>;
+  if (!breakdown) return <div style={{ marginTop: 10, color: 'var(--muted)', fontSize: 12 }}>Loading…</div>;
+
+  const mono = { fontFamily: "'JetBrains Mono', monospace" };
+  const fmt = (v) => (v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 3 }));
+
+  return (
+    <div style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+      <div className="ca-scroll-x">
+        <table className="ca-table" style={{ margin: 0 }}>
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th style={{ textAlign: 'right' }}>Weight</th>
+              <th style={{ textAlign: 'right' }}>Base value</th>
+              <th style={{ textAlign: 'right' }}>Current value</th>
+              <th style={{ textAlign: 'right' }}>× Ratio</th>
+              <th style={{ textAlign: 'right' }}>Contribution</th>
+              <th>Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {breakdown.components.length === 0 && (
+              <tr><td colSpan={7} style={{ padding: 16, textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
+                Advanced (expression) formula — no discrete weighted components to break down.
+              </td></tr>
+            )}
+            {breakdown.components.map((c, i) => (
+              <tr key={i}>
+                <td style={{ fontSize: 12 }}>{c.label}{c.commodity_name ? <span style={{ color: 'var(--muted)' }}> · {c.commodity_name}</span> : null}</td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{c.weight_pct.toFixed(1)}%</td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>{fmt(c.base_value)}</td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>{fmt(c.current_value)}</td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>
+                  {c.has_data ? (
+                    <span style={{ color: c.ratio > 1 ? 'var(--accent2)' : c.ratio < 1 ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                      {c.ratio.toFixed(3)}
+                    </span>
+                  ) : (
+                    <span title="No index data — line rides flat" style={{ color: 'var(--accent3)' }}>flat</span>
+                  )}
+                </td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right', fontWeight: 600 }}>{fmt(c.contribution)}</td>
+                <td style={{ fontSize: 10, color: 'var(--muted)' }}>{c.source ? (SOURCE_LABEL[c.source] || c.source) : '—'}</td>
+              </tr>
+            ))}
+            <tr>
+              <td colSpan={5} style={{ fontSize: 11, fontWeight: 600, textAlign: 'right', color: 'var(--text-secondary)' }}>Indexed cost (Σ components)</td>
+              <td style={{ ...mono, fontSize: 12, fontWeight: 700, textAlign: 'right' }}>{sym}{fmt(breakdown.cost_before_margin)}</td>
+              <td />
+            </tr>
+            <tr>
+              <td colSpan={5} style={{ fontSize: 11, textAlign: 'right', color: 'var(--text-secondary)' }}>+ Margin ({breakdown.margin_type})</td>
+              <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{sym}{fmt(breakdown.margin_amount)}</td>
+              <td />
+            </tr>
+            {breakdown.incoterm_adjustment != null && (
+              <tr>
+                <td colSpan={5} style={{ fontSize: 11, textAlign: 'right', color: 'var(--text-secondary)' }}>
+                  + Incoterm adjustment{breakdown.normalized_to_incoterm ? ` (→ ${breakdown.normalized_to_incoterm})` : ''}
+                </td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{sym}{fmt(breakdown.incoterm_adjustment)}</td>
+                <td />
+              </tr>
+            )}
+            <tr>
+              <td colSpan={5} style={{ fontSize: 12, fontWeight: 700, textAlign: 'right' }}>= Should-cost</td>
+              <td style={{ ...mono, fontSize: 13, fontWeight: 700, textAlign: 'right', color: 'var(--accent)' }}>{sym}{fmt(breakdown.should_cost)}</td>
+              <td />
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {breakdown.data_gaps.length > 0 && (
+        <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--accent3)', borderTop: '1px solid var(--border)' }}>
+          {breakdown.data_gaps.length} component{breakdown.data_gaps.length > 1 ? 's' : ''} missing index data and rode flat: {breakdown.data_gaps.map(g => g.component_label).join(', ')}.
+        </div>
+      )}
     </div>
   );
 }

@@ -6,6 +6,9 @@ import exportCsv from '../utils/exportCsv';
 import FormulaDetailModal from '../components/FormulaDetailModal';
 import FileUpload from '../components/FileUpload';
 import { stripReservedFns } from '../utils/formulaFns';
+import NumberInput from '../components/NumberInput';
+import { normalizeVarMap } from '../components/VariableMapEditor';
+import IndexCombo from '../components/IndexCombo';
 
 // data_confidence → badge treatment. CONF-LOW is a placeholder pending expert
 // review — it must read as a caution, not as fact.
@@ -782,7 +785,7 @@ function FormulaModal({ template, activeTeamId, canEditPlatform, canEditTeam, co
         name: name.trim(),
         description: description.trim() || null,
         expression: expression.trim() || null,
-        variables: Object.keys(vars).length > 0 ? vars : null,
+        variables: Object.keys(vars).length > 0 ? normalizeVarMap(vars) : null,
       };
       let res;
       if (isNew) {
@@ -1003,16 +1006,15 @@ function FormulaModal({ template, activeTeamId, canEditPlatform, canEditTeam, co
                     <option value="index">Index</option>
                   </select>
                   {def.type === 'fixed' ? (
-                    <input className="ca-input" type="number" style={{ padding: '6px 8px', fontSize: 11 }}
-                      value={def.value ?? 0}
-                      onChange={e => updateVar(varName, 'value', parseFloat(e.target.value) || 0)} />
+                    <NumberInput style={{ padding: '6px 8px', fontSize: 11 }}
+                      value={def.value}
+                      onChange={v => updateVar(varName, 'value', v)} />
                   ) : (
-                    <select className="ca-select" style={{ fontSize: 11, padding: '6px 8px' }}
-                      value={def.commodity_id ?? ''}
-                      onChange={e => updateVar(varName, 'commodity_id', parseInt(e.target.value) || null)}>
-                      <option value="">Select index…</option>
-                      {commodities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                    <IndexCombo
+                      value={def.commodity_id ?? null}
+                      commodities={commodities}
+                      onChange={id => updateVar(varName, 'commodity_id', id)}
+                    />
                   )}
                   <button onClick={() => removeVar(varName)} style={{
                     background: 'none', border: 'none', cursor: 'pointer',

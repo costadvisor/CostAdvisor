@@ -8,7 +8,7 @@ from app.models.cost_model import CostModel
 from app.rate_limit import limiter
 from app.routers.auth import get_current_user
 from app.schemas.costing import (
-    ShouldCostRequest, ShouldCostResult,
+    ShouldCostRequest, ShouldCostResult, ShouldCostBreakdown,
     EvolutionRequest, EvolutionResult,
     SqueezeRequest, SqueezeResult,
     BriefRequest, BriefResult,
@@ -17,7 +17,7 @@ from app.schemas.costing import (
 from app.services.costing_engine import (
     calculate_should_cost, calculate_evolution,
     calculate_squeeze, calculate_brief,
-    calculate_price_change,
+    calculate_price_change, calculate_should_cost_breakdown,
 )
 from app.services.permissions import require_permission
 from app.services.audit import log_event
@@ -48,6 +48,37 @@ def should_cost(
         target_year=data.target_year,
         target_quarter=data.target_quarter,
         normalize_to_incoterm=data.normalize_to_incoterm,
+    )
+
+
+@router.post("/should-cost/breakdown", response_model=ShouldCostBreakdown)
+def should_cost_breakdown(
+    data: ShouldCostRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Scrum 17 — itemized should-cost: per-component index/weight/base/current/ratio/
+    contribution, plus margin, FX, unit and Incoterm adjustments, all summing exactly
+    to the displayed should-cost."""
+    cm = db.query(CostModel).filter(CostModel.id == data.cost_model_id).first()
+    if not cm:
+        raise HTTPException(status_code=404, detail="Cost model not found")
+    require_permission(db, current_user, cm.team_id, "costing.view")
+
+    if not cm.current_formula:
+        raise HTTPException(
+            status_code=422,
+            detail="No formula defined for this cost model. Add components in the Cost Model Builder first.",
+        )
+
+    return calculate_should_cost_breakdown(
+        db=db,
+        cost_model=cm,
+        target_year=data.target_year,
+        target_quarter=data.target_quarter,
+        normalize_to_incoterm=data.normalize_to_incoterm,
+        display_currency=data.display_currency,
+        display_unit=data.display_unit,
     )
 
 

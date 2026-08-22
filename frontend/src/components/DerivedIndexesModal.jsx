@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import api, { formatApiError } from '../api';
-import VariableMapEditor from './VariableMapEditor';
+import VariableMapEditor, { normalizeVarMap } from './VariableMapEditor';
+import RegionSelect from './RegionSelect';
 
 /* Derived-index management (super-admin), relocated out of the Admin page into the
  * Index Library. Two kinds of "derived" index:
@@ -130,6 +131,7 @@ export default function DerivedIndexesModal({ onClose }) {
 function CompositeFormModal({ index, commodities, onClose, onSaved }) {
   const [expression, setExpression] = useState(index.composite_expression || '');
   const [vars, setVars] = useState(index.composite_variables || {});
+  const [compositeRegion, setCompositeRegion] = useState(index.composite_region || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
@@ -138,7 +140,8 @@ function CompositeFormModal({ index, commodities, onClose, onSaved }) {
     try {
       await api.put(`/api/indexes/${index.id}/composite`, {
         composite_expression: expression.trim() || null,
-        composite_variables: vars,
+        composite_variables: normalizeVarMap(vars),
+        composite_region: compositeRegion || null,
       });
       onSaved();
     } catch (e) {
@@ -159,6 +162,18 @@ function CompositeFormModal({ index, commodities, onClose, onSaved }) {
         <div className="ca-modal-body">
           <VariableMapEditor expression={expression} setExpression={setExpression}
             vars={vars} setVars={setVars} commodities={pickable} />
+          <div style={{ marginTop: 12 }}>
+            <label className="ca-label">Region</label>
+            <RegionSelect
+              value={compositeRegion} onChange={setCompositeRegion}
+              includeEmpty emptyLabel="Any region (computed on request)"
+            />
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+              {compositeRegion
+                ? `Labels this index as ${compositeRegion} and reports it under that region. It does not change where the formula reads from — pin a region on a variable to control that, otherwise it uses the global series.`
+                : 'Any region — reported under GLOBAL, and unpinned variables follow whatever region is requested.'}
+            </div>
+          </div>
           <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
             Clear the formula to turn this back into a normal index.
           </p>

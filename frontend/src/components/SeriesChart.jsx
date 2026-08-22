@@ -6,7 +6,9 @@ import { useState, useMemo, useEffect, useRef } from 'react';
  *
  * Features: hover crosshair + tooltip, a trailing-window range selector, and
  * two-point selection (click point A then point B) that shades the band and
- * reports the selected slice back via `onWindowChange` for statistics.
+ * reports the selected slice back via `onWindowChange` for statistics. The
+ * first click anchors A with a marker line + ring and previews the band to the
+ * cursor, so a half-made selection is visible instead of silent.
  *
  * Props:
  *   points        : ascending array of { label, value, date? }
@@ -168,10 +170,14 @@ export default function SeriesChart({ points, comparePoints, markedLabels, color
     return Math.max(0, Math.min(N - 1, idx));
   };
   const onMove = e => setHover(idxFromEvent(e));
+  // Three-click cycle: anchor A → commit A–B → clear both. Clicking a completed
+  // span used to re-anchor A at the click instead, which read as the band
+  // "sliding" from the old end point to the new click rather than resetting.
   const onClick = e => {
     const idx = idxFromEvent(e);
-    if (selA == null || (selA != null && selB != null)) { setSelA(idx); setSelB(null); } // start new selection
-    else setSelB(idx);
+    if (selA != null && selB != null) { setSelA(null); setSelB(null); return; }
+    if (selA == null) { setSelA(idx); return; }
+    setSelB(idx);
   };
 
   const hp = hover != null ? windowed[hover] : null;
@@ -184,6 +190,13 @@ export default function SeriesChart({ points, comparePoints, markedLabels, color
 
   const bandX1 = selLo != null ? xScale(selLo) : 0;
   const bandX2 = selHi != null ? xScale(selHi) : 0;
+
+  // A picked, B not yet: anchor the first point and preview the band to the
+  // cursor, so the span being measured is visible before it is committed.
+  // `selA < N` guards a stale index if `points` shrinks under a live selection.
+  const pending = selA != null && selB == null && selA < N;
+  const pendX = pending ? xScale(selA) : 0;
+  const previewX = pending && hover != null ? xScale(hover) : null;
 
   return (
     <div className="ca-fade-in" style={{ width: '100%' }}>
@@ -200,14 +213,24 @@ export default function SeriesChart({ points, comparePoints, markedLabels, color
             </g>
           ))}
 
-          {/* selection band */}
-          {selLo != null && (
+          {/* selection band — committed A–B, or the live A→cursor preview after the first click */}
+          {selLo != null ? (
             <g>
               <rect x={Math.min(bandX1, bandX2)} y={PAD.t} width={Math.abs(bandX2 - bandX1)} height={plotH}
                 fill="var(--accent4)" opacity={0.12} />
               {[selLo, selHi].map((si, k) => (
                 <line key={k} x1={xScale(si)} y1={PAD.t} x2={xScale(si)} y2={H - PAD.b} stroke="var(--accent4)" strokeWidth={1} />
               ))}
+            </g>
+          ) : pending && (
+            <g>
+              {/* fainter than the committed band (0.12) so pending reads as provisional;
+                  the cursor edge is already marked by the hover crosshair */}
+              {previewX != null && (
+                <rect x={Math.min(pendX, previewX)} y={PAD.t} width={Math.abs(previewX - pendX)} height={plotH}
+                  fill="var(--accent4)" opacity={0.07} />
+              )}
+              <line x1={pendX} y1={PAD.t} x2={pendX} y2={H - PAD.b} stroke="var(--accent4)" strokeWidth={1} />
             </g>
           )}
 
@@ -234,10 +257,14 @@ export default function SeriesChart({ points, comparePoints, markedLabels, color
             return <circle key={`mk-${i}`} cx={xScale(i)} cy={yScale(v)} r={6} fill="var(--accent3)" stroke="var(--surface)" strokeWidth={2.5} />;
           })}
 
-          {/* selection endpoint markers */}
-          {selLo != null && [selLo, selHi].map((si, k) => (
+          {/* selection endpoint markers — hollow ring while A is pending, solid once committed.
+              The hover dot is also a solid accent4 dot, so a solid pending dot would be
+              indistinguishable from it; the ring reads as "pinned". */}
+          {selLo != null ? [selLo, selHi].map((si, k) => (
             <circle key={k} cx={xScale(si)} cy={yScale(vals[si])} r={3.5} fill="var(--accent4)" stroke="var(--surface)" strokeWidth={1.5} />
-          ))}
+          )) : pending && (
+            <circle cx={pendX} cy={yScale(vals[selA])} r={4.5} fill="var(--surface)" stroke="var(--accent4)" strokeWidth={2} />
+          )}
 
           {/* hover crosshair */}
           {hp && (
@@ -283,7 +310,9 @@ export default function SeriesChart({ points, comparePoints, markedLabels, color
       <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
         {selLo != null
           ? <>Selected {windowed[selLo].date || windowed[selLo].label} → {windowed[selHi].date || windowed[selHi].label} · <button className="ca-btn ca-btn-sm ca-btn-ghost" style={{ padding: '0 6px' }} onClick={() => { setSelA(null); setSelB(null); }}>clear</button></>
-          : 'Click two points on the chart to analyse a span.'}
+          : pending
+            ? <>Selected {windowed[selA].date || windowed[selA].label} → pick an end point · <button className="ca-btn ca-btn-sm ca-btn-ghost" style={{ padding: '0 6px' }} onClick={() => { setSelA(null); setSelB(null); }}>clear</button></>
+            : 'Click two points on the chart to analyse a span.'}
       </div>
     </div>
   );
