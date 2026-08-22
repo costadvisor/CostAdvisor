@@ -9,6 +9,20 @@ export function AuthProvider({ children }) {
   const [teams, setTeams] = useState([]);
   const [activeTeamId, setActiveTeamId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [pendingInviteCount, setPendingInviteCount] = useState(0);
+
+  // Read ?login_error from URL once on mount and clear it immediately so it
+  // doesn't persist across navigations or reloads.
+  const [loginError, setLoginError] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get('login_error') || null;
+    if (err) {
+      params.delete('login_error');
+      const newSearch = params.toString();
+      window.history.replaceState(null, '', newSearch ? `?${newSearch}` : window.location.pathname);
+    }
+    return err;
+  });
 
   const fetchUser = useCallback(async () => {
     try {
@@ -25,6 +39,7 @@ export function AuthProvider({ children }) {
         id: m.team_id,
         name: m.team?.name || 'Team',
         role: m.role,
+        created_at: m.team?.created_at || null,
       })) || [];
       setTeams(userTeams);
 
@@ -35,9 +50,18 @@ export function AuthProvider({ children }) {
       } else if (userTeams.length > 0) {
         setActiveTeamId(userTeams[0].id);
       }
+
+      // Fetch pending invites for badge count
+      try {
+        const { data: invites } = await api.get('/api/invites/pending');
+        setPendingInviteCount(invites.length);
+      } catch {
+        setPendingInviteCount(0);
+      }
     } catch {
       setUser(null);
       setTeams([]);
+      setPendingInviteCount(0);
     } finally {
       setLoading(false);
     }
@@ -68,6 +92,9 @@ export function AuthProvider({ children }) {
     setUser(null);
     setTeams([]);
     setActiveTeamId(null);
+    // Landing page URL — set VITE_LANDING_URL per environment (e.g. localhost:3333 locally);
+    // defaults to the public landing site on deploy.
+    window.location.href = import.meta.env.VITE_LANDING_URL || 'https://www.costadvisor.org';
   };
 
   return (
@@ -80,6 +107,9 @@ export function AuthProvider({ children }) {
       logout,
       refreshUser: fetchUser,
       setTheme,
+      pendingInviteCount,
+      loginError,
+      clearLoginError: () => setLoginError(null),
     }}>
       {children}
     </AuthContext.Provider>

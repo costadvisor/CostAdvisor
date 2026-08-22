@@ -24,7 +24,7 @@ export default function Home() {
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button className="ca-btn ca-btn-primary" onClick={() => navigate('/cost-models/new')}>New Cost Model</button>
               <button className="ca-btn ca-btn-ghost" onClick={() => navigate('/dashboard')}>View Dashboard</button>
-              <button className="ca-btn ca-btn-ghost" onClick={() => navigate('/indexes')}>Market Indexes</button>
+              <button className="ca-btn ca-btn-ghost" onClick={() => navigate('/index-library')}>Index Library</button>
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 210 }}>

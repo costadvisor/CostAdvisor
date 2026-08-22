@@ -1,6 +1,7 @@
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 
 from app.database import get_db
 from app.models.user import User
@@ -16,9 +17,11 @@ router = APIRouter()
 def list_audit_logs(
     team_id: uuid.UUID,
     entity_type: str | None = Query(None),
+    event_type: str | None = Query(None),
     entity_id: str | None = Query(None),
+    search: str | None = Query(None),
     limit: int = Query(50, le=200),
-    offset: int = Query(0),
+    skip: int = Query(0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -31,17 +34,35 @@ def list_audit_logs(
         if not membership:
             raise HTTPException(status_code=403, detail="Not a member of this team")
 
-    query = db.query(AuditLog).filter(AuditLog.team_id == team_id)
+    # Exclude platform-level admin actions — those are only visible in /api/admin/audit-logs
+    query = (
+        db.query(AuditLog)
+        .options(joinedload(AuditLog.user))
+        .filter(AuditLog.team_id == team_id)
+        .filter(~AuditLog.event_type.startswith("admin_"))
+    )
 
     if entity_type:
         query = query.filter(AuditLog.entity_type == entity_type)
+    if event_type:
+        query = query.filter(AuditLog.event_type == event_type)
     if entity_id:
         query = query.filter(AuditLog.entity_id == entity_id)
+    if search:
+        term = f"%{search.lower()}%"
+        query = query.filter(
+            or_(
+                AuditLog.event_type.ilike(term),
+                AuditLog.entity_type.ilike(term),
+                AuditLog.user.has(User.email.ilike(term)),
+                AuditLog.user.has(User.display_name.ilike(term)),
+            )
+        )
 
     logs = (
         query
         .order_by(AuditLog.timestamp.desc())
-        .offset(offset)
+        .offset(skip)
         .limit(limit)
         .all()
     )

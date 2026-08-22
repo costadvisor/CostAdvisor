@@ -1,0 +1,39 @@
+.lp-sectors {
+  padding: 14px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.lp-sectors-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.lp-sectors-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  padding-right: 6px;
+}
+
+.lp-sector-chip {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 10px;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+
+@media (max-width: 700px) {
+  .lp-sectors-inner { gap: 6px; padding: 0 8px; }
+}

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Literal
-from pydantic import BaseModel, field_validator, computed_field
+from pydantic import BaseModel, field_validator, computed_field, model_validator
 
 from app.constants.incoterms import (
     is_valid as incoterm_is_valid,
@@ -53,6 +53,7 @@ class FormulaComponentItem(BaseModel):
 
 
 class FormulaVersionCreate(BaseModel):
+    formula_type: Literal['simple', 'advanced'] = 'simple'
     base_price: float
     base_year: int
     base_quarter: int
@@ -61,7 +62,10 @@ class FormulaVersionCreate(BaseModel):
     incoterm: str | None = None
     named_place: str | None = None
     landed_cost_adjustments: dict | None = None
-    components: list[FormulaComponentItem]
+    components: list[FormulaComponentItem] = []
+    # Advanced mode fields
+    expression: str | None = None
+    variables: dict | None = None
     notes: str | None = None
 
     @field_validator("base_price")
@@ -71,12 +75,13 @@ class FormulaVersionCreate(BaseModel):
             raise ValueError("Base price must be positive")
         return v
 
-    @field_validator("components")
-    @classmethod
-    def at_least_one_component(cls, v):
-        if not v:
-            raise ValueError("At least one formula component is required")
-        return v
+    @model_validator(mode='after')
+    def validate_formula_fields(self):
+        if self.formula_type == 'simple' and not self.components:
+            raise ValueError("At least one formula component is required for simple mode")
+        if self.formula_type == 'advanced' and not self.expression:
+            raise ValueError("An expression is required for advanced formula mode")
+        return self
 
     @field_validator("margin_type")
     @classmethod
@@ -140,6 +145,7 @@ class FormulaComponentOut(BaseModel):
 
 class FormulaVersionOut(BaseModel):
     id: int
+    formula_type: str = 'simple'
     base_price: float
     base_year: int
     base_quarter: int
@@ -148,6 +154,8 @@ class FormulaVersionOut(BaseModel):
     incoterm: str | None = None
     named_place: str | None = None
     landed_cost_adjustments: dict | None = None
+    expression: str | None = None
+    variables: dict | None = None
     notes: str | None
     created_at: datetime
     updated_at: datetime | None = None
@@ -171,6 +179,7 @@ class CostModelOut(BaseModel):
     region: str
     currency: str
     incoterm: str | None = None
+    negotiation_state: str = "none"   # Scrum 25 collaboration flag
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime

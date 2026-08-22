@@ -1,0 +1,140 @@
+.lp-roi {
+  padding: 80px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface2);
+}
+
+.lp-roi-headline {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(26px, 3.5vw, 42px);
+  font-weight: 800;
+  letter-spacing: -1px;
+  line-height: 1.1;
+  margin: 14px 0 36px;
+}
+
+.lp-roi-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 40px;
+  max-width: 860px;
+}
+
+.lp-roi-inner {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 56px;
+  align-items: center;
+}
+
+.lp-roi-slider-wrap {
+  margin-bottom: 28px;
+}
+
+.lp-roi-slider-wrap:last-child {
+  margin-bottom: 0;
+}
+
+.lp-roi-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.lp-roi-label strong {
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.lp-roi-range {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.lp-roi-output {
+  text-align: center;
+  padding: 20px;
+  border-left: 1px solid var(--border);
+}
+
+.lp-roi-big {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: clamp(40px, 5vw, 60px);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -3px;
+  line-height: 1;
+  margin-bottom: 12px;
+  transition: color 0.3s;
+}
+
+.lp-roi-sub {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.lp-roi-note {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+/* ── CTA form (shared with cta section) ── */
+.lp-cta-form {
+  display: flex;
+  gap: 10px;
+  max-width: 460px;
+  margin: 0 auto;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.lp-cta-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 13px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+  font-family: inherit;
+}
+
+.lp-cta-input:focus { border-color: var(--accent); }
+.lp-cta-input::placeholder { color: var(--muted); }
+
+.lp-cta-signin {
+  display: block;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.lp-cta-signin:hover { color: var(--text); }
+
+.lp-cta-ok {
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 700px) {
+  .lp-roi-inner { grid-template-columns: 1fr; gap: 32px; }
+  .lp-roi-output { border-left: none; border-top: 1px solid var(--border); padding-top: 28px; }
+  .lp-roi-card { padding: 24px; }
+}

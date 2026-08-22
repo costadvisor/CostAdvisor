@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import EvoChart from '../components/EvoChart';
 import FileUpload from '../components/FileUpload';
-import api from '../api';
+import api, { formatApiError } from '../api';
 import exportCsv from '../utils/exportCsv';
 
 export default function Squeeze() {
@@ -26,7 +26,7 @@ export default function Squeeze() {
       volume_projection: volumeProjection,
     })
       .then(({ data }) => { setData(data); setError(null); })
-      .catch(err => setError(err.response?.data?.detail || 'Failed to load'))
+      .catch(err => setError(formatApiError(err)))
       .finally(() => setLoading(false));
   };
 
@@ -61,7 +61,9 @@ export default function Squeeze() {
           )}>Export CSV</button>
         </div>
       </div>
-      <p className="ca-subtitle">{product_name}{supplier_name ? ` \u00B7 ${supplier_name}` : ''} \u00B7 {region}</p>
+      {/* Built from parts: a bare \u00B7 in JSX text renders literally, and an empty
+          segment would otherwise leave a dangling separator. */}
+      <p className="ca-subtitle">{[product_name, supplier_name, region].filter(Boolean).join(' \u00B7 ')}</p>
 
       {/* Controls */}
       <div className="ca-card" style={{ marginBottom: 16 }}>

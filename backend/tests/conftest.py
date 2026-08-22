@@ -104,6 +104,10 @@ def user_factory(db):
     # otherwise tries to null out PK columns on related rows.
     bypass_rls_var.set(True)
     for uid, tid in created:
+        # Clear audit rows this user authored first — impersonation writes a row
+        # with user_id=admin into the *target's* team, so it isn't covered by the
+        # team CASCADE and would otherwise block the users DELETE on its FK.
+        db.execute(text("DELETE FROM audit_logs WHERE user_id = :uid"), {"uid": str(uid)})
         db.execute(text("DELETE FROM teams WHERE id = :tid"), {"tid": str(tid)})
         db.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": str(uid)})
     db.commit()

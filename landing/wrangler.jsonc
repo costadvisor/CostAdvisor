@@ -1,0 +1,12 @@
+{
+  // Cloudflare Workers static assets — deploys landing/ as a static site.
+  // Per-branch worker (matches frontend: web / web-dev):
+  //   dev branch  → costadvisor-landing-dev, custom domain dev.costadvisor.org
+  //   main branch → costadvisor-landing,     custom domain www.costadvisor.org
+  // (custom domains are bound in the Cloudflare dashboard)
+  "name": "costadvisor-landing",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": "."
+  }
+}

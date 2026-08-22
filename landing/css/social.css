@@ -1,0 +1,77 @@
+.lp-social {
+  padding: 120px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.lp-social-headline {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(28px, 3.5vw, 46px);
+  font-weight: 800;
+  letter-spacing: -1px;
+  line-height: 1.1;
+  margin: 14px 0 52px;
+}
+
+.lp-social-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.lp-social-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 36px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  transition: border-color 0.18s;
+}
+
+.lp-social-card:hover {
+  border-color: var(--muted);
+}
+
+.lp-social-card p {
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.8;
+  font-family: 'Syne', sans-serif;
+  font-weight: 400;
+  flex: 1;
+}
+
+.lp-social-card::before {
+  content: '\201C';
+  font-family: 'Syne', sans-serif;
+  font-size: 64px;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 0.6;
+  display: block;
+  opacity: 0.4;
+}
+
+.lp-social-card footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.lp-social-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.lp-social-co {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+@media (max-width: 700px) {
+  .lp-social-grid { grid-template-columns: 1fr; }
+}

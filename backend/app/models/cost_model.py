@@ -26,10 +26,14 @@ class CostModel(Base):
         Integer, ForeignKey("suppliers.id"), nullable=True
     )
     destination_country: Mapped[str | None] = mapped_column(String(64))
-    destination_region: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    region: Mapped[str] = mapped_column(String(20), default="Europe")
+    destination_region: Mapped[str | None] = mapped_column(
+        String(20), ForeignKey("regions.code"), nullable=True
+    )
+    region: Mapped[str] = mapped_column(String(20), ForeignKey("regions.code"), default="Europe")
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     incoterm: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # Scrum 25 — negotiation flag: none / in_negotiation / agreed / under_review
+    negotiation_state: Mapped[str] = mapped_column(String(20), default="none", server_default="none")
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
     )
@@ -91,6 +95,9 @@ class FormulaVersion(Base):
     base_price: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
     base_year: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     base_quarter: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    formula_type: Mapped[str] = mapped_column(String(10), default="simple", server_default="simple")
+    expression: Mapped[str | None] = mapped_column(Text, nullable=True)
+    variables: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     margin_type: Mapped[str] = mapped_column(String(10), default="pct")  # 'pct', 'fixed', 'unknown'
     margin_value: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     incoterm: Mapped[str | None] = mapped_column(String(8), nullable=True)

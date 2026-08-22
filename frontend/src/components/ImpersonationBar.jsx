@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import api from '../api';
 import { useAuth } from '../AuthContext';
+import { useConfirm } from './ConfirmDialog';
 
 export default function ImpersonationBar() {
   const { user, refreshUser } = useAuth();
+  const confirm = useConfirm();
   const [active, setActive] = useState(false);
 
   useEffect(() => {
@@ -13,6 +15,12 @@ export default function ImpersonationBar() {
   if (!active) return null;
 
   const stop = async () => {
+    const ok = await confirm({
+      title: 'Stop impersonation?',
+      message: `You will return to your own admin session and be redirected to the admin console.`,
+      confirmLabel: 'Stop Impersonation',
+    });
+    if (!ok) return;
     try {
       await api.post('/api/admin/stop-impersonate');
       await refreshUser();

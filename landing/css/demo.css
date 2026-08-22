@@ -1,0 +1,121 @@
+.lp-modal-wide {
+  max-width: 520px;
+}
+
+/* Step indicator */
+.lp-demo-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  margin-bottom: 20px;
+  color: var(--muted, #888);
+  font-weight: 500;
+}
+.lp-demo-step { transition: color 0.15s; }
+.lp-demo-step.active { color: var(--accent, #4fffb0); font-weight: 700; }
+.lp-demo-step-sep { color: var(--muted, #888); font-size: 10px; }
+
+/* Calendar */
+.lp-cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.lp-cal-month {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text, #e0e0e0);
+}
+.lp-cal-nav {
+  background: var(--surface2, #1e1e30);
+  border: 1px solid var(--border, #2a2a3e);
+  border-radius: 6px;
+  color: var(--text, #e0e0e0);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 10px;
+  transition: background 0.12s;
+}
+.lp-cal-nav:hover { background: var(--surface3, #28283e); }
+
+.lp-cal {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.lp-cal-dow {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted, #888);
+  padding: 4px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.lp-cal-day {
+  text-align: center;
+  padding: 7px 4px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text, #e0e0e0);
+  background: none;
+  border: 1px solid transparent;
+  transition: background 0.12s, border-color 0.12s;
+  font-family: inherit;
+}
+.lp-cal-day:empty { cursor: default; }
+.lp-cal-day--today { font-weight: 700; color: var(--accent, #4fffb0); }
+.lp-cal-day--disabled {
+  color: var(--muted, #555) !important;
+  cursor: default;
+  pointer-events: none;
+}
+.lp-cal-day--selected {
+  background: var(--accent, #4fffb0) !important;
+  color: #0d0d1a !important;
+  border-color: var(--accent, #4fffb0) !important;
+  font-weight: 700;
+}
+.lp-cal-day:not(.lp-cal-day--disabled):not(:empty):hover {
+  background: var(--surface2, #1e1e30);
+  border-color: var(--border, #2a2a3e);
+}
+
+/* Slot grid */
+.lp-slot-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.lp-slot-btn {
+  background: var(--surface2, #1e1e30);
+  border: 1px solid var(--border, #2a2a3e);
+  border-radius: 8px;
+  color: var(--text, #e0e0e0);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 500;
+  padding: 8px 14px;
+  transition: background 0.12s, border-color 0.12s;
+}
+.lp-slot-btn:hover { background: var(--surface3, #28283e); border-color: var(--accent, #4fffb0); }
+.lp-slot-btn--selected {
+  background: var(--accent, #4fffb0) !important;
+  color: #0d0d1a !important;
+  border-color: var(--accent, #4fffb0) !important;
+  font-weight: 700;
+}
+
+/* Back / nav row */
+.lp-demo-nav {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}

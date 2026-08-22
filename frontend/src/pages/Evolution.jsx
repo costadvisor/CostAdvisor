@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import EvoChart from '../components/EvoChart';
 import { PIE_COLORS, INCOTERMS } from '../utils/constants';
-import api from '../api';
+import api, { formatApiError } from '../api';
 import exportCsv from '../utils/exportCsv';
 
 function qLabel(y, q) { return `Q${q}-${String(y).slice(-2)}`; }
@@ -67,7 +67,7 @@ export default function Evolution() {
           return all;
         });
       })
-      .catch(err => setError(err.response?.data?.detail || 'Failed to load'))
+      .catch(err => setError(formatApiError(err)))
       .finally(() => setLoading(false));
   };
 
@@ -129,11 +129,17 @@ export default function Evolution() {
   if (error) return <div className="ca-page" style={{ color: 'var(--accent2)' }}>Error: {error}</div>;
   if (!data) return null;
 
-  const { periods, product_name, supplier_name, reference_cost, region, currency, unit, incoterm, named_place, normalized_to_incoterm } = data;
+  const { periods, product_name, supplier_name, reference_cost, region, currency, unit, incoterm, named_place, normalized_to_incoterm, data_gaps } = data;
   const theoretical = periods.map(p => p.theoretical);
-  const actual = periods.map(p => p.actual ?? 0);
+  // Pass null through — EvoChart skips null points instead of connecting to zero
+  const actual = periods.map(p => p.actual);
   const periodLabels = periods.map(p => p.period);
   const lastActualPeriod = [...periods].reverse().find(p => p.actual !== null);
+  const hasAnyActual = periods.some(p => p.actual !== null);
+  // Deduplicate data gap component labels for the warning banner
+  const gapComponents = data_gaps?.length
+    ? [...new Set(data_gaps.map(g => g.component_label))]
+    : [];
   const sym = currency === 'EUR' ? '\u20AC' : '$';
 
   // Quarter picker options bounded by available index data
@@ -143,12 +149,20 @@ export default function Evolution() {
 
   return (
     <div className="ca-page ca-fade-in">
+      <nav style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, display: 'flex', gap: 6, alignItems: 'center' }}>
+        <button className="ca-btn-link" style={{ fontSize: 11 }} onClick={() => navigate('/dashboard')}>Dashboard</button>
+        <span>›</span>
+        <button className="ca-btn-link" style={{ fontSize: 11 }} onClick={() => navigate(`/cost-models/${costModelId}`)}>{product_name}</button>
+        <span>›</span>
+        <span>Evolution</span>
+      </nav>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <div className="ca-h1">Cost Evolution</div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}`)}>View Model</button>
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/pricing`)}>Pricing</button>
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/brief`)}>Brief</button>
+          <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/squeeze`)}>Squeeze</button>
           <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => exportCsv(
             `evolution_${product_name}.csv`,
             ['Period', 'Should-Cost', 'Actual', 'Gap', 'Gap %'],
@@ -156,6 +170,21 @@ export default function Evolution() {
           )}>Export CSV</button>
         </div>
       </div>
+      {!hasAnyActual && (
+        <div style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--accent)' }}>
+          No actual prices yet — add them in the{' '}
+          <button className="ca-btn-link" onClick={() => navigate(`/cost-models/${costModelId}/pricing`)}>
+            Pricing tab
+          </button>{' '}
+          to see the gap against your should-cost.
+        </div>
+      )}
+      {gapComponents.length > 0 && (
+        <div style={{ background: 'var(--warn-bg)', border: '1px solid var(--accent3)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--accent3)' }}>
+          Missing index data for: <strong>{gapComponents.join(', ')}</strong>. Those components use their base-period value as a fallback.{' '}
+          <button className="ca-btn-link" onClick={() => navigate('/index-library')}>Configure in Index Library →</button>
+        </div>
+      )}
       <p className="ca-subtitle">
         {product_name}{supplier_name ? ` · ${supplier_name}` : ''} · {region}{incoterm ? ` · ${incoterm}${named_place ? ' ' + named_place : ''}` : ''} · Ref: {sym}{reference_cost?.toFixed(2)}
         {normalized_to_incoterm && (

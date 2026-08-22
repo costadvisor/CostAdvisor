@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import api from '../api';
+import api, { formatApiError } from '../api';
+import { useAlert } from './ConfirmDialog';
 
 // Mirror of backend/app/constants/incoterms.py COST_BUCKETS + labels
 export const COST_BUCKETS = [
@@ -28,6 +29,7 @@ export default function IncotermAdjustments({
   originRegion, destinationRegion, currencySym = '$',
 }) {
   const [loadingDefaults, setLoadingDefaults] = useState(false);
+  const showAlert = useAlert();
   const adj = value || {};
 
   const setBucket = (key, next) => {
@@ -52,7 +54,7 @@ export default function IncotermAdjustments({
 
   const useLaneDefaults = async () => {
     if (!originRegion || !destinationRegion) {
-      alert('Set producing region and destination region first.');
+      showAlert({ title: 'Regions required', message: 'Set producing region and destination region first.' });
       return;
     }
     setLoadingDefaults(true);
@@ -61,7 +63,7 @@ export default function IncotermAdjustments({
         params: { origin_region: originRegion, destination_region: destinationRegion, mode: 'sea' },
       });
       if (!data) {
-        alert('No lane default for this region pair.');
+        showAlert({ title: 'No defaults found', message: 'No lane default for this region pair.' });
         return;
       }
       // Fill buckets we don't already have set.
@@ -71,7 +73,7 @@ export default function IncotermAdjustments({
       });
       onChange(Object.keys(next).length ? next : null);
     } catch (err) {
-      alert('Lane lookup failed: ' + (err.response?.data?.detail || err.message));
+      showAlert({ title: 'Lane lookup failed', message: formatApiError(err) });
     } finally {
       setLoadingDefaults(false);
     }

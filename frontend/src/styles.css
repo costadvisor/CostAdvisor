@@ -83,6 +83,10 @@
 
   --radius: 10px;
   --radius-lg: 14px;
+
+  /* Height of the sticky nav. Wide grids offset their sticky <thead> by this so
+     the first rows don't slide under the nav bar. */
+  --nav-h: 58px;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -94,7 +98,12 @@ body, #root {
   min-height: 100vh;
   font-size: 13px;
   line-height: 1.5;
+  display: flex;
+  flex-direction: column;
 }
+
+/* Ensure root fills body */
+#root { flex: 1; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -138,7 +147,7 @@ body, #root {
 .ca-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
 /* Layout */
-.ca-page { padding: 36px 40px; max-width: 1380px; margin: 0 auto; }
+.ca-page { padding: 36px 40px; max-width: 1380px; margin: 0 auto; min-width: 0; }
 @media (max-width: 900px) { .ca-page { padding: 24px 16px; } }
 
 /* Typography */
@@ -206,7 +215,15 @@ body, #root {
   letter-spacing: 0.5px;
   text-transform: uppercase;
   display: inline-flex; align-items: center; gap: 6px;
+  /* <a class="ca-btn"> download links inherit the UA underline otherwise, so a
+     link-as-button renders underlined next to an identical <button> that doesn't. */
+  text-decoration: none;
 }
+/* There was no :disabled rule at all — a disabled button was pixel-identical to
+   an enabled one, so "Add"/"Analyze" looked broken rather than not-yet-usable. */
+.ca-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.ca-btn:disabled:hover { transform: none; opacity: 0.45; }
+.ca-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ca-btn-primary { background: var(--accent); color: var(--on-accent); }
 .ca-btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
 .ca-btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
@@ -214,6 +231,60 @@ body, #root {
 .ca-btn-danger { background: transparent; border: 1px solid var(--accent2); color: var(--accent2); font-size: 10px; padding: 4px 10px; }
 .ca-btn-danger:hover { background: var(--accent2); color: var(--on-danger); }
 .ca-btn-sm { font-size: 10px; padding: 6px 14px; }
+
+/* Inline link-styled button. Used 15 times across 6 files but never defined, so
+   every one rendered as a raw browser <button>: outset border, #f0f0f0 fill,
+   zero padding — a grey 3D box in the middle of a sentence. */
+.ca-btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--accent4);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: color .15s;
+}
+.ca-btn-link:hover { color: var(--accent); }
+.ca-btn-link:focus-visible { outline: 2px solid var(--accent4); outline-offset: 2px; border-radius: 2px; }
+
+/* Dropdown menu — the app's first shared menu primitive. Every other dropdown
+   is still hand-rolled inline; they can adopt these classes as they're touched.
+   Hover and keyboard focus share one rule so a focused item is never invisible,
+   which is what the previous onMouseEnter/onMouseLeave style-mutation caused. */
+.ca-menu {
+  position: absolute; top: calc(100% + 6px); right: 0;
+  min-width: 216px; z-index: 50; padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-popover);
+}
+.ca-menu-identity {
+  padding: 9px 10px 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.ca-menu-label {
+  padding: 8px 10px 3px;
+  font-size: 9px; font-weight: 700;
+  letter-spacing: 0.5px; text-transform: uppercase;
+  color: var(--muted);
+}
+.ca-menu-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; box-sizing: border-box; text-align: left;
+  background: transparent; border: none; cursor: pointer;
+  padding: 8px 10px; border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--text); text-decoration: none;
+}
+.ca-menu-item:hover { background: var(--surface2); }
+.ca-menu-item:focus-visible { background: var(--surface2); outline: 2px solid var(--accent); outline-offset: -2px; }
+.ca-menu-item[aria-current="page"] { color: var(--accent); }
+.ca-menu-sep { height: 1px; background: var(--border); margin: 5px 0; }
 
 /* Badge */
 .ca-badge {
@@ -229,7 +300,37 @@ body, #root {
   color: var(--muted); padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   text-align: left; font-weight: 500;
+  position: sticky; top: 0; z-index: 1;
+  background: var(--surface);
 }
+/* Wide grids that scroll the PAGE (not an inner box) need the header to stop at
+   the sticky nav rather than the top of the viewport, or the first rows hide
+   underneath it. Opt in per table so short tables keep the simpler behaviour.
+   REQUIRES no scrolling ancestor between the table and the viewport — any
+   `overflow: auto` wrapper becomes the sticky containing block and the offset is
+   then measured from that box instead (see .ca-grid-scroll). */
+.ca-table-sticky th { top: 0; z-index: 2; }
+
+/* Grid wrapper: the scroll container for a wide grid, in BOTH axes.
+ *
+ * This was `overflow: visible` so a sticky `thead` could reach the viewport. But
+ * with nothing clipping it, a table wider than the card simply bled out past the
+ * card's right border — which happened as soon as values grew to 5 digits and the
+ * row width crossed the ~1298px the card allows. Scrolling beats spilling.
+ *
+ * Because an `overflow` container is the sticky containing block, the header now
+ * pins to the top of THIS box rather than the viewport, so the box owns the
+ * vertical scroll too. Sized off the viewport (not the old fixed 440px porthole),
+ * it gives roughly 650px of grid with the header always visible. */
+.ca-grid-scroll {
+  max-width: 100%;
+  overflow: auto;
+  max-height: calc(100vh - var(--nav-h, 58px) - 32px);
+}
+/* Numeric columns carry short mono values and don't need the full gutter. Tighter
+   padding is what keeps the windowed grid inside the page width, so it fits
+   without a horizontal scroller (which would break the sticky header). */
+.ca-table-sticky th.right, .ca-table-sticky td.right { padding-left: 6px; padding-right: 8px; }
 .ca-table td {
   padding: 9px 10px;
   border-bottom: 1px solid var(--row-divider);
@@ -237,6 +338,43 @@ body, #root {
 }
 .ca-table tr:hover td { background: var(--row-stripe); }
 .ca-table th.center, .ca-table td.center { text-align: center; }
+.ca-table th.right, .ca-table td.right { text-align: right; }
+
+/* Row as a control: keyboard-reachable grid rows need a visible focus ring, and
+   the outline must sit inside the cell box or it's clipped by the scroll container. */
+.ca-table tr[role="button"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.ca-table tr[role="button"]:focus:not(:focus-visible) { outline: none; }
+
+/* Editable grid cell. Writing an override is a real mutation, so the cell has to
+   LOOK editable — previously the only hint was `cursor: cell` on hover, leaving
+   thousands of cells one accidental click from a write with nothing to mark them. */
+.ca-cell-edit { cursor: cell; }
+.ca-cell-edit:hover {
+  background: var(--accent4-dim) !important;
+  box-shadow: inset 0 0 0 1px var(--accent4);
+}
+.ca-cell-edit:focus-visible { outline: 2px solid var(--accent4); outline-offset: -2px; }
+
+/* Skeleton — shape of the content, not a spinner over it. */
+.ca-skeleton {
+  background: var(--surface2);
+  border-radius: 4px;
+  animation: skeletonPulse 1.4s ease-in-out infinite;
+}
+@keyframes skeletonPulse { 0%, 100% { opacity: .45; } 50% { opacity: .9; } }
+@media (prefers-reduced-motion: reduce) {
+  .ca-skeleton { animation: none; opacity: .6; }
+}
+
+/* Visually hidden but announced — <caption> and other screen-reader-only text. */
+.ca-sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 
 /* Bars */
 .bar-wrap {
@@ -287,7 +425,7 @@ body, #root {
 .ca-sep { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 
 /* Scroll */
-.ca-scroll-x { overflow-x: auto; }
+.ca-scroll-x { overflow-x: auto; overflow-y: auto; max-height: 440px; max-width: 100%; }
 
 /* Range input */
 input[type=range] { padding: 0; cursor: pointer; accent-color: var(--accent); }
@@ -300,14 +438,35 @@ input[type=range] { padding: 0; cursor: pointer; accent-color: var(--accent); }
 }
 
 /* Animations */
-@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-.ca-fade-in { animation: fadeIn .35s ease-out; }
+/* Page-entry fade. OPACITY ONLY — deliberately no transform.
+ *
+ * This used to be `from { opacity: 0; transform: translateY(8px) }`. A transformed
+ * element becomes the containing block for its `position: fixed` descendants, and
+ * `.ca-fade-in` sits on `.ca-page` in ~30 places with every modal backdrop rendered
+ * inside it. So for the ~150ms the transform was interpolating, every fixed element
+ * on the page resolved its coordinates against the page box instead of the viewport
+ * — measured at `top: 66px` instead of `0` — and then snapped into position when the
+ * animation ended. That was the modal misalignment on page entry.
+ *
+ * There is no way to keep the 8px rise here: any transform (or `translate`,
+ * `filter`, `perspective`, `will-change`, `contain`) on this element re-creates the
+ * containing block, and animating `top`/`margin` instead would thrash layout. If the
+ * rise is ever wanted back, it has to go on an inner wrapper that contains no
+ * fixed-position descendants. */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.ca-fade-in { animation: fadeIn .28s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .ca-fade-in { animation: none; }
+}
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 
 /* Modal */
 .ca-modal-backdrop { position:fixed; inset:0; background:var(--backdrop); z-index:200; display:flex; align-items:center; justify-content:center; }
 .ca-modal { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); max-height:80vh; overflow-y:auto; }
 .ca-modal-header { display:flex; justify-content:space-between; align-items:center; padding:18px 22px; border-bottom:1px solid var(--border); }
+.ca-modal-title { font-family:'Syne',sans-serif; font-weight:700; font-size:15px; }
+.ca-modal-close { background:none; border:none; color:var(--muted); cursor:pointer; font-size:20px; line-height:1; padding:4px; }
+.ca-modal-close:hover { color:var(--text); }
 .ca-modal-body { padding:22px; }
 .ca-modal-footer { padding:14px 22px; border-top:1px solid var(--border); display:flex; gap:10px; justify-content:flex-end; }
 
@@ -550,24 +709,47 @@ input[type=range] { padding: 0; cursor: pointer; accent-color: var(--accent); }
   --pie-9: #c45e3a;
 }
 
+/* @page must be outside @media print for reliable cross-browser support */
+@page {
+  size: A4 portrait;
+  margin: 18mm 15mm;
+}
+
 /* Print styles */
 @media print {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
   body, #root { background: #fff; color: #111; }
   .ca-nav, .ca-no-print { display: none !important; }
   .ca-print-only { display: block !important; }
   .ca-card { border: 1px solid #ddd; background: #fff; box-shadow: none; }
   .ca-metric { border: 1px solid #ddd; background: #fafafa; }
-  .ca-page { padding: 16px; max-width: 100%; }
+  .ca-page { padding: 0; max-width: 100%; }
   .ca-table th, .ca-table td { border-bottom: 1px solid #ddd; }
+  .ca-table th { background: #f5f5f5; }
+  /* Unlock scroll container so SVG charts print in full */
+  .ca-scroll-x { max-height: none !important; overflow: visible !important; overflow-y: visible !important; }
+  .ca-print-page svg { max-width: 100% !important; }
+  /* Direction badges: strip background fill, keep text + left-border stripe */
+  .ca-print-page span[style*="borderLeft"] {
+    background: transparent !important;
+  }
+  /* Verdict card accent border: ensure it prints dark */
+  .ca-print-page .ca-card[style*="borderLeft"] {
+    border-left-color: #111 !important;
+    border-left-width: 3px !important;
+  }
   :root {
     --accent: #0a7c42;
     --accent2: #c0392b;
     --accent3: #b8860b;
-    --accent4: #2a6ebf;
-    --muted: #666;
+    --accent4: #1a5fa8;
+    --muted: #555;
     --text: #111;
     --text-secondary: #444;
     --border: #ddd;
+    --danger-bg: rgba(192,57,43,0.08);
+    --success-bg: rgba(10,124,66,0.08);
+    --neutral-bg: rgba(0,0,0,0.04);
   }
 }
 .ca-print-only { display: none; }

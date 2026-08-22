@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Modal from './Modal';
-import api from '../api';
+import api, { formatApiError } from '../api';
 
 export default function EditCellModal({ isOpen, onClose, cell, teamId, teamSource, periods, onSaved }) {
   const [newValue, setNewValue] = useState('');
@@ -71,7 +71,7 @@ export default function EditCellModal({ isOpen, onClose, cell, teamId, teamSourc
       setMessage({ type: 'success', text: 'Saved.' });
       setTimeout(() => onClose(), 600);
     } catch (err) {
-      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to save.' });
+      setMessage({ type: 'error', text: formatApiError(err) });
     } finally {
       setSaving(false);
     }
@@ -94,7 +94,7 @@ export default function EditCellModal({ isOpen, onClose, cell, teamId, teamSourc
       setMessage({ type: 'success', text: 'Reset to default.' });
       setTimeout(() => onClose(), 600);
     } catch (err) {
-      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to reset.' });
+      setMessage({ type: 'error', text: formatApiError(err) });
     } finally {
       setSaving(false);
     }

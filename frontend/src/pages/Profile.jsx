@@ -1,31 +1,38 @@
 import { useState } from 'react';
-import api from '../api';
+import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { THEMES } from '../utils/theme';
 
 export default function Profile() {
   const { user, refreshUser, setTheme } = useAuth();
   const [displayName, setDisplayName] = useState(user?.display_name || '');
+  const [company, setCompany] = useState(user?.company || '');
   const [savingName, setSavingName] = useState(false);
   const [message, setMessage] = useState(null);
   const [showDelete, setShowDelete] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState('');
 
+  const isImpersonating = document.cookie.split(';').some(c => c.trim().startsWith('ca_impersonating='));
+
   const nameDirty = (displayName || '').trim() !== (user?.display_name || '').trim();
+  const companyDirty = (company || '').trim() !== (user?.company || '').trim();
+  const profileDirty = nameDirty || companyDirty;
 
   const handleSaveName = async () => {
-    const next = (displayName || '').trim();
-    if (!next) {
+    const nextName = (displayName || '').trim();
+    if (!nextName) {
       setMessage({ type: 'error', text: 'Display name cannot be empty.' });
       return;
     }
     setSavingName(true);
     try {
-      await api.put('/auth/me', { display_name: next });
+      const payload = { display_name: nextName };
+      if (companyDirty) payload.company = (company || '').trim() || null;
+      await api.put('/auth/me', payload);
       await refreshUser();
       setMessage({ type: 'success', text: 'Profile updated.' });
     } catch (err) {
-      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to save.' });
+      setMessage({ type: 'error', text: formatApiError(err) });
     } finally {
       setSavingName(false);
     }
@@ -40,7 +47,7 @@ export default function Profile() {
       await api.delete('/api/account');
       window.location.href = '/login';
     } catch (err) {
-      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to delete account.' });
+      setMessage({ type: 'error', text: formatApiError(err) });
     }
   };
 
@@ -48,6 +55,16 @@ export default function Profile() {
     <div className="ca-page ca-fade-in">
       <div className="ca-h1">Profile</div>
       <p className="ca-subtitle">Your personal preferences. Team-level settings live on the Team page.</p>
+
+      {isImpersonating && (
+        <div style={{
+          padding: '10px 16px', borderRadius: 8, marginBottom: 16, fontSize: 12,
+          background: 'var(--accent2-dim)', color: 'var(--accent2)',
+          border: '1px solid var(--danger-bg-strong)',
+        }}>
+          You are currently impersonating another user. Profile edits are disabled until you stop impersonation.
+        </div>
+      )}
 
       {message && (
         <div style={{
@@ -79,18 +96,30 @@ export default function Profile() {
         </div>
 
         <label className="ca-label">Display name</label>
-        <div style={{ display: 'flex', gap: 8, maxWidth: 480 }}>
+        <div style={{ display: 'flex', gap: 8, maxWidth: 480, marginBottom: 12 }}>
           <input
             className="ca-input"
             value={displayName}
             onChange={e => setDisplayName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && nameDirty && handleSaveName()}
+            onKeyDown={e => e.key === 'Enter' && profileDirty && !isImpersonating && handleSaveName()}
             placeholder="Your name"
+            disabled={isImpersonating}
+          />
+        </div>
+        <label className="ca-label">Company</label>
+        <div style={{ display: 'flex', gap: 8, maxWidth: 480 }}>
+          <input
+            className="ca-input"
+            value={company}
+            onChange={e => setCompany(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && profileDirty && !isImpersonating && handleSaveName()}
+            placeholder="Your company name"
+            disabled={isImpersonating}
           />
           <button
             className="ca-btn ca-btn-primary ca-btn-sm"
             onClick={handleSaveName}
-            disabled={!nameDirty || savingName}
+            disabled={!profileDirty || savingName || isImpersonating}
           >
             {savingName ? 'Saving...' : 'Save'}
           </button>
@@ -121,7 +150,7 @@ export default function Profile() {
           For teams with other members, only your membership is removed. This cannot be undone.
         </p>
         {!showDelete ? (
-          <button className="ca-btn-danger" onClick={() => setShowDelete(true)}>
+          <button className="ca-btn-danger" onClick={() => setShowDelete(true)} disabled={isImpersonating}>
             Delete my account
           </button>
         ) : (

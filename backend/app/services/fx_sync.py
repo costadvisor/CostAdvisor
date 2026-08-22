@@ -5,29 +5,25 @@ After FX exchange rate indexes (EUR/USD, GBP/EUR, etc.) are scraped,
 this module copies their values into the fx_rates table so the cost
 engine and portfolio calculations can use them for currency conversion.
 """
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
 from app.models.index_data import CommodityIndex, IndexValue
+from app.models.fx_pair import FxPair
 from app.models.fx_rate import FxRate
-
-
-# Map commodity name to (from_currency, to_currency)
-_FX_PAIR_MAP = {
-    "EUR/USD": ("EUR", "USD"),
-    "GBP/EUR": ("GBP", "EUR"),
-    "CNY/EUR": ("CNY", "EUR"),
-    "JPY/EUR": ("JPY", "EUR"),
-    "IDR/EUR": ("IDR", "EUR"),
-    "PHP/EUR": ("PHP", "EUR"),
-}
 
 
 def sync_fx_rates(db: Session) -> int:
     """
     Copy FX-category index values into the fx_rates table.
+    Pair mapping is now read from the fx_pairs DB table instead of hardcoded.
     Returns the number of rows upserted.
     """
-    # Get all FX-category commodities
+    # Build name→(from, to) map from fx_pairs table
+    pairs = db.query(FxPair).all()
+    pair_map = {p.name: (p.from_currency, p.to_currency) for p in pairs}
+
     fx_commodities = (
         db.query(CommodityIndex)
         .filter(CommodityIndex.category == "FX")
@@ -36,12 +32,11 @@ def sync_fx_rates(db: Session) -> int:
 
     count = 0
     for commodity in fx_commodities:
-        pair = _FX_PAIR_MAP.get(commodity.name)
+        pair = pair_map.get(commodity.name)
         if not pair:
             continue
         from_ccy, to_ccy = pair
 
-        # Get all index values for this FX commodity
         values = (
             db.query(IndexValue)
             .filter(IndexValue.commodity_id == commodity.id)
@@ -58,6 +53,8 @@ def sync_fx_rates(db: Session) -> int:
 
             if existing:
                 existing.rate = iv.value
+                existing.uploaded_at = datetime.now(timezone.utc)
+                existing.uploaded_by = None
             else:
                 db.add(FxRate(
                     from_currency=from_ccy,
@@ -65,8 +62,7 @@ def sync_fx_rates(db: Session) -> int:
                     year=iv.year,
                     quarter=iv.quarter,
                     rate=iv.value,
-                    # Use a system UUID for automated syncs
-                    uploaded_by="00000000-0000-0000-0000-000000000000",
+                    uploaded_by=None,
                 ))
             count += 1
 

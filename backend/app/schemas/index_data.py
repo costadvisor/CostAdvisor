@@ -11,10 +11,49 @@ class CommodityIndexOut(BaseModel):
     unit: str | None
     currency: str | None = None
     category: str | None = None
+    provider: str | None = None
+    frequency: str | None = None
     source_url: str | None = None
     scrape_enabled: bool
+    # Metadata + proxy mapping (Scrum 57)
+    access_tier: str | None = None
+    role: str | None = None
+    retrieval_status: str | None = None
+    free_source_name: str | None = None
+    free_source_url: str | None = None
+    proxy_logic: dict | None = None
+    proxy_for_id: int | None = None
+    # Composite / calculated index (computed live from other indexes)
+    composite_expression: str | None = None
+    composite_variables: dict | None = None
+    # Region a composite is computed for; None = follow the requested region.
+    composite_region: str | None = None
+
+    # Regions this index actually holds values for. NOT a column — the index itself
+    # is deliberately region-agnostic (Scrum 57); region lives on `index_values`.
+    # Surfaced so pickers can tell apart the many indexes whose names differ only
+    # by the region they cover. Populated by the list endpoint; empty elsewhere.
+    regions: list[str] = []
 
     model_config = {"from_attributes": True}
+
+
+class ProxyLogicUpdate(BaseModel):
+    """Admin edit of a commodity index's structured proxy_logic (Scrum 67).
+    `retrieval_status` optional — lets an admin promote a `blocked` index to
+    `good_proxy`/`weak_proxy` once a spec is set. FD-1 (SCRUM-80) executes the spec."""
+    proxy_logic: dict | None = None
+    retrieval_status: str | None = None
+
+
+class CompositeUpdate(BaseModel):
+    """Super-admin edit of a composite/calculated index. `composite_expression` is an
+    advanced expression over `composite_variables` (index/fixed vars). Passing a null
+    or empty expression clears the composite (turns it back into a normal index)."""
+    composite_expression: str | None = None
+    composite_variables: dict | None = None
+    # Region the composite is computed for. None keeps it region-agnostic.
+    composite_region: str | None = None
 
 
 class IndexValueOut(BaseModel):
@@ -33,6 +72,27 @@ class IndexValueOut(BaseModel):
     global_scrape_at: str | None = None  # ISO timestamp of last global scrape
 
     model_config = {"from_attributes": True}
+
+
+class PublicQuarterPoint(BaseModel):
+    year: int
+    quarter: int
+    value: float
+
+
+class IndexValuePublicOut(BaseModel):
+    """Public, no-tenant view of one commodity's recent quarterly series — for the
+    marketing landing page. Platform scraped data only; no overrides, no team context."""
+    commodity_name: str
+    category: str | None = None
+    unit: str | None = None
+    currency: str | None = None
+    source_url: str | None = None
+    region: str
+    points: list[PublicQuarterPoint]  # oldest-first, ready to chart
+    latest: float | None = None
+    prev: float | None = None
+    qoq_pct: float | None = None  # quarter-over-quarter % change of the two most recent points
 
 
 class IndexValueFilter(BaseModel):
@@ -93,6 +153,7 @@ class TeamIndexSourceOut(BaseModel):
     commodity_name: str | None = None
     last_scrape_status: str | None = None  # "ok" | "error" | null
     last_scrape_at: str | None = None
+    scrape_warning: str | None = None  # set when auto-scrape on save fails
 
     model_config = {"from_attributes": True}
 

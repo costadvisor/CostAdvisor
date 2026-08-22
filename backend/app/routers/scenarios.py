@@ -5,23 +5,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
 from app.models.scenario import CostScenario
-from app.models.team import TeamMembership
 from app.routers.auth import get_current_user
 from app.schemas.scenario import ScenarioCreate, ScenarioOut
 from app.services.audit import log_event
+from app.services.permissions import require_permission
 
 router = APIRouter()
-
-
-def require_team_access(db: Session, user: User, team_id: uuid.UUID):
-    if user.is_super_admin:
-        return
-    membership = db.query(TeamMembership).filter(
-        TeamMembership.user_id == user.id,
-        TeamMembership.team_id == team_id,
-    ).first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Not a member of this team")
 
 
 @router.get("/", response_model=list[ScenarioOut])
@@ -32,7 +21,7 @@ def list_scenarios(
 ):
     """Return system scenarios + team-specific scenarios (only if caller is a member)."""
     if team_id is not None:
-        require_team_access(db, current_user, team_id)
+        require_permission(db, current_user, team_id, "scenarios.view")
         query = db.query(CostScenario).filter(
             (CostScenario.is_system == True) |  # noqa: E712
             (CostScenario.team_id == team_id)
@@ -49,7 +38,7 @@ def create_scenario(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_team_access(db, current_user, team_id)
+    require_permission(db, current_user, team_id, "scenarios.edit")
     scenario = CostScenario(
         name=data.name,
         description=data.description,
@@ -61,8 +50,8 @@ def create_scenario(
     db.flush()
     log_event(db, team_id, current_user.id, "create", "scenario", str(scenario.id),
               new_value={"name": data.name})
+    db.expunge(scenario)
     db.commit()
-    db.refresh(scenario)
     return scenario
 
 
@@ -78,7 +67,7 @@ def delete_scenario(
     if scenario.is_system:
         raise HTTPException(status_code=400, detail="Cannot delete system scenarios")
     if scenario.team_id is not None:
-        require_team_access(db, current_user, scenario.team_id)
+        require_permission(db, current_user, scenario.team_id, "scenarios.delete")
         log_event(db, scenario.team_id, current_user.id, "delete", "scenario", str(scenario.id),
                   previous_value={"name": scenario.name})
     db.delete(scenario)

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Dark rounded background -->
+  <rect width="32" height="32" rx="7" fill="#0a0c10"/>
+  <!--
+    C letterform as a donut ring with the right side open.
+    Outer arc r=13, inner arc r=8, opening angle ±30° from horizontal right.
+    Outer top  (13·cos330°, 13·sin330°) = (27.3, 9.5)
+    Outer bot  = (27.3, 22.5)
+    Inner top  (8·cos330°, 8·sin330°)  = (22.9, 12)
+    Inner bot  = (22.9, 20)
+  -->
+  <path
+    d="M27.3,9.5 A13,13 0 1,0 27.3,22.5 L22.9,20 A8,8 0 1,1 22.9,12 Z"
+    fill="#4fffb0"
+  />
+</svg>

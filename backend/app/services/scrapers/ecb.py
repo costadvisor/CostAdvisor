@@ -59,8 +59,20 @@ class ECBScraper(BaseScraper):
             # Match Obs elements in any namespace
             if not (tag.endswith("}Obs") or tag == "Obs"):
                 continue
-            period = elem.get("TIME_PERIOD", "")
-            value = elem.get("OBS_VALUE")
+            # ECB SDMX-ML uses child elements ObsDimension/ObsValue
+            period = ""
+            value = None
+            for child in elem:
+                local = child.tag.split("}")[-1]
+                if local == "ObsDimension":
+                    period = child.get("value", "")
+                elif local == "ObsValue":
+                    value = child.get("value")
+            # Fallback: some SDMX flavours put period/value as attributes
+            if not period:
+                period = elem.get("TIME_PERIOD", "")
+            if value is None:
+                value = elem.get("OBS_VALUE")
             if not period or value is None:
                 continue
             try:
@@ -132,3 +144,39 @@ class ECBPHPEURScraper(ECBScraper):
     """PHP/EUR exchange rate (quarterly average)."""
     commodity_name = "PHP/EUR"
     CURRENCY_CODE = "PHP"
+
+
+class ECBUrlScraper(ECBScraper):
+    """ECB scraper that accepts a full quarterly URL from fx_pairs.scrape_url."""
+
+    def __init__(self, commodity_name: str, scrape_url: str):
+        # Skip super().__init__() signature that calls commodity_name attribute
+        self.commodity_name = commodity_name
+        self.scrape_url = scrape_url
+
+    async def fetch(self) -> list[ScrapedDataPoint]:
+        params = {"lastNObservations": "24"}
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(self.scrape_url, params=params)
+            resp.raise_for_status()
+        return self._parse_sdmx_ml(resp.text)
+
+
+class ECBLiveScraper:
+    """Fetch a single daily (live) rate from ECB by swapping Q→D in the pair's scrape_url."""
+
+    def __init__(self, pair_name: str, quarterly_url: str):
+        self.pair_name = pair_name
+        # Replace Q frequency with D to get daily data
+        self.daily_url = quarterly_url.replace("/Q.", "/D.")
+
+    async def fetch_live(self) -> float | None:
+        params = {"lastNObservations": "1"}
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(self.daily_url, params=params)
+                resp.raise_for_status()
+            points = ECBScraper._parse_sdmx_ml(resp.text)
+            return float(points[-1].value) if points else None
+        except Exception:
+            return None

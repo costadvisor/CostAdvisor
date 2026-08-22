@@ -1,20 +1,30 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { OVC_ITEMS, RM_ITEMS, PIE_COLORS, INCOTERMS } from '../utils/constants';
 import DonutChart from '../components/DonutChart';
 import IncotermAdjustments from '../components/IncotermAdjustments';
-import api from '../api';
-
-const REGIONS = ['Europe', 'NA', 'Asia', 'Latam'];
+import RegionSelect from '../components/RegionSelect';
+import api, { formatApiError } from '../api';
+import { useConfirm, useAlert } from '../components/ConfirmDialog';
+import { useToast } from '../components/Toast';
 import { useAuth } from '../AuthContext';
+import { stripReservedFns } from '../utils/formulaFns';
+import NumberInput from '../components/NumberInput';
+import { normalizeVarMap } from '../components/VariableMapEditor';
+import IndexCombo from '../components/IndexCombo';
 
 export default function CostModelBuilder() {
   const { costModelId } = useParams();
   const navigate = useNavigate();
-  const { activeTeamId } = useAuth();
+  const { activeTeamId, user } = useAuth();
+  const confirm = useConfirm();
+  const showAlert = useAlert();
+  const { addToast } = useToast();
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(!costModelId);
   const [editing, setEditing] = useState(!costModelId);
+  const [loadError, setLoadError] = useState(null);
+  const [justCreated, setJustCreated] = useState(false);
 
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -47,6 +57,26 @@ export default function CostModelBuilder() {
   const [landedCostAdjustments, setLandedCostAdjustments] = useState(null);
   const [components, setComponents] = useState([]);
 
+  // Advanced formula mode
+  const [formulaMode, setFormulaMode] = useState('simple'); // 'simple' | 'advanced'
+  const [advancedExpression, setAdvancedExpression] = useState('');
+  const [advancedVars, setAdvancedVars] = useState({});
+  const [showLandedCost, setShowLandedCost] = useState(true);
+
+  // Formula template picker / saver
+  const [formulaTemplates, setFormulaTemplates] = useState([]);
+  const [showTemplateDropdown, setShowTemplateDropdown] = useState(false);
+  // Last catalog template loaded into this model — persisted onto the product
+  // at save so future models for it auto-load the same recipe.
+  const loadedTemplateIdRef = useRef(null);
+  const autoLoadedTemplateRef = useRef(false);
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+  const [canEditPlatform, setCanEditPlatform] = useState(false);
+  const templateDropdownRef = useRef(null);
+
+  const membership = user?.memberships?.find(m => m.team_id === activeTeamId);
+  const canEditTeam = membership?.role === 'owner' || membership?.role === 'admin';
+
   // Snapshot for cancel
   const [snapshot, setSnapshot] = useState(null);
 
@@ -63,13 +93,56 @@ export default function CostModelBuilder() {
     Promise.all([
       api.get('/api/products', { params: { team_id: activeTeamId } }),
       api.get('/api/suppliers', { params: { team_id: activeTeamId } }),
+      // Full index list — catalog formulas reference commodities that don't
+      // carry values yet; filtering to has_data would blank their rows.
       api.get('/api/indexes'),
-    ]).then(([pRes, sRes, iRes]) => {
+      api.get('/api/formulas/', { params: { team_id: activeTeamId } }).catch(() => ({ data: [] })),
+      api.get('/api/formulas/can-edit-platform').catch(() => ({ data: { can_edit: false } })),
+    ]).then(([pRes, sRes, iRes, tmplRes, permRes]) => {
       setProducts(pRes.data);
       setSuppliers(sRes.data);
       setCommodities(iRes.data);
-    }).catch(console.error);
+      setFormulaTemplates(tmplRes.data);
+      setCanEditPlatform(permRes.data.can_edit);
+    }).catch(() => setLoadError('Could not load reference data. Try reloading the page.'));
   }, [activeTeamId]);
+
+  // Preselect a product when arriving from Portfolio's draft "Complete formula"
+  // action (route state), so completing a draft attaches to the existing product
+  // instead of creating a near-duplicate.
+  useEffect(() => {
+    if (costModelId) return;
+    const pid = location.state?.productId;
+    if (!pid || !products.length) return;
+    const p = products.find(pp => pp.id === pid);
+    if (!p) return;
+    setProductId(p.id);
+    setProductName(p.name);
+    setFormula(p.formula || '');
+    setUnit(p.unit || 'kg');
+    setActiveContent(p.active_content ?? 0.65);
+    // A catalog-linked product auto-loads its recipe at this model's region
+    // (Scrum 58: "creating a product auto-loads the template by formula × region").
+    if (p.formula_template_id && formulaTemplates.length && !autoLoadedTemplateRef.current) {
+      const t = formulaTemplates.find(ft => ft.id === p.formula_template_id);
+      if (t) {
+        autoLoadedTemplateRef.current = true;
+        loadTemplateIntoModel(t);
+      }
+    }
+  }, [products, formulaTemplates, location.state, costModelId]);
+
+  // Close template dropdown on outside click
+  useEffect(() => {
+    if (!showTemplateDropdown) return;
+    const handler = (e) => {
+      if (templateDropdownRef.current && !templateDropdownRef.current.contains(e.target)) {
+        setShowTemplateDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showTemplateDropdown]);
 
   // Load existing cost model
   useEffect(() => {
@@ -105,6 +178,11 @@ export default function CostModelBuilder() {
             commodity_id: c.commodity_id,
             parts: Math.round(c.weight * 100),
           })));
+          const ftype = currentFv.formula_type || 'simple';
+          setFormulaMode(ftype);
+          setAdvancedExpression(currentFv.expression || '');
+          setAdvancedVars(currentFv.variables || {});
+          setShowLandedCost(ftype === 'simple');
         }
         setLoaded(true);
       })
@@ -118,7 +196,9 @@ export default function CostModelBuilder() {
     : (marginValue || 0);
   const componentPool = basePrice - marginCost;
   const marginWeight = basePrice > 0 ? marginCost / basePrice : 0;
-  const isValid = totalParts > 0 && componentPool >= 0 && basePrice > 0;
+  const isValid = formulaMode === 'advanced'
+    ? (advancedExpression.trim().length > 0 && basePrice > 0)
+    : (totalParts > 0 && componentPool >= 0 && basePrice > 0);
 
   const compWeight = (c) => totalParts > 0 ? (c.parts / totalParts) * (componentPool / basePrice) : 0;
   const compCost = (c) => totalParts > 0 ? (c.parts / totalParts) * componentPool : 0;
@@ -145,6 +225,7 @@ export default function CostModelBuilder() {
       supplierId, newSupplierName, destinationCountry, destinationRegion, region, currency, incoterm,
       basePrice, baseYear, baseQuarter, marginType, marginValue,
       versionIncoterm, versionNamedPlace, landedCostAdjustments,
+      formulaMode, advancedExpression, advancedVars: { ...advancedVars }, showLandedCost,
       components: components.map(c => ({ ...c })),
     });
     setEditing(true);
@@ -171,6 +252,10 @@ export default function CostModelBuilder() {
       setVersionIncoterm(snapshot.versionIncoterm);
       setVersionNamedPlace(snapshot.versionNamedPlace);
       setLandedCostAdjustments(snapshot.landedCostAdjustments);
+      setFormulaMode(snapshot.formulaMode);
+      setAdvancedExpression(snapshot.advancedExpression);
+      setAdvancedVars(snapshot.advancedVars);
+      setShowLandedCost(snapshot.showLandedCost);
       setComponents(snapshot.components);
     }
     setEditing(false);
@@ -187,8 +272,15 @@ export default function CostModelBuilder() {
           formula,
           active_content: activeContent,
           unit,
+          // Remember which catalog recipe priced this product, so its next
+          // cost model auto-loads the template at that model's region.
+          formula_template_id: loadedTemplateIdRef.current || null,
         });
         pid = data.id;
+      } else if (loadedTemplateIdRef.current) {
+        await api.put(`/api/products/${pid}`, {
+          formula_template_id: loadedTemplateIdRef.current,
+        });
       }
 
       let sid = supplierId || null;
@@ -202,6 +294,28 @@ export default function CostModelBuilder() {
         setNewSupplierName('');
       }
 
+      const formulaPayload = {
+        formula_type: formulaMode,
+        base_price: basePrice,
+        base_year: baseYear,
+        base_quarter: baseQuarter,
+        incoterm: versionIncoterm || null,
+        named_place: versionNamedPlace || null,
+        landed_cost_adjustments: landedCostAdjustments,
+        ...(formulaMode === 'advanced' ? {
+          expression: advancedExpression,
+          variables: normalizeVarMap(advancedVars),
+        } : {
+          margin_type: marginType,
+          margin_value: marginValue,
+          components: components.map(c => ({
+            label: c.label,
+            commodity_name: c.commodity_name || null,
+            weight: totalParts > 0 ? c.parts / totalParts : 0,
+          })),
+        }),
+      };
+
       const payload = {
         product_id: pid,
         supplier_id: sid ? Number(sid) : null,
@@ -210,21 +324,7 @@ export default function CostModelBuilder() {
         region,
         currency,
         incoterm: incoterm || null,
-        formula: {
-          base_price: basePrice,
-          base_year: baseYear,
-          base_quarter: baseQuarter,
-          margin_type: marginType,
-          margin_value: marginValue,
-          incoterm: versionIncoterm || null,
-          named_place: versionNamedPlace || null,
-          landed_cost_adjustments: landedCostAdjustments,
-          components: components.map(c => ({
-            label: c.label,
-            commodity_name: c.commodity_name || null,
-            weight: totalParts > 0 ? c.parts / totalParts : 0,
-          })),
-        },
+        formula: formulaPayload,
       };
 
       if (costModelId) {
@@ -244,20 +344,40 @@ export default function CostModelBuilder() {
           currency,
           incoterm: incoterm || null,
         });
-        await api.post(`/api/cost-models/${costModelId}/renegotiate`, payload.formula);
+        await api.post(`/api/cost-models/${costModelId}/renegotiate`, formulaPayload);
         setEditing(false);
         setSnapshot(null);
       } else {
         const { data } = await api.post(`/api/cost-models?team_id=${activeTeamId}`, payload);
         setEditing(false);
         setSnapshot(null);
+        setJustCreated(true);
         navigate(`/cost-models/${data.id}`, { replace: true });
       }
     } catch (err) {
-      alert('Error saving: ' + (err.response?.data?.detail || err.message));
+      showAlert({ title: 'Error saving', message: formatApiError(err) });
     } finally {
       setSaving(false);
     }
+  };
+
+  const detectVars = () => {
+    const expr = advancedExpression.replace(/[[\]]/g, '').replace(/\s/g, '');
+    const tokens = expr.match(/[a-zA-Z_][a-zA-Z0-9_]*/g) || [];
+    const unique = stripReservedFns([...new Set(tokens)]);
+    setAdvancedVars(prev => {
+      const next = {};
+      unique.forEach(name => { next[name] = prev[name] || { type: 'fixed', value: 0 }; });
+      return next;
+    });
+  };
+
+  const updateAdvancedVar = (name, key, val) => {
+    setAdvancedVars(prev => ({ ...prev, [name]: { ...prev[name], [key]: val } }));
+  };
+
+  const removeAdvancedVar = (name) => {
+    setAdvancedVars(prev => { const n = { ...prev }; delete n[name]; return n; });
   };
 
   const updateComp = (i, key, val) => {
@@ -268,12 +388,74 @@ export default function CostModelBuilder() {
   const addComp = () => setComponents([...components, { label: '', commodity_name: '', parts: 0 }]);
   const removeComp = (i) => setComponents(components.filter((_, j) => j !== i));
 
+  // Instantiate a library template into this model. Weighted templates load
+  // as simple-mode components (the resolver flattens chained formulas and
+  // picks the recipe for this model's region); expression templates keep the
+  // existing advanced-mode prefill.
+  const loadTemplateIntoModel = async (t) => {
+    setShowTemplateDropdown(false);
+    try {
+      const res = await api.get(`/api/formulas/${t.id}/resolve`, {
+        params: { team_id: activeTeamId, region },
+      });
+      const { lines, coverage: cov, region_resolved } = res.data;
+      loadedTemplateIdRef.current = t.id;
+      if (lines.length > 0) {
+        setFormulaMode('simple');
+        setShowLandedCost(true);
+        setComponents(lines.map(l => ({
+          label: l.name,
+          commodity_name: l.commodity_name || '',
+          commodity_id: l.commodity_id,
+          parts: Math.round(l.effective_weight_pct * 10) / 10,
+        })));
+        // Catalog recipes carry margin as a fixed line inside the weights —
+        // a separate margin on top would double-count it.
+        setMarginType('pct');
+        setMarginValue(0);
+        if (cov) {
+          if (cov.base_price != null) setBasePrice(cov.base_price);
+          if (cov.base_year) { setBaseYear(cov.base_year); setBaseQuarter(cov.base_quarter); }
+          if (cov.currency) setCurrency(cov.currency);
+        }
+        const fallback = region_resolved && region_resolved !== region
+          ? ` — pricing from ${region_resolved}` : '';
+        addToast(`Loaded ${t.name}${fallback}`, 'success');
+        if (cov?.needs_review) {
+          addToast('This recipe is a placeholder pending expert review — treat the number as directional', 'info');
+        }
+        if (!cov || cov.base_price == null) {
+          addToast('No base price anchor on this formula — set the starting price manually', 'info');
+        }
+      } else {
+        setFormulaMode('advanced');
+        setAdvancedExpression(t.expression || '');
+        setAdvancedVars(t.variables || {});
+      }
+    } catch (e) {
+      addToast(formatApiError(e), 'error');
+    }
+  };
+
   if (!loaded) return <div className="ca-page" style={{ color: 'var(--muted)' }}>Loading...</div>;
 
   const sym = currency === 'EUR' ? '\u20AC' : '$';
 
   return (
+    <>
     <div className="ca-page ca-fade-in">
+      {loadError && (
+        <div style={{ background: 'var(--accent2-dim)', border: '1px solid var(--accent2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--accent2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>{loadError}</span>
+          <button className="ca-btn-icon" onClick={() => setLoadError(null)} style={{ marginLeft: 12, fontWeight: 700 }}>✕</button>
+        </div>
+      )}
+      {justCreated && (
+        <div style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--accent)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Model created. Next: go to <button className="ca-btn-link" onClick={() => navigate(`/cost-models/${costModelId}/pricing`)}>Pricing</button> to upload actual prices and see the gap.</span>
+          <button className="ca-btn-icon" onClick={() => setJustCreated(false)} style={{ marginLeft: 12, fontWeight: 700 }}>✕</button>
+        </div>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <div className="ca-h1">
           {!costModelId ? 'New Cost Model' : editing ? 'Edit Cost Model' : 'Cost Model'}
@@ -289,6 +471,9 @@ export default function CostModelBuilder() {
               </button>
               <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/brief`)}>
                 Brief
+              </button>
+              <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/squeeze`)}>
+                Squeeze
               </button>
             </>
           )}
@@ -334,16 +519,11 @@ export default function CostModelBuilder() {
                 </div>
                 <div>
                   <label className="ca-label">Destination Region</label>
-                  <select className="ca-select" value={destinationRegion} onChange={e => setDestinationRegion(e.target.value)}>
-                    <option value="">—</option>
-                    {REGIONS.map(r => <option key={r}>{r}</option>)}
-                  </select>
+                  <RegionSelect value={destinationRegion} onChange={setDestinationRegion} includeEmpty />
                 </div>
                 <div>
                   <label className="ca-label">Producing Region</label>
-                  <select className="ca-select" value={region} onChange={e => setRegion(e.target.value)}>
-                    {REGIONS.map(r => <option key={r}>{r}</option>)}
-                  </select>
+                  <RegionSelect value={region} onChange={setRegion} />
                 </div>
                 <div>
                   <label className="ca-label">Currency</label>
@@ -391,7 +571,30 @@ export default function CostModelBuilder() {
 
           {/* Formula */}
           <div className="ca-card">
-            <div className="ca-card-title">Formula Components</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div className="ca-card-title" style={{ marginBottom: 0 }}>Formula</div>
+              {editing && (
+                <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
+                  {['simple', 'advanced'].map(mode => (
+                    <button
+                      key={mode}
+                      onClick={() => { setFormulaMode(mode); setShowLandedCost(mode === 'simple'); }}
+                      style={{
+                        padding: '4px 14px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
+                        background: formulaMode === mode ? 'var(--accent)' : 'transparent',
+                        color: formulaMode === mode ? '#fff' : 'var(--muted)',
+                        textTransform: 'capitalize',
+                      }}
+                    >{mode}</button>
+                  ))}
+                </div>
+              )}
+              {!editing && (
+                <span style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                  {formulaMode}
+                </span>
+              )}
+            </div>
             {editing ? (
               <>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
@@ -430,50 +633,254 @@ export default function CostModelBuilder() {
                 </div>
 
                 <div className="ca-card" style={{ marginBottom: 12, padding: 10, background: 'var(--bg)' }}>
-                  <div className="ca-card-title" style={{ fontSize: 11, marginBottom: 8 }}>Landed-Cost Adjustments</div>
-                  <IncotermAdjustments
-                    value={landedCostAdjustments}
-                    onChange={setLandedCostAdjustments}
-                    editing={true}
-                    originRegion={region}
-                    destinationRegion={destinationRegion}
-                    currencySym={sym}
-                  />
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 60px 80px 90px 30px', gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Label</span>
-                  <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Reference Index</span>
-                  <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Parts</span>
-                  <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', textAlign: 'right' }}>Weight</span>
-                  <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', textAlign: 'right' }}>Est. Cost</span>
-                  <span></span>
-                </div>
-                {components.map((c, i) => (
-                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 60px 80px 90px 30px', gap: 8, marginBottom: 6, alignItems: 'center' }}>
-                    <input className="ca-input" value={c.label} placeholder="Component label"
-                      onChange={e => updateComp(i, 'label', e.target.value)} style={{ padding: '7px 8px' }} />
-                    <select className="ca-select" value={c.commodity_name || ''} style={{ fontSize: 11, padding: '7px 8px' }}
-                      onChange={e => updateComp(i, 'commodity_name', e.target.value)}>
-                      <option value="">None</option>
-                      {commodities.map(ci => <option key={ci.id} value={ci.name}>{ci.name}</option>)}
-                    </select>
-                    <input className="ca-input" type="number" value={c.parts || 0} min={0}
-                      style={{ textAlign: 'right', padding: '7px 6px' }}
-                      onChange={e => updateComp(i, 'parts', +e.target.value)} />
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>
-                      {(compWeight(c) * 100).toFixed(1)}%
-                    </span>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right' }}>
-                      {sym}{compCost(c).toFixed(3)}
-                    </span>
-                    <button className="ca-btn-danger" onClick={() => removeComp(i)}>x</button>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: showLandedCost ? 8 : 0 }}>
+                    <div className="ca-card-title" style={{ fontSize: 11, marginBottom: 0 }}>Landed-Cost Adjustments</div>
+                    {formulaMode === 'advanced' && (
+                      <span
+                        onClick={() => setShowLandedCost(v => !v)}
+                        style={{ fontSize: 10, color: 'var(--muted)', cursor: 'pointer', userSelect: 'none', letterSpacing: '0.04em' }}
+                      >
+                        {showLandedCost ? '▲ hide' : '▼ ex-works'}
+                      </span>
+                    )}
                   </div>
-                ))}
+                  {showLandedCost ? (
+                    <IncotermAdjustments
+                      value={landedCostAdjustments}
+                      onChange={setLandedCostAdjustments}
+                      editing={true}
+                      originRegion={region}
+                      destinationRegion={destinationRegion}
+                      currencySym={sym}
+                    />
+                  ) : null}
+                </div>
 
-                <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ marginTop: 6, marginBottom: 12 }} onClick={addComp}>
-                  + Add Component
-                </button>
+                {formulaMode === 'simple' ? (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <label className="ca-label" style={{ marginBottom: 0 }}>Components</label>
+                      <div style={{ position: 'relative' }} ref={templateDropdownRef}>
+                        <button
+                          className="ca-btn ca-btn-ghost ca-btn-sm"
+                          style={{ fontSize: 10 }}
+                          onClick={() => setShowTemplateDropdown(v => !v)}
+                        >
+                          Load Catalog Formula ▾
+                        </button>
+                        {showTemplateDropdown && (
+                          <div style={{
+                            position: 'absolute', right: 0, top: 'calc(100% + 4px)',
+                            background: 'var(--surface)', border: '1px solid var(--border)',
+                            borderRadius: 8, boxShadow: 'var(--shadow-popover)',
+                            zIndex: 50, minWidth: 280, maxHeight: 300, overflowY: 'auto', padding: 6,
+                          }}>
+                            {formulaTemplates.length === 0 ? (
+                              <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--muted)' }}>
+                                No templates available
+                              </div>
+                            ) : (
+                              [
+                                { label: 'Default', items: formulaTemplates.filter(t => !t.team_id) },
+                                { label: 'Team', items: formulaTemplates.filter(t => t.team_id) },
+                              ].map(group => group.items.length > 0 && (
+                                <div key={group.label}>
+                                  <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '6px 8px 2px' }}>
+                                    {group.label}
+                                  </div>
+                                  {group.items.map(t => (
+                                    <button
+                                      key={t.id}
+                                      style={{
+                                        display: 'block', width: '100%', textAlign: 'left',
+                                        padding: '6px 10px', borderRadius: 4, fontSize: 12,
+                                        border: 'none', cursor: 'pointer', background: 'transparent',
+                                        color: 'var(--text)',
+                                      }}
+                                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface2)'; }}
+                                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                                      onClick={() => loadTemplateIntoModel(t)}
+                                    >
+                                      <span style={{ fontWeight: 600 }}>{t.name}</span>
+                                      {t.code && (
+                                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--muted)', marginLeft: 6 }}>
+                                          {t.code}
+                                        </span>
+                                      )}
+                                      {t.description && (
+                                        <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>{t.description}</span>
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 60px 80px 90px 30px', gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Label</span>
+                      <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Reference Index</span>
+                      <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Parts</span>
+                      <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', textAlign: 'right' }}>Weight</span>
+                      <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', textAlign: 'right' }}>Est. Cost</span>
+                      <span></span>
+                    </div>
+                    {components.map((c, i) => (
+                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 60px 80px 90px 30px', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                        <input className="ca-input" value={c.label} placeholder="Component label"
+                          onChange={e => updateComp(i, 'label', e.target.value)} style={{ padding: '7px 8px' }} />
+                        <select className="ca-select" value={c.commodity_name || ''} style={{ fontSize: 11, padding: '7px 8px' }}
+                          onChange={e => updateComp(i, 'commodity_name', e.target.value)}>
+                          <option value="">None</option>
+                          {commodities.map(ci => <option key={ci.id} value={ci.name}>{ci.name}</option>)}
+                        </select>
+                        <NumberInput value={c.parts} allowNegative={false}
+                          style={{ textAlign: 'right', padding: '7px 6px' }}
+                          onChange={v => updateComp(i, 'parts', v ?? 0)} />
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>
+                          {(compWeight(c) * 100).toFixed(1)}%
+                        </span>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right' }}>
+                          {sym}{compCost(c).toFixed(3)}
+                        </span>
+                        <button className="ca-btn-danger" onClick={() => removeComp(i)}>x</button>
+                      </div>
+                    ))}
+                    <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ marginTop: 6, marginBottom: 12 }} onClick={addComp}>
+                      + Add Component
+                    </button>
+                    {components.length === 0 && (
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+                        Add at least one commodity component to enable should-cost calculation.
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ marginBottom: 12 }}>
+                    {/* Expression label row with Load Template dropdown */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <label className="ca-label" style={{ marginBottom: 0 }}>Expression</label>
+                      <div style={{ position: 'relative' }} ref={templateDropdownRef}>
+                        <button
+                          className="ca-btn ca-btn-ghost ca-btn-sm"
+                          style={{ fontSize: 10 }}
+                          onClick={() => setShowTemplateDropdown(v => !v)}
+                        >
+                          Load Template ▾
+                        </button>
+                        {showTemplateDropdown && (
+                          <div style={{
+                            position: 'absolute', right: 0, top: 'calc(100% + 4px)',
+                            background: 'var(--surface)', border: '1px solid var(--border)',
+                            borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+                            zIndex: 50, minWidth: 260, maxHeight: 300, overflowY: 'auto', padding: 6,
+                          }}>
+                            {formulaTemplates.length === 0 ? (
+                              <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--muted)' }}>
+                                No templates available
+                              </div>
+                            ) : (
+                              [
+                                { label: 'Default', items: formulaTemplates.filter(t => !t.team_id) },
+                                { label: 'Team', items: formulaTemplates.filter(t => t.team_id) },
+                              ].map(group => group.items.length > 0 && (
+                                <div key={group.label}>
+                                  <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '6px 8px 2px' }}>
+                                    {group.label}
+                                  </div>
+                                  {group.items.map(t => (
+                                    <button
+                                      key={t.id}
+                                      style={{
+                                        display: 'block', width: '100%', textAlign: 'left',
+                                        padding: '6px 10px', borderRadius: 4, fontSize: 12,
+                                        border: 'none', cursor: 'pointer', background: 'transparent',
+                                        color: 'var(--text)',
+                                      }}
+                                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface2)'; }}
+                                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                                      onClick={() => loadTemplateIntoModel(t)}
+                                    >
+                                      <span style={{ fontWeight: 600 }}>{t.name}</span>
+                                      {t.description && (
+                                        <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>{t.description}</span>
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
+                      The result is the should-cost directly — embed any margin in the expression. Use square or round brackets.
+                    </div>
+                    <textarea
+                      className="ca-input"
+                      rows={3}
+                      style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, width: '100%', resize: 'vertical', boxSizing: 'border-box' }}
+                      placeholder="e.g. 0.92*[(0.75*ACN+1500)*(1-h)+h*AA/0.8]+FC"
+                      value={advancedExpression}
+                      onChange={e => setAdvancedExpression(e.target.value)}
+                    />
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8, marginBottom: 14, alignItems: 'center' }}>
+                      <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={detectVars}>
+                        Detect Variables
+                      </button>
+                      {advancedExpression.trim() && (
+                        <button
+                          className="ca-btn ca-btn-ghost ca-btn-sm"
+                          style={{ fontSize: 10, color: 'var(--accent)' }}
+                          onClick={() => setShowSaveTemplate(true)}
+                        >
+                          Save as Template
+                        </button>
+                      )}
+                    </div>
+                    {Object.keys(advancedVars).length > 0 && (
+                      <div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '90px 90px 1fr 28px', gap: 8, marginBottom: 6 }}>
+                          <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Variable</span>
+                          <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Type</span>
+                          <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Index / Value</span>
+                          <span></span>
+                        </div>
+                        {Object.entries(advancedVars).map(([name, def]) => (
+                          <div key={name} style={{ display: 'grid', gridTemplateColumns: '90px 90px 1fr 28px', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600 }}>{name}</span>
+                            <select className="ca-select" value={def.type || 'fixed'} style={{ fontSize: 11, padding: '6px 8px' }}
+                              onChange={e => updateAdvancedVar(name, 'type', e.target.value)}>
+                              <option value="fixed">Fixed</option>
+                              <option value="index">Index</option>
+                            </select>
+                            {def.type === 'index' ? (
+                              <IndexCombo
+                                value={def.commodity_id ?? null}
+                                commodities={commodities}
+                                onChange={id => updateAdvancedVar(name, 'commodity_id', id)}
+                              />
+                            ) : (
+                              <NumberInput
+                                style={{ padding: '6px 8px', fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
+                                value={def.value}
+                                onChange={v => updateAdvancedVar(name, 'value', v)} />
+                            )}
+                            <button className="ca-btn-danger" onClick={() => removeAdvancedVar(name)}>x</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {Object.keys(advancedVars).length === 0 && advancedExpression.trim() && (
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                        Click "Detect Variables" to extract variable names from your expression.
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
               <>
@@ -494,95 +901,132 @@ export default function CostModelBuilder() {
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 80px 90px', gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Label</span>
-                  <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Reference Index</span>
-                  <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', textAlign: 'right' }}>Weight</span>
-                  <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', textAlign: 'right' }}>Est. Cost</span>
-                </div>
-                {components.map((c, i) => (
-                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 80px 90px', gap: 8, marginBottom: 6, alignItems: 'center' }}>
-                    <span style={{ fontSize: 13 }}>{c.label}</span>
-                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>{c.commodity_name || '\u2014'}</span>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>
-                      {(compWeight(c) * 100).toFixed(1)}%
-                    </span>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right' }}>
-                      {sym}{compCost(c).toFixed(3)}
-                    </span>
+                {formulaMode === 'advanced' ? (
+                  <div>
+                    <label className="ca-label">Expression</label>
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, background: 'var(--bg)', borderRadius: 6, padding: '8px 10px', marginBottom: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                      {advancedExpression || '\u2014'}
+                    </div>
+                    {Object.keys(advancedVars).length > 0 && (
+                      <>
+                        <div style={{ display: 'grid', gridTemplateColumns: '90px 90px 1fr', gap: 8, marginBottom: 4 }}>
+                          <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Variable</span>
+                          <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Type</span>
+                          <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Index / Value</span>
+                        </div>
+                        {Object.entries(advancedVars).map(([name, def]) => {
+                          const idxName = def.type === 'index'
+                            ? (commodities.find(c => c.id === def.commodity_id)?.name || `ID ${def.commodity_id}`)
+                            : null;
+                          return (
+                            <div key={name} style={{ display: 'grid', gridTemplateColumns: '90px 90px 1fr', gap: 8, marginBottom: 5, alignItems: 'center' }}>
+                              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600 }}>{name}</span>
+                              <span style={{ fontSize: 11, color: 'var(--muted)' }}>{def.type === 'index' ? 'Index' : 'Fixed'}</span>
+                              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>
+                                {def.type === 'index' ? idxName : String(def.value)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
                   </div>
-                ))}
+                ) : (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 80px 90px', gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Label</span>
+                      <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Reference Index</span>
+                      <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', textAlign: 'right' }}>Weight</span>
+                      <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', textAlign: 'right' }}>Est. Cost</span>
+                    </div>
+                    {components.map((c, i) => (
+                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 80px 90px', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                        <span style={{ fontSize: 13 }}>{c.label}</span>
+                        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{c.commodity_name || '\u2014'}</span>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>
+                          {(compWeight(c) * 100).toFixed(1)}%
+                        </span>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right' }}>
+                          {sym}{compCost(c).toFixed(3)}
+                        </span>
+                      </div>
+                    ))}
+                  </>
+                )}
               </>
             )}
 
-            <hr className="ca-sep" />
-
-            {/* Margin section */}
-            <div className="ca-card-title" style={{ marginTop: 8 }}>Margin</div>
-            {editing ? (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 70px 70px', gap: 12, marginBottom: 12, alignItems: 'flex-end' }}>
-                <div>
-                  <label className="ca-label">Type</label>
-                  <select className="ca-select" value={marginType} onChange={e => setMarginType(e.target.value)}>
-                    <option value="pct">Percentage</option>
-                    <option value="fixed">Fixed Amount</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="ca-label">{marginType === 'pct' ? 'Margin %' : `Fixed Amount (${sym})`}</label>
-                  <input className="ca-input" type="number" value={marginValue} min={0}
-                    step={marginType === 'pct' ? 1 : 0.01}
-                    onChange={e => setMarginValue(+e.target.value)} />
-                </div>
-                <div>
-                  <label className="ca-label" style={{ fontSize: 9 }}>Weight</label>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, textAlign: 'right', padding: '7px 0', color: 'var(--muted)' }}>
-                    {(marginWeight * 100).toFixed(1)}%
+            {formulaMode === 'simple' && (
+              <>
+                <hr className="ca-sep" />
+                <div className="ca-card-title" style={{ marginTop: 8 }}>Margin</div>
+                {editing ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 70px 70px', gap: 12, marginBottom: 12, alignItems: 'flex-end' }}>
+                    <div>
+                      <label className="ca-label">Type</label>
+                      <select className="ca-select" value={marginType} onChange={e => setMarginType(e.target.value)}>
+                        <option value="pct">Percentage</option>
+                        <option value="fixed">Fixed Amount</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="ca-label">{marginType === 'pct' ? 'Margin %' : `Fixed Amount (${sym})`}</label>
+                      <input className="ca-input" type="number" value={marginValue} min={0}
+                        step={marginType === 'pct' ? 1 : 0.01}
+                        onChange={e => setMarginValue(+e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="ca-label" style={{ fontSize: 9 }}>Weight</label>
+                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, textAlign: 'right', padding: '7px 0', color: 'var(--muted)' }}>
+                        {(marginWeight * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                    <div>
+                      <label className="ca-label" style={{ fontSize: 9 }}>Est. Cost</label>
+                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, textAlign: 'right', padding: '7px 0' }}>
+                        {sym}{marginCost.toFixed(3)}
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div>
-                  <label className="ca-label" style={{ fontSize: 9 }}>Est. Cost</label>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, textAlign: 'right', padding: '7px 0' }}>
-                    {sym}{marginCost.toFixed(3)}
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 70px 70px', gap: 12, marginBottom: 12, alignItems: 'flex-end' }}>
+                    <div>
+                      <label className="ca-label">Type</label>
+                      <div style={{ fontSize: 13, padding: '7px 0' }}>{marginType === 'pct' ? 'Percentage' : 'Fixed Amount'}</div>
+                    </div>
+                    <div>
+                      <label className="ca-label">Value</label>
+                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, padding: '7px 0' }}>
+                        {marginType === 'pct' ? `${marginValue}%` : `${sym}${marginValue}`}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="ca-label" style={{ fontSize: 9 }}>Weight</label>
+                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, textAlign: 'right', padding: '7px 0', color: 'var(--muted)' }}>
+                        {(marginWeight * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                    <div>
+                      <label className="ca-label" style={{ fontSize: 9 }}>Est. Cost</label>
+                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, textAlign: 'right', padding: '7px 0' }}>
+                        {sym}{marginCost.toFixed(3)}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 70px 70px', gap: 12, marginBottom: 12, alignItems: 'flex-end' }}>
-                <div>
-                  <label className="ca-label">Type</label>
-                  <div style={{ fontSize: 13, padding: '7px 0' }}>{marginType === 'pct' ? 'Percentage' : 'Fixed Amount'}</div>
-                </div>
-                <div>
-                  <label className="ca-label">Value</label>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, padding: '7px 0' }}>
-                    {marginType === 'pct' ? `${marginValue}%` : `${sym}${marginValue}`}
+                )}
+                {editing && componentPool < 0 && (
+                  <div style={{ fontSize: 11, color: 'var(--accent2)', marginBottom: 8 }}>
+                    Margin exceeds total price.
                   </div>
-                </div>
-                <div>
-                  <label className="ca-label" style={{ fontSize: 9 }}>Weight</label>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, textAlign: 'right', padding: '7px 0', color: 'var(--muted)' }}>
-                    {(marginWeight * 100).toFixed(1)}%
-                  </div>
-                </div>
-                <div>
-                  <label className="ca-label" style={{ fontSize: 9 }}>Est. Cost</label>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, textAlign: 'right', padding: '7px 0' }}>
-                    {sym}{marginCost.toFixed(3)}
-                  </div>
-                </div>
-              </div>
+                )}
+              </>
             )}
 
-            {editing && componentPool < 0 && (
-              <div style={{ fontSize: 11, color: 'var(--accent2)', marginBottom: 8 }}>
-                Margin exceeds total price.
-              </div>
-            )}
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: 'var(--bg)', borderRadius: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: 'var(--bg)', borderRadius: 8, marginTop: 8 }}>
               <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                Components: {sym}{componentPool >= 0 ? componentPool.toFixed(3) : '\u2014'} + Margin: {sym}{marginCost.toFixed(3)}
+                {formulaMode === 'advanced'
+                  ? `Base price anchor: ${sym}${basePrice.toFixed(3)} - should-cost from expression`
+                  : `Components: ${sym}${componentPool >= 0 ? componentPool.toFixed(3) : '—'} + Margin: ${sym}${marginCost.toFixed(3)}`}
               </span>
               <span style={{
                 fontFamily: "'Syne', sans-serif", fontSize: 16, fontWeight: 700,
@@ -642,24 +1086,33 @@ export default function CostModelBuilder() {
             <div style={{ marginTop: 4, fontSize: 11, color: 'var(--muted)' }}>
               per {unit} · {region}
             </div>
-            <hr className="ca-sep" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 20, fontWeight: 700, color: 'var(--accent3)' }}>
-                  {sym}{componentPool >= 0 ? componentPool.toFixed(3) : '\u2014'}
+            {formulaMode === 'simple' ? (
+              <>
+                <hr className="ca-sep" />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 20, fontWeight: 700, color: 'var(--accent3)' }}>
+                      {sym}{componentPool >= 0 ? componentPool.toFixed(3) : '\u2014'}
+                    </div>
+                    <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Indexed Cost</div>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 20, fontWeight: 700, color: 'var(--accent2)' }}>
+                      {sym}{marginCost.toFixed(3)}
+                    </div>
+                    <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Margin</div>
+                  </div>
                 </div>
-                <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Indexed Cost</div>
+              </>
+            ) : (
+              <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
+                Should-cost computed from expression at runtime.
               </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 20, fontWeight: 700, color: 'var(--accent2)' }}>
-                  {sym}{marginCost.toFixed(3)}
-                </div>
-                <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Margin</div>
-              </div>
-            </div>
+            )}
           </div>
 
-          {/* Donut chart */}
+          {/* Donut chart — simple mode only; advanced formulas have no component breakdown */}
+          {formulaMode === 'simple' ? (
           <div className="ca-card">
             <div className="ca-card-title">Cost Composition</div>
             <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
@@ -684,6 +1137,14 @@ export default function CostModelBuilder() {
               </div>
             </div>
           </div>
+          ) : (
+          <div className="ca-card">
+            <div className="ca-card-title">Cost Composition</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', padding: '4px 0' }}>
+              No breakdown available — the expression evaluates directly to a should-cost value.
+            </div>
+          </div>
+          )}
 
           {costModelId && (
             <VersionHistory costModelId={costModelId} editing={editing} onLoadVersion={(v) => {
@@ -701,8 +1162,111 @@ export default function CostModelBuilder() {
                 commodity_id: c.commodity_id,
                 parts: Math.round(c.weight * 100),
               })));
+              const vtype = v.formula_type || 'simple';
+              setFormulaMode(vtype);
+              setAdvancedExpression(v.expression || '');
+              setAdvancedVars(v.variables || {});
+              setShowLandedCost(vtype === 'simple');
             }} />
           )}
+        </div>
+      </div>
+    </div>
+
+    {showSaveTemplate && (
+      <SaveTemplateModal
+        expression={advancedExpression}
+        variables={advancedVars}
+        activeTeamId={activeTeamId}
+        canEditPlatform={canEditPlatform}
+        canEditTeam={canEditTeam}
+        addToast={addToast}
+        onClose={() => setShowSaveTemplate(false)}
+        onSaved={(t) => {
+          setFormulaTemplates(prev => [...prev, t]);
+          setShowSaveTemplate(false);
+        }}
+      />
+    )}
+    </>
+  );
+}
+
+function SaveTemplateModal({ expression, variables, activeTeamId, canEditPlatform, canEditTeam, addToast, onClose, onSaved }) {
+  const showScopeToggle = canEditPlatform && canEditTeam;
+  const defaultScope = !canEditTeam && canEditPlatform ? 'platform' : 'team';
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [scope, setScope] = useState(defaultScope);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!name.trim()) { addToast('Name is required', 'error'); return; }
+    setSaving(true);
+    try {
+      const res = await api.post('/api/formulas/', {
+        team_id: scope === 'platform' ? null : activeTeamId,
+        name: name.trim(),
+        description: description.trim() || null,
+        expression,
+        variables: Object.keys(variables).length > 0 ? normalizeVarMap(variables) : null,
+      });
+      addToast('Saved to Formula Library', 'success');
+      onSaved(res.data);
+    } catch (e) {
+      addToast(e?.response?.data?.detail || 'Save failed', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200,
+    }}>
+      <div style={{
+        background: 'var(--surface)', borderRadius: 12, padding: 28,
+        width: '100%', maxWidth: 440, boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+        margin: '0 16px',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Save as Template</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--muted)' }}>✕</button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <label className="ca-label">Name *</label>
+            <input className="ca-input" value={name} onChange={e => setName(e.target.value)} placeholder="Template name" autoFocus />
+          </div>
+          <div>
+            <label className="ca-label">Description</label>
+            <input className="ca-input" value={description} onChange={e => setDescription(e.target.value)} placeholder="Optional description" />
+          </div>
+          {showScopeToggle && (
+            <div>
+              <label className="ca-label">Scope</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {['team', 'platform'].map(s => (
+                  <button key={s} onClick={() => setScope(s)} style={{
+                    padding: '5px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                    border: `1px solid ${scope === s ? 'var(--accent)' : 'var(--border)'}`,
+                    background: scope === s ? 'var(--accent)' : 'transparent',
+                    color: scope === s ? '#fff' : 'var(--text)',
+                    fontWeight: scope === s ? 600 : 400,
+                  }}>
+                    {s === 'platform' ? 'Default (all teams)' : 'Team only'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 20 }}>
+          <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="ca-btn ca-btn-primary ca-btn-sm" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
         </div>
       </div>
     </div>
@@ -712,6 +1276,8 @@ export default function CostModelBuilder() {
 function VersionHistory({ costModelId, editing, onLoadVersion }) {
   const [versions, setVersions] = useState([]);
   const [open, setOpen] = useState(false);
+  const confirm = useConfirm();
+  const showAlert = useAlert();
 
   const fetchVersions = () => {
     api.get(`/api/cost-models/${costModelId}/versions`)
@@ -721,11 +1287,16 @@ function VersionHistory({ costModelId, editing, onLoadVersion }) {
 
   useEffect(fetchVersions, [costModelId]);
 
-  const deleteVersion = (v) => {
-    if (!confirm(`Delete formula for Q${v.base_quarter}-${v.base_year}?`)) return;
+  const deleteVersion = async (v) => {
+    const ok = await confirm({
+      title: `Delete formula for Q${v.base_quarter}-${v.base_year}?`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     api.delete(`/api/cost-models/${costModelId}/versions/${v.id}`)
       .then(fetchVersions)
-      .catch(err => alert('Error: ' + (err.response?.data?.detail || err.message)));
+      .catch(err => showAlert({ title: 'Error', message: formatApiError(err) }));
   };
 
   if (versions.length === 0) return null;

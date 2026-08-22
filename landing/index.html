@@ -1,0 +1,2279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>CostAdvisor — Procurement Cost Intelligence</title>
+  <meta name="description" content="Know what your products should cost before your supplier tells you. Should-cost models from live commodity indices — for procurement teams in chemicals, paper, food &amp; beverage, and more." />
+  <link rel="canonical" href="https://www.costadvisor.org/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.costadvisor.org/" />
+  <meta property="og:title" content="CostAdvisor — Procurement Cost Intelligence" />
+  <meta property="og:description" content="Know if your supplier's price increase is justified — before you negotiate." />
+  <meta property="og:image" content="https://www.costadvisor.org/og-cover.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="CostAdvisor — know what your products should cost. A StaminaChem company." />
+  <meta name="twitter:image" content="https://www.costadvisor.org/og-cover.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="CostAdvisor — Procurement Cost Intelligence" />
+  <meta name="twitter:description" content="Should-cost models. Live market indices. AI negotiation briefs." />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- Non-render-blocking font load: preload + swap media on load; <noscript> fallback -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" /></noscript>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"CostAdvisor","url":"https://www.costadvisor.org/","applicationCategory":"BusinessApplication","operatingSystem":"Web","description":"Buyer-side should-cost intelligence for procurement teams.","publisher":{"@type":"Organization","name":"StaminaChem","url":"https://staminachem.com/","email":"laurent.thomas@staminachem.com","address":{"@type":"PostalAddress","streetAddress":"Schubertring 14/1, Stock/1","postalCode":"1010","addressLocality":"Wien","addressCountry":"AT"}}}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
+    {"@type":"Question","name":"What does CostAdvisor do?","acceptedAnswer":{"@type":"Answer","text":"CostAdvisor builds buyer-side should-cost models: decompose a product into raw-material components, link each to a live commodity index, and calculate what it should cost today — then compare against your supplier's price to quantify the negotiation gap."}},
+    {"@type":"Question","name":"Is my data secure?","acceptedAnswer":{"@type":"Answer","text":"Yes. Every tenant is isolated at the database level via Postgres row-level security. Data is encrypted at rest (AES-256) and in transit (TLS 1.2+), and all mutations are audit-logged."}},
+    {"@type":"Question","name":"Where is my data stored?","acceptedAnswer":{"@type":"Answer","text":"On EU (Frankfurt) Postgres. Account data is kept for your subscription term; on deletion, personal data is removed within 30 days."}},
+    {"@type":"Question","name":"Do you use my data to train AI?","acceptedAnswer":{"@type":"Answer","text":"No. AI narratives run on a self-hosted model. No data is sent to OpenAI or any third-party AI provider."}},
+    {"@type":"Question","name":"Who owns my cost models and briefs?","acceptedAnswer":{"@type":"Answer","text":"You do. Your cost models, uploaded data, and negotiation briefs remain your intellectual property."}},
+    {"@type":"Question","name":"How do I get access?","acceptedAnswer":{"@type":"Answer","text":"CostAdvisor is currently invite-only. Request access with your work email and we'll review and reach out within 48 hours."}}
+  ]}</script>
+
+<style>
+/* ── Reset & tokens ─────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#eef2f5;--surface:#ffffff;--surface2:#eef3f5;
+  --glass:rgba(255,255,255,.82);--border:#dbe3e8;
+  --blue:#00A99D;--teal:#00c8bc;--green:#10B981;
+  --amber:#c8911a;--red:#d64545;--purple:#7c5cbf;
+  --ink:#062a26;--ink2:#0a3a34;  /* deep teal for dark contrast bands */
+  --text:#0f2228;--muted:#54666d;--dim:#7c8b91;
+  --font-display:'Space Grotesk',system-ui,sans-serif;
+  --font-sans:'Inter',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',monospace;
+  --radius:16px;--radius-sm:9px;
+  --shadow-sm:0 1px 3px rgba(8,40,36,.06),0 1px 2px rgba(8,40,36,.04);
+  --shadow:0 6px 22px rgba(8,40,36,.08),0 2px 6px rgba(8,40,36,.05);
+  --shadow-lg:0 18px 48px rgba(8,40,36,.13),0 6px 16px rgba(8,40,36,.07);
+  --safe-top:env(safe-area-inset-top,0px);
+  --safe-bottom:env(safe-area-inset-bottom,0px);
+}
+html{scroll-behavior:smooth;color-scheme:light}
+body{background:var(--bg);color:var(--text);font-family:var(--font-sans);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+h1,h2,h3,h4,h5,h6,.nav-wordmark{font-family:var(--font-display);letter-spacing:-.02em}
+a{color:inherit;text-decoration:none}
+button{cursor:pointer;font-family:inherit}
+img,svg{display:block;max-width:100%}
+input,textarea,select{
+  font-family:var(--font-sans);background:var(--surface2);
+  border:1px solid var(--border);color:var(--text);
+  border-radius:var(--radius-sm);padding:10px 14px;font-size:14px;
+  width:100%;outline:none;transition:border-color .2s
+}
+input:focus,textarea:focus{border-color:var(--blue)}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:4px}
+button:focus-visible,a:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+.skip-link{position:absolute;left:-9999px;top:0;z-index:10000;background:var(--blue);color:#fff;padding:10px 16px;border-radius:0 0 8px 0;font-weight:600;text-decoration:none}
+.skip-link:focus{left:0}
+
+/* ── Glass / skeuo ──────────────────────────────────────── */
+/* Glass: reserved for nav only (One Glass Rule). On cards it degrades to a clean white surface. */
+.glass{
+  background:var(--glass);
+  -webkit-backdrop-filter:saturate(1.4) blur(12px);backdrop-filter:saturate(1.4) blur(12px);
+  border:1px solid var(--border);
+  box-shadow:var(--shadow-sm)
+}
+/* Modern flat card (was skeuomorphic) — clean surface + soft layered shadow */
+.skeuo{
+  background:var(--surface);
+  box-shadow:var(--shadow-sm);
+  border:1px solid var(--border);
+  transition:box-shadow .2s ease,transform .2s ease
+}
+
+/* ── Icons (stroke set, replaces emoji) ─────────────────── */
+.ic{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:block}
+.security-tile-icon,.legal-card-icon,.fd3-icon,.fd3-item-icon{color:var(--blue)}
+.security-tile-icon .ic{width:26px;height:26px}
+.legal-card-icon .ic{width:22px;height:22px}
+.hwb1-icon .ic,.fd3-icon .ic{width:26px;height:26px}
+.fd3-item-icon .ic{width:18px;height:18px}
+.hwb1-card--blue .hwb1-icon{color:var(--blue)}
+.hwb1-card--green .hwb1-icon{color:var(--green)}
+.hwb1-card--amber .hwb1-icon{color:var(--amber)}
+.modal-success-icon{color:var(--green)}
+.modal-success-icon .ic{width:46px;height:46px;margin:0 auto}
+
+/* ── Decorative chemistry motifs (distinct from the hero hex lattice) ── */
+.mol-deco{position:absolute;pointer-events:none;z-index:0;color:var(--blue);opacity:.13;fill:none;stroke:currentColor}
+.mol-deco circle{fill:currentColor;stroke:none}
+.mol-deco .bond{stroke-width:1.6}
+.mol-deco .orbit{stroke-width:1.4;fill:none}
+#security{position:relative;overflow:hidden}
+#security .container{position:relative;z-index:1}
+#cta{position:relative;overflow:hidden}
+#cta .container{position:relative;z-index:1}
+.mol-tr{top:-40px;right:-30px;width:360px;height:auto}
+.mol-bl{bottom:-50px;left:-40px;width:300px;height:auto;opacity:.1}
+@media(max-width:760px){.mol-deco{display:none}}
+
+/* ── Buttons ────────────────────────────────────────────── */
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 22px;border-radius:10px;font-size:14px;font-weight:600;border:none;transition:all .18s ease;white-space:nowrap}
+.btn:disabled,button:disabled{opacity:.55;cursor:not-allowed}
+.btn-spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:btnspin .7s linear infinite;vertical-align:-2px;margin-right:7px}
+@keyframes btnspin{to{transform:rotate(360deg)}}
+/* utility text colours — replace scattered inline style="color:var(--…)" */
+.text-pos{color:var(--green)}.text-neg{color:var(--red)}.text-muted{color:var(--muted)}
+.btn-primary{background:var(--blue);color:#fff;box-shadow:0 0 0 1px rgba(0,169,157,.25),0 4px 16px rgba(0,169,157,.3),inset 0 1px 0 rgba(255,255,255,.18)}
+.btn-primary:hover{background:#009990;box-shadow:0 0 0 1px rgba(0,169,157,.4),0 6px 24px rgba(0,169,157,.4),inset 0 1px 0 rgba(255,255,255,.2);transform:translateY(-1px)}
+.btn-primary:active{transform:translateY(1px);box-shadow:0 2px 8px rgba(0,169,157,.3)}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text);backdrop-filter:none}
+.btn-ghost:hover{background:rgba(0,169,157,.07);border-color:var(--blue);color:var(--blue)}
+.btn-lg{padding:14px 28px;font-size:15px;border-radius:12px}
+
+/* ── Layout ─────────────────────────────────────────────── */
+section{padding:96px 0}
+.container{max-width:1180px;margin:0 auto;padding:0 24px}
+.section-label{font-family:var(--font-mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--blue);margin-bottom:12px}
+.section-title{font-size:clamp(28px,4vw,42px);font-weight:800;line-height:1.15;margin-bottom:16px;text-wrap:balance}
+.section-sub{font-size:16px;color:var(--muted);max-width:560px;line-height:1.7;text-wrap:pretty}
+
+/* ── Progress bar ───────────────────────────────────────── */
+#lpProgress{position:fixed;top:0;left:0;width:100%;height:2px;background:linear-gradient(90deg,var(--blue),var(--teal));transform-origin:left;transform:scaleX(0);z-index:9999;transition:transform .05s linear}
+
+/* ── Nav ────────────────────────────────────────────────── */
+.nav{position:fixed;top:0;left:0;right:0;z-index:900;backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);background:rgba(232,236,241,.92);border-bottom:1px solid var(--border);box-shadow:0 1px 0 rgba(0,0,0,.06);transition:box-shadow .2s ease;padding-top:var(--safe-top)}
+.nav.scrolled{box-shadow:0 2px 20px rgba(0,0,0,.09)}
+.nav-inner{max-width:1180px;margin:0 auto;padding:0 24px;height:64px;display:flex;align-items:center;gap:32px}
+.nav-logo{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.nav-logomark{width:34px;height:34px;border-radius:9px;overflow:hidden;flex-shrink:0;box-shadow:0 3px 10px rgba(0,169,157,.34),inset 0 1px 0 rgba(255,255,255,.22)}
+.nav-logomark svg{display:block;width:100%;height:100%}
+.nav-wordmark{font-size:16px;font-weight:700;letter-spacing:-.015em}
+.nav-wordmark b{font-weight:800}
+.nav-wordmark .wm-light{font-weight:500;opacity:.85}
+.nav-links{display:flex;align-items:center;gap:28px;flex:1;justify-content:center}
+.nav-links a{font-size:13px;font-weight:500;color:var(--muted);transition:color .15s}
+.nav-links a:hover{color:var(--text)}
+.nav-actions{display:flex;align-items:center;gap:10px}
+.nav-burger{display:none;background:none;border:1px solid var(--border);border-radius:8px;padding:0;color:var(--text);font-size:18px;line-height:1;min-width:44px;min-height:44px;align-items:center;justify-content:center}
+@media(max-width:768px){
+  .nav-links,.nav-actions .btn-ghost{display:none}
+  .nav-burger{display:flex}
+}
+.nav-mobile{display:none;flex-direction:column;gap:4px;padding:12px 24px 20px;border-top:1px solid var(--border);background:rgba(232,236,241,.97)}
+.nav-mobile.open{display:flex}
+.nav-mobile a{font-size:14px;font-weight:500;color:var(--muted);padding:10px 0;border-bottom:1px solid var(--border);transition:color .15s}
+.nav-mobile a:hover{color:var(--text)}
+.nav-mobile a:last-child{border-bottom:none}
+
+/* ── Hero ───────────────────────────────────────────────── */
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:calc(120px + var(--safe-top)) 0 60px;position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;top:-200px;right:-200px;width:700px;height:700px;border-radius:50%;background:radial-gradient(circle,rgba(0,169,157,.10) 0%,transparent 70%);pointer-events:none}
+.hero::after{content:'';position:absolute;bottom:-100px;left:-100px;width:500px;height:500px;border-radius:50%;background:radial-gradient(circle,rgba(16,185,129,.06) 0%,transparent 70%);pointer-events:none}
+.hero-grid{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center}
+@media(max-width:900px){.hero-grid{grid-template-columns:1fr}}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;background:rgba(0,169,157,.1);border:1px solid rgba(0,169,157,.25);border-radius:20px;padding:6px 14px;font-size:12px;color:var(--blue);font-family:var(--font-mono);font-weight:500;margin-bottom:28px;width:fit-content}
+.hero-badge-dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 5px var(--green)}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(1.3)}}
+.hero h1{font-size:clamp(32px,5vw,56px);font-weight:800;line-height:1.1;margin-bottom:24px;letter-spacing:-.02em;text-wrap:balance}
+.hero h1 span{color:var(--blue)}
+.hero-sub{font-size:17px;color:var(--muted);line-height:1.7;margin-bottom:36px;max-width:480px}
+.hero-actions{display:flex;gap:12px;flex-wrap:wrap}
+.hero-stats{display:flex;gap:32px;margin-top:40px;flex-wrap:wrap}
+.hero-stat{display:flex;flex-direction:column}
+.hero-stat-val{font-size:26px;font-weight:800;font-family:var(--font-mono);color:var(--blue)}
+.hero-stat-label{font-size:11px;color:var(--dim);font-family:var(--font-mono);letter-spacing:.5px}
+
+/* ── Hero spatial mockup ─────────────────────────────────── */
+.hero-mockup-wrap{perspective:900px;display:flex;justify-content:center;align-items:center}
+@media(max-width:900px){.hero-mockup-wrap{margin-top:40px}}
+@media(max-width:900px){.hero-mockup{transform:none!important;max-width:100%}}
+.hero-mockup{border-radius:18px;padding:20px;transform:perspective(900px) rotateX(8deg) rotateY(-6deg);transform-origin:center center;transition:transform .5s cubic-bezier(.23,1,.32,1);width:100%;max-width:480px;background:var(--surface);box-shadow:var(--shadow-lg);border:1px solid var(--border);position:relative;overflow:hidden}
+.hero-mockup::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--blue),var(--teal))}
+.hero-mockup:hover{transform:perspective(900px) rotateX(5deg) rotateY(-3deg)}
+.hero-mockup:hover{transform:perspective(900px) rotateX(0) rotateY(0) translateY(-4px)}
+.hero-mockup-bar{display:flex;align-items:center;gap:6px;margin-bottom:16px}
+.hero-mockup-dot{width:10px;height:10px;border-radius:50%}
+.hero-mockup-title{font-size:11px;font-family:var(--font-mono);color:var(--dim);margin-left:8px}
+.mockup-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.mockup-label{font-size:11px;color:var(--muted);font-family:var(--font-mono)}
+.mockup-val{font-size:13px;font-weight:600;font-family:var(--font-mono)}
+.mockup-gap-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-family:var(--font-mono);font-weight:700;background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.25)}
+.mockup-chart-area{margin-top:14px;border-radius:10px;background:var(--surface2);padding:12px}
+.mockup-chart-legend{display:flex;gap:16px;margin-bottom:8px}
+.mockup-legend-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)}
+.mockup-legend-line{width:16px;height:2px;border-radius:1px}
+.mockup-chart-labels{display:flex;justify-content:space-between;font-size:9px;color:var(--dim);font-family:var(--font-mono);margin-top:6px}
+.mockup-metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.mockup-metric{background:rgba(0,169,157,.07);border:1px solid var(--border);border-radius:8px;padding:10px 12px}
+.mockup-metric-label{font-size:9px;color:var(--dim);font-family:var(--font-mono);margin-bottom:4px}
+.mockup-metric-val{font-size:15px;font-weight:700;font-family:var(--font-mono)}
+
+/* ── Ticker ─────────────────────────────────────────────── */
+.ticker-wrap{background:rgba(0,0,0,.03);border-top:1px solid var(--border);border-bottom:1px solid var(--border);overflow:hidden;padding:12px 0;margin-top:56px;min-height:44px}
+.ticker-inner{display:flex;gap:48px;width:max-content;animation:ticker 28s linear infinite}
+@keyframes ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.ticker-item{display:flex;align-items:center;gap:10px;white-space:nowrap}
+.ticker-name{font-size:12px;font-family:var(--font-mono);color:var(--muted)}
+.ticker-val{font-size:13px;font-family:var(--font-mono);font-weight:600}
+.ticker-chg{font-size:11px;font-family:var(--font-mono);font-weight:600;padding:2px 7px;border-radius:4px}
+.chg-up{background:rgba(16,185,129,.12);color:var(--green)}
+.chg-dn{background:rgba(239,68,68,.12);color:var(--red)}
+
+/* ── Market pulse ────────────────────────────────────────── */
+.pulse-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-top:48px}
+@media(max-width:1100px){.pulse-grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:640px){.pulse-grid{grid-template-columns:1fr 1fr}}
+.pulse-card{position:relative;border-radius:16px;padding:20px 20px 14px;transition:transform .12s ease-out,box-shadow .3s ease}
+.pulse-card:hover{box-shadow:var(--shadow);transform:translateY(-2px)}
+/* periodic-element style chemical-formula badge */
+.pulse-formula{position:absolute;top:14px;right:14px;font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--blue);background:rgba(0,169,157,.10);border:1px solid rgba(0,169,157,.22);border-radius:7px;padding:3px 8px;line-height:1.2}
+.pulse-card-name{font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:6px;letter-spacing:.5px}
+.pulse-card-val{font-size:22px;font-weight:700;font-family:var(--font-mono);margin-bottom:2px}
+.pulse-card-unit{font-size:10px;color:var(--dim);font-family:var(--font-mono)}
+.pulse-card-chg{display:inline-block;margin-top:4px;padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono);font-weight:700}
+.pulse-canvas-wrap{margin-top:12px;height:60px}
+.pulse-canvas-wrap canvas{height:60px!important}
+
+/* ── FX dashboard ────────────────────────────────────────── */
+.fx-inner{display:grid;grid-template-columns:200px 1fr;gap:28px;align-items:start;margin-top:48px}
+@media(max-width:768px){.fx-inner{grid-template-columns:1fr}}
+.fx-pair-tabs{display:flex;flex-direction:column;gap:8px}
+@media(max-width:768px){.fx-pair-tabs{flex-direction:row;flex-wrap:wrap}}
+.fx-tab{padding:11px 14px;border-radius:10px;font-size:12px;font-family:var(--font-mono);font-weight:600;border:1px solid var(--border);background:transparent;color:var(--muted);text-align:left;transition:all .18s}
+.fx-tab:hover{background:var(--surface2);color:var(--text)}
+.fx-tab.active{background:rgba(0,169,157,.1);border-color:rgba(0,169,157,.3);color:var(--blue)}
+.fx-chart-panel{border-radius:var(--radius);padding:24px}
+.fx-chart-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}
+.fx-chart-label{font-size:12px;color:var(--muted);font-family:var(--font-mono);margin-bottom:4px}
+.fx-chart-val{font-size:28px;font-weight:800;font-family:var(--font-mono)}
+#fxChartVal,#fxChartLabel,#fxChartChg{transition:opacity .14s ease}
+.fx-val-fade{opacity:0}
+.fx-range-row{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 4px}
+.fx-range-btn{padding:5px 12px;border-radius:7px;font-size:12px;font-family:var(--font-mono);font-weight:500;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--muted);transition:all .15s}
+.fx-range-btn:hover{color:var(--text);border-color:var(--blue)}
+.fx-range-btn.active{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:700}
+.fx-range-btn:disabled{opacity:.4;cursor:not-allowed}
+.fx-chart-canvas-wrap{height:220px}
+.fx-current-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:24px}
+@media(max-width:640px){.fx-current-grid{grid-template-columns:repeat(3,1fr)}}
+.fx-current-tile{border-radius:10px;padding:12px 14px;text-align:center}
+.fx-current-tile-pair{font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-bottom:4px}
+.fx-current-tile-val{font-size:14px;font-weight:700;font-family:var(--font-mono)}
+
+/* .how-card/.how-grid/.how-num/.how-icon removed — section uses .hwb1 system */
+
+/* ── Demo calculator ─────────────────────────────────────── */
+.demo-inner{display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:start;margin-top:48px}
+@media(max-width:768px){.demo-inner{grid-template-columns:1fr}}
+.demo-total-panel{border-radius:18px;padding:28px;margin-bottom:20px}
+.demo-total-label{font-size:12px;color:var(--muted);font-family:var(--font-mono);margin-bottom:8px}
+.demo-total-val{font-size:44px;font-weight:800;font-family:var(--font-mono);color:var(--green);transition:color .3s}
+.demo-total-unit{font-size:13px;color:var(--muted);margin-top:4px;font-family:var(--font-mono)}
+.demo-gap-row{display:flex;gap:12px;margin-top:14px}
+.demo-gap-tile{flex:1;border-radius:10px;padding:12px;border:1px solid var(--border);background:var(--surface2)}
+.demo-gap-tile-label{font-size:10px;color:var(--dim);font-family:var(--font-mono);margin-bottom:4px}
+.demo-gap-tile-val{font-size:15px;font-weight:700;font-family:var(--font-mono)}
+.slider-group{margin-bottom:22px}
+.slider-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.slider-name{font-size:13px;font-weight:600}
+.slider-val{font-size:13px;font-family:var(--font-mono);color:var(--blue);font-weight:600}
+.slider-sub{font-size:11px;color:var(--dim);font-family:var(--font-mono);margin-top:2px}
+input[type=range]{-webkit-appearance:none;width:100%;height:4px;background:var(--surface2);border-radius:2px;border:none;padding:0;accent-color:var(--blue)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--blue);cursor:pointer;box-shadow:0 0 0 3px rgba(0,169,157,.25),0 2px 6px rgba(0,0,0,.2)}
+.demo-chart-wrap{border-radius:14px;padding:22px;height:260px}
+
+/* ── Security ────────────────────────────────────────────── */
+.security-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-top:48px}
+@media(max-width:900px){.security-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.security-grid{grid-template-columns:1fr}}
+.security-tile{border-radius:16px;padding:28px 22px;text-align:center;transition:transform .3s,box-shadow .3s}
+.security-tile:hover{transform:translateY(-4px);box-shadow:0 12px 32px rgba(0,0,0,.09)}
+.security-tile-icon{font-size:26px;margin:0 auto 14px;width:54px;height:54px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:rgba(0,169,157,.1);border:1px solid rgba(0,169,157,.2);box-shadow:0 2px 12px rgba(0,169,157,.12),inset 0 1px 0 rgba(255,255,255,.5)}
+.security-tile h4{font-size:14px;font-weight:700;margin-bottom:8px}
+.security-tile p{font-size:12px;color:var(--muted);line-height:1.6}
+
+/* ── CTA ─────────────────────────────────────────────────── */
+.cta-grid{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:48px}
+@media(max-width:768px){.cta-grid{grid-template-columns:1fr}}
+.cta-card{border-radius:20px;padding:36px}
+.cta-card h3{font-size:22px;font-weight:800;margin-bottom:10px}
+.cta-card p{font-size:14px;color:var(--muted);margin-bottom:24px;line-height:1.7}
+.form-group{margin-bottom:12px}
+.form-label{font-size:12px;color:var(--muted);margin-bottom:5px;display:block}
+.form-success{text-align:center;padding:28px;display:none}
+.form-success-icon{font-size:40px;margin-bottom:10px}
+.form-success h4{font-size:18px;font-weight:700;margin-bottom:8px}
+.form-success p{font-size:14px;color:var(--muted)}
+.form-error{font-size:12px;color:var(--red);margin-top:6px;display:none}
+.cta-demo-features{margin:20px 0;display:flex;flex-direction:column;gap:12px}
+.cta-demo-feat{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--muted)}
+.cta-demo-feat-check{color:var(--green);font-size:16px;flex-shrink:0}
+
+/* ── Terms ───────────────────────────────────────────────── */
+.terms-section{padding:64px 0}
+.terms-details{border-radius:14px;border:1px solid var(--border);background:var(--surface);overflow:hidden}
+.terms-details+.terms-details{margin-top:10px}
+.terms-details summary{padding:18px 24px;font-size:14px;font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;user-select:none}
+.terms-details summary::-webkit-details-marker{display:none}
+.terms-details summary::after{content:'+';font-size:18px;color:var(--dim);transition:transform .2s}
+.terms-details[open] summary::after{transform:rotate(45deg)}
+.terms-body{padding:0 24px 22px;font-size:13px;color:var(--muted);line-height:1.8;border-top:1px solid var(--border)}
+.terms-body h5{font-size:12px;font-weight:700;color:var(--text);margin:16px 0 6px;text-transform:uppercase;letter-spacing:.5px}
+.terms-body p{margin-bottom:8px}
+
+/* ── Footer ──────────────────────────────────────────────── */
+.footer{background:var(--surface);border-top:1px solid var(--border);padding:56px 0 32px}
+.footer-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:48px;margin-bottom:40px}
+@media(max-width:640px){.footer-grid{grid-template-columns:1fr;gap:28px}}
+.footer-brand p{font-size:13px;color:var(--muted);margin-top:12px;line-height:1.7;max-width:280px}
+.footer-col h5{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--dim);margin-bottom:14px}
+.footer-col a{display:block;font-size:13px;color:var(--muted);margin-bottom:10px;transition:color .15s}
+.footer-col a:hover{color:var(--text)}
+.footer-bottom{padding-top:22px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
+.footer-bottom p{font-size:12px;color:var(--dim)}
+
+/* ── Modals ──────────────────────────────────────────────── */
+.modal-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.72);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:20px;transition:background .22s ease,backdrop-filter .22s ease}
+@starting-style{.modal-backdrop{background:rgba(0,0,0,0);backdrop-filter:blur(0px)}}
+.modal{width:100%;max-width:480px;border-radius:20px;padding:32px;position:relative;background:var(--surface);border:1px solid var(--border);box-shadow:0 24px 64px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.9);max-height:90vh;overflow-y:auto;transition:opacity .3s cubic-bezier(.22,1,.36,1),transform .3s cubic-bezier(.22,1,.36,1)}
+@starting-style{.modal{opacity:0;transform:scale(.94) translateY(16px)}}
+.modal-close{position:absolute;top:8px;right:8px;background:none;border:none;color:var(--muted);font-size:20px;line-height:1;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;border-radius:8px;transition:color .15s;cursor:pointer}
+.modal-close:hover{color:var(--text)}
+.modal h3{font-size:20px;font-weight:800;margin-bottom:8px}
+.modal-sub{font-size:13px;color:var(--muted);margin-bottom:22px}
+.modal-success{text-align:center;padding:16px 0;display:none}
+.modal-success-icon{font-size:48px;margin-bottom:14px}
+.modal-success h4{font-size:20px;font-weight:700;margin-bottom:8px}
+.modal-success p{font-size:14px;color:var(--muted)}
+.modal-error-msg{font-size:12px;color:var(--red);margin-bottom:12px;display:none}
+/* demo modal */
+.demo-steps{display:flex;gap:8px;margin-bottom:26px;align-items:center;justify-content:center}
+.demo-step-dot{width:8px;height:8px;border-radius:50%;background:var(--dim);transition:background .2s,transform .2s}
+.demo-step-dot.active{background:var(--blue);transform:scale(1.3)}
+.demo-step-line{flex:1;height:1px;background:var(--border);max-width:40px}
+.lp-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:12px}
+.lp-cal-dow{text-align:center;font-size:11px;color:var(--dim);padding:4px 0;font-family:var(--font-mono)}
+.lp-cal-day{aspect-ratio:1;border-radius:8px;border:1px solid transparent;background:var(--surface2);color:var(--muted);font-size:13px;font-family:var(--font-mono);transition:background .15s,color .15s;cursor:pointer}
+.lp-cal-day:hover:not(.lp-cal-day--disabled){background:rgba(0,169,157,.12);color:var(--blue)}
+.lp-cal-day--selected{background:var(--blue);color:#fff}
+.lp-cal-day--today{border:1px solid var(--blue);color:var(--blue)}
+.lp-cal-day--disabled{opacity:.3;cursor:not-allowed}
+.lp-cal-empty{pointer-events:none}
+.cal-nav{display:flex;justify-content:space-between;align-items:center}
+.cal-nav-btn{background:var(--surface2);border:1px solid var(--border);color:var(--text);min-width:44px;min-height:44px;padding:0 14px;border-radius:8px;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.cal-nav-btn:hover{background:rgba(0,0,0,.06)}
+#lpCalMonthLabel{font-size:14px;font-weight:600}
+.slot-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+.lp-slot-btn{padding:12px 10px;min-height:44px;border-radius:8px;font-size:13px;font-family:var(--font-mono);background:var(--surface2);border:1px solid var(--border);color:var(--muted);transition:all .15s;cursor:pointer}
+.lp-slot-btn:hover{border-color:var(--blue);color:var(--blue);background:rgba(0,169,157,.07)}
+.lp-slot-btn--selected{background:rgba(0,169,157,.12);border-color:var(--blue);color:var(--blue)}
+.demo-error-small{font-size:12px;color:var(--red);margin-top:8px;display:none}
+.demo-nav{display:flex;gap:10px;margin-top:18px}
+
+/* ── Hero engineering grid ────────────────────────────────── */
+/* Hexagonal (benzene-ring) lattice — chemistry motif behind the hero */
+.hero-dots{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.6;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='49' viewBox='0 0 56 49'%3E%3Cpath d='M14 1H42L55 24.5L42 48H14L1 24.5Z' fill='none' stroke='%2300A99D' stroke-opacity='0.14' stroke-width='1.2'/%3E%3C/svg%3E");background-size:56px 49px;-webkit-mask-image:radial-gradient(ellipse 80% 64% at 50% 38%,#000 26%,transparent 78%);mask-image:radial-gradient(ellipse 80% 64% at 50% 38%,#000 26%,transparent 78%)}
+.hero .container{position:relative;z-index:1}
+
+
+/* ── Path draw + tilt ─────────────────────────────────────── */
+.draw-path{stroke-dasharray:640;stroke-dashoffset:640;animation:drawPath 2.2s cubic-bezier(.6,0,.2,1) forwards .6s}
+@keyframes drawPath{to{stroke-dashoffset:0}}
+.tilt-card{transform-style:preserve-3d;will-change:transform}
+
+/* ── Market signal tiles ──────────────────────────────────── */
+.signal-row{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:24px}
+@media(max-width:768px){.signal-row{grid-template-columns:1fr}}
+.signal-tile{border-radius:12px;padding:18px 20px;border:1px solid rgba(16,185,129,.3);background:rgba(16,185,129,.07);display:flex;gap:14px;align-items:flex-start}
+.signal-tile.down{border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.07)}
+.signal-arrow{font-size:18px;line-height:1;margin-top:1px}
+.signal-tile-name{font-size:13px;font-weight:700;margin-bottom:5px}
+.signal-tile-impact{font-size:12px;color:var(--muted);font-family:var(--font-mono);line-height:1.5}
+.signal-tile-impact b{color:var(--text);font-weight:600}
+
+/* ── Evolution showcase ───────────────────────────────────── */
+.evo-inner{display:grid;grid-template-columns:1.6fr 1fr;gap:28px;align-items:stretch;margin-top:48px}
+@media(max-width:860px){.evo-inner{grid-template-columns:1fr}}
+.evo-chart-panel{border-radius:var(--radius);padding:26px}
+.evo-legend{display:flex;gap:18px;margin-bottom:6px;flex-wrap:wrap}
+.evo-legend-item{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);font-family:var(--font-mono)}
+.evo-legend-dot{width:10px;height:10px;border-radius:3px}
+.evo-chart-wrap{height:300px;margin-top:12px}
+.evo-stats{display:flex;flex-direction:column;gap:14px;justify-content:center}
+.evo-stat-card{border-radius:14px;padding:22px 24px}
+.evo-stat-label{font-family:var(--font-mono);font-size:11px;color:var(--muted);letter-spacing:.5px;margin-bottom:8px}
+.evo-stat-val{font-size:34px;font-weight:800;font-family:var(--font-mono);line-height:1}
+.evo-stat-sub{font-size:12px;color:var(--dim);margin-top:8px;line-height:1.5}
+
+/* ── Testimonial ──────────────────────────────────────────── */
+/* Deep teal-ink contrast band — a premium dark focal moment in the page rhythm */
+.quote-section{padding:96px 0;position:relative;overflow:hidden;background:
+  radial-gradient(120% 90% at 80% -10%,rgba(0,200,188,.16) 0%,transparent 55%),
+  radial-gradient(90% 80% at 10% 120%,rgba(16,185,129,.10) 0%,transparent 50%),
+  linear-gradient(160deg,var(--ink2) 0%,var(--ink) 100%);
+  color:#eafffb}
+.quote-card{max-width:840px;margin:0 auto;text-align:center;border-radius:24px;padding:56px 48px;position:relative;
+  background:transparent;border:1px solid rgba(0,200,188,.18);box-shadow:none;
+  -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
+.quote-mark{font-family:var(--font-display);font-size:110px;line-height:.5;color:var(--teal);opacity:.45;height:48px;user-select:none}
+.quote-text{font-size:clamp(19px,2.5vw,27px);font-weight:600;line-height:1.5;margin:18px 0 26px;letter-spacing:-.01em;color:#f3fffd}
+.quote-attr{font-family:var(--font-mono);font-size:13px;color:#a6cfc9}
+.quote-badge{display:inline-flex;align-items:center;gap:8px;margin-top:18px;font-family:var(--font-mono);font-size:11px;color:var(--teal);background:rgba(0,200,188,.12);border:1px solid rgba(0,200,188,.3);border-radius:20px;padding:6px 14px}
+@media(max-width:600px){.quote-card{padding:40px 24px}}
+
+/* ── Interactive demo (donut) ─────────────────────────────── */
+.demo-viz{border-radius:18px;padding:26px;background:var(--surface);backdrop-filter:none;border:1px solid var(--border);box-shadow:0 4px 24px rgba(0,0,0,.07)}
+.demo-viz-title{font-size:12px;color:var(--muted);font-family:var(--font-mono);margin-bottom:18px;text-align:center;letter-spacing:.5px}
+.demo-donut-wrap{position:relative;height:236px;margin:0 auto}
+.demo-donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+.demo-donut-center-label{font-size:10px;color:var(--dim);font-family:var(--font-mono);letter-spacing:1.5px}
+.demo-donut-center-val{font-size:36px;font-weight:800;font-family:var(--font-mono);color:var(--green);line-height:1.1;transition:color .3s}
+.demo-donut-center-unit{font-size:11px;color:var(--muted);font-family:var(--font-mono)}
+.demo-legend{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;margin-top:22px}
+.demo-leg-item{display:flex;align-items:center;gap:9px;font-size:12px}
+.demo-leg-dot{width:11px;height:11px;border-radius:3px;flex-shrink:0;box-shadow:0 0 8px currentColor}
+.demo-leg-name{color:var(--muted);flex:1}
+.demo-leg-val{font-family:var(--font-mono);font-weight:600;color:var(--text)}
+.demo-verdict{display:inline-flex;align-items:center;gap:8px;margin-top:16px;padding:9px 15px;border-radius:10px;font-size:13px;font-weight:700;font-family:var(--font-mono);transition:all .3s;width:fit-content}
+.demo-verdict.over{background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25)}
+.demo-verdict.fair{background:rgba(16,185,129,.12);color:var(--green);border:1px solid rgba(16,185,129,.25)}
+.demo-verdict.under{background:rgba(0,169,157,.1);color:var(--blue);border:1px solid rgba(0,169,157,.25)}
+
+/* ── Legal cards ──────────────────────────────────────────── */
+.legal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:44px}
+@media(max-width:900px){.legal-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:600px){.legal-grid{grid-template-columns:1fr}}
+.legal-card{border-radius:16px;padding:26px 24px;background:var(--surface2);border:1px solid var(--border)}
+.legal-card:hover{box-shadow:0 8px 32px rgba(0,0,0,.1),inset 0 1px 0 rgba(255,255,255,.9);border-color:rgba(0,169,157,.3)}
+.legal-card-icon{width:46px;height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:21px;background:rgba(0,169,157,.1);border:1px solid rgba(0,169,157,.18);margin-bottom:15px;box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}
+.legal-card h4{font-size:15px;font-weight:700;margin-bottom:10px}
+.legal-card p{font-size:13px;color:var(--muted);line-height:1.7}
+
+/* ── Engagement popup ─────────────────────────────────────── */
+.pa-popup{display:flex;flex-direction:column;gap:0;padding:22px 24px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 20px 56px rgba(0,0,0,.13),0 1px 0 rgba(255,255,255,.9) inset;width:330px;position:fixed;bottom:28px;right:28px;z-index:90;transform:translateY(160%);opacity:0;transition:transform .55s cubic-bezier(.23,1,.32,1),opacity .55s}
+.pa-popup.show{transform:translateY(0);opacity:1}
+.pa-close{position:absolute;top:0;right:0;background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:0 12px 0 8px;opacity:.6;transition:opacity .15s}
+.pa-close:hover{opacity:1}
+.pa-title{font-family:var(--font-sans);font-weight:800;font-size:20px;line-height:1.1;letter-spacing:-.022em;color:var(--text);margin-bottom:8px;text-wrap:balance}
+.pa-sub{font-family:var(--font-mono);font-size:11.5px;color:var(--muted);line-height:1.6;margin-bottom:16px}
+.pa-cta{display:block;width:100%;padding:10px 0;background:var(--blue);color:#fff;font-family:var(--font-mono);font-size:11.5px;font-weight:600;border:none;border-radius:7px;cursor:pointer;text-align:center;transition:background .18s}
+.pa-cta:hover{background:#009990}
+.btn-sm{padding:8px 16px;font-size:13px;border-radius:9px}
+@media(max-width:600px){.pa-popup{left:16px;right:16px;bottom:max(16px,calc(var(--safe-bottom) + 16px));width:auto}}
+@media(prefers-reduced-motion:reduce){.pa-popup{transition:opacity .3s}}
+
+/* ── Reveal ──────────────────────────────────────────────── */
+/* Content is visible by default. JS adds .reveal-ready to body, then hides until observed. */
+.reveal{transition:opacity .6s ease,transform .6s ease}
+.reveal-ready .reveal{opacity:0;transform:translateY(24px)}
+.reveal-ready .reveal.visible{opacity:1;transform:none}
+
+/* ── Hero entrance choreography ─────────────────────────────── */
+@keyframes heroIn{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@keyframes heroMockupIn{from{opacity:0;filter:blur(8px)}to{opacity:1;filter:blur(0)}}
+@keyframes heroFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+@keyframes badgePulse{0%,100%{border-color:rgba(0,169,157,.25);box-shadow:none}50%{border-color:rgba(0,169,157,.5);box-shadow:0 0 14px rgba(0,169,157,.18)}}
+@keyframes orbDrift1{0%,100%{transform:translate(0,0)}40%{transform:translate(30px,-18px)}75%{transform:translate(-15px,22px)}}
+@keyframes orbDrift2{0%,100%{transform:translate(0,0)}35%{transform:translate(-22px,16px)}70%{transform:translate(18px,-26px)}}
+/* left column — staggered top-to-bottom */
+.hero-badge{animation:heroIn .65s cubic-bezier(.16,1,.3,1) both,badgePulse 4s ease-in-out 1.6s infinite}
+.hero h1{animation:heroIn .72s cubic-bezier(.16,1,.3,1) .08s both}
+.hero-sub{animation:heroIn .7s cubic-bezier(.16,1,.3,1) .2s both}
+.hero-actions{animation:heroIn .65s cubic-bezier(.16,1,.3,1) .32s both}
+.hero-stats{animation:heroIn .6s cubic-bezier(.16,1,.3,1) .46s both}
+/* right column — crystallise into focus, then idle float */
+.hero-mockup{animation:heroMockupIn .9s cubic-bezier(.16,1,.3,1) .12s both}
+.hero-mockup-wrap{animation:heroFloat 7s ease-in-out 1.8s infinite}
+/* atmospheric — subliminal orb movement */
+.hero::before{animation:orbDrift1 22s ease-in-out infinite}
+.hero::after{animation:orbDrift2 28s ease-in-out infinite}
+
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:0s!important;transition-duration:0s!important}
+  .ticker-inner{animation:none}
+  .reveal,.reveal-ready .reveal{opacity:1;transform:none}
+  .hero-mockup{transform:none}
+  /* hero entrance — show everything instantly, no float, no orb drift */
+  .hero-badge,.hero h1,.hero-sub,.hero-actions,.hero-stats,.hero-mockup,.hero-mockup-wrap{animation:none;opacity:1}
+  .hero-mockup-wrap,.hero::before,.hero::after{transform:none}
+}
+
+/* ── How it works — bolder cards ─────────────────────────── */
+.hwb1{max-width:1180px;margin:0 auto;padding:0 24px}
+.hwb1-title{font-family:var(--font-sans);font-weight:800;font-size:clamp(28px,3.5vw,48px);line-height:1.08;letter-spacing:-.025em;color:var(--text);margin-bottom:14px;text-wrap:balance}
+.hwb1-sub{font-family:var(--font-mono);font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:56px;max-width:52ch}
+.hwb1-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.hwb1-card{position:relative;overflow:hidden;padding:32px 28px 28px;border-radius:14px;border:1px solid var(--border);display:flex;flex-direction:column;gap:16px}
+.hwb1-card--blue{background:rgba(0,169,157,.09);border-color:rgba(0,169,157,.2)}
+.hwb1-card--green{background:rgba(16,185,129,.11);border-color:rgba(16,185,129,.18)}
+.hwb1-card--amber{background:rgba(245,158,11,.11);border-color:rgba(245,158,11,.18)}
+.hwb1-bg-num{position:absolute;bottom:-16px;right:8px;font-family:var(--font-sans);font-weight:800;font-size:80px;line-height:1;color:var(--text);opacity:.07;pointer-events:none;user-select:none;letter-spacing:-.04em}
+.hwb1-icon{width:52px;height:52px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0}
+.hwb1-card--blue .hwb1-icon{background:rgba(0,169,157,.18);border:1px solid rgba(0,169,157,.3)}
+.hwb1-card--green .hwb1-icon{background:rgba(16,185,129,.21);border:1px solid rgba(16,185,129,.35)}
+.hwb1-card--amber .hwb1-icon{background:rgba(245,158,11,.21);border:1px solid rgba(245,158,11,.35)}
+.hwb1-h3{font-family:var(--font-sans);font-weight:800;font-size:clamp(20px,2.2vw,26px);line-height:1.1;letter-spacing:-.02em;color:var(--text);margin:0}
+.hwb1-p{font-family:var(--font-mono);font-size:12px;color:var(--muted);line-height:1.75;margin:0;max-width:38ch}
+@media(max-width:800px){.hwb1-grid{grid-template-columns:1fr}.hwb1-bg-num{font-size:80px}}
+
+/* ═══════════════════════════════════════════════════════════════
+   Tablet (641 – 900px)
+   ═══════════════════════════════════════════════════════════════ */
+@media(min-width:641px) and (max-width:900px){
+  section{padding:72px 0}
+  .hero{padding:calc(100px + var(--safe-top)) 0 48px}
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Mobile (≤ 640px)
+   ═══════════════════════════════════════════════════════════════ */
+@media(max-width:640px){
+  /* Rhythm — compress section padding so content leads */
+  section{padding:56px 0}
+  .quote-section{padding:52px 0}
+  .terms-section{padding:36px 0}
+  .footer{padding:40px 0 max(24px,calc(var(--safe-bottom) + 24px))}
+
+  /* Hero */
+  .hero{padding:calc(88px + var(--safe-top)) 0 40px;min-height:auto}
+  .hero-sub{font-size:15px;max-width:100%}
+  .hero-actions{gap:8px}
+  .hero-actions .btn{flex:1 1 auto;min-width:0;justify-content:center}
+  .hero-actions .btn-lg{padding:13px 16px;font-size:14px}
+  .hero-stats{gap:18px;margin-top:28px}
+  .hero-stat-val{font-size:22px}
+  .hero-stat-label{font-size:10px}
+
+  /* Demo interactive section */
+  .demo-total-panel{padding:20px 18px}
+  .demo-total-val{font-size:32px}
+  .demo-chart-wrap{height:200px}
+  .demo-gap-row{gap:8px}
+  .demo-gap-tile{padding:10px}
+
+  /* FX tabs — horizontal scroll so all 5 fit without wrapping */
+  .fx-pair-tabs{flex-direction:row!important;flex-wrap:nowrap;overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .fx-pair-tabs::-webkit-scrollbar{display:none}
+  .fx-tab{flex-shrink:0}
+
+  /* Modals */
+  .modal{padding:20px}
+  .modal h3{font-size:17px}
+  .modal-sub{font-size:12px}
+
+  /* Quote */
+  .quote-card{padding:36px 20px}
+  .quote-text{font-size:18px}
+  .quote-mark{font-size:80px;height:32px}
+
+  /* Evolution stats */
+  .evo-stat-val{font-size:28px}
+  .evo-stat-card{padding:18px 20px}
+
+  /* CTA cards */
+  .cta-card{padding:28px 22px}
+
+  /* Section-title ceiling tighter on mobile */
+  .section-title{font-size:clamp(24px,7vw,36px)}
+  .hwb1-title{font-size:clamp(24px,7vw,36px)!important}
+
+  /* Ticker — slightly smaller so more items show */
+  .ticker-item{gap:7px}
+  .ticker-name{font-size:11px}
+  .ticker-val{font-size:12px}
+
+  /* Ensure pulse grid doesn't overflow */
+  .pulse-card-val{font-size:18px}
+
+  /* Footer spacing */
+  .footer-bottom{flex-direction:column;align-items:flex-start;gap:6px}
+}
+</style>
+</head>
+<body>
+
+<div id="lpProgress"></div>
+
+<a href="#main" class="skip-link">Skip to content</a>
+<!-- Shared brand mark (single source of truth, referenced via <use> in nav + footer) -->
+<svg width="0" height="0" style="position:absolute;overflow:hidden" aria-hidden="true" focusable="false">
+  <symbol id="ca-logo" viewBox="0 0 32 32">
+    <defs>
+      <linearGradient id="ca-logo-grad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#00c8bc"/><stop offset="1" stop-color="#007e93"/>
+      </linearGradient>
+    </defs>
+    <rect width="32" height="32" rx="8" fill="url(#ca-logo-grad)"/>
+    <!-- ascending index line + node — "cost intelligence from market indices" -->
+    <path d="M7 21 L13 15.5 L18 18 L25 9.5" fill="none" stroke="#ffffff" stroke-width="2.4"
+          stroke-linecap="round" stroke-linejoin="round" opacity=".96"/>
+    <circle cx="25" cy="9.5" r="2.5" fill="#ffffff"/>
+  </symbol>
+</svg>
+<!-- Professional stroke-icon set (Lucide-style); referenced via <svg class="ic"><use href="#ic-…"/> -->
+<svg width="0" height="0" style="position:absolute;overflow:hidden" aria-hidden="true" focusable="false">
+  <symbol id="ic-lock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="ic-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="ic-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M10.85 12.15 21 2"/><path d="m16 7 3 3"/></symbol>
+  <symbol id="ic-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6"/><path d="M9 17h5"/></symbol>
+  <symbol id="ic-mail" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 6 10 7 10-7"/></symbol>
+  <symbol id="ic-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20"/></symbol>
+  <symbol id="ic-landmark" viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V10"/><path d="M9 21V10"/><path d="M15 21V10"/><path d="M19 21V10"/><path d="M12 3 21 8H3z"/></symbol>
+  <symbol id="ic-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="ic-alert" viewBox="0 0 24 24"><path d="M10.3 3.3 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.3a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="ic-flask" viewBox="0 0 24 24"><path d="M9 3h6"/><path d="M10 3v6l-5.2 8.6A2 2 0 0 0 6.5 21h11a2 2 0 0 0 1.7-3.4L14 9V3"/><path d="M7.5 15h9"/></symbol>
+  <symbol id="ic-calc" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01"/></symbol>
+  <symbol id="ic-clipboard" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6"/><path d="M9 16h4"/></symbol>
+  <symbol id="ic-trend" viewBox="0 0 24 24"><path d="M22 7 13.5 15.5 8.5 10.5 2 17"/><path d="M16 7h6v6"/></symbol>
+  <symbol id="ic-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></symbol>
+  <symbol id="ic-fx" viewBox="0 0 24 24"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></symbol>
+  <symbol id="ic-bars" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M8 17v-5"/><path d="M13 17V7"/><path d="M18 17v-9"/></symbol>
+</svg>
+<!-- ── Nav ──────────────────────────────────────────────────── -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/" class="nav-logo">
+      <span class="nav-logomark"><svg viewBox="0 0 32 32"><use href="#ca-logo"/></svg></span>
+      <span class="nav-wordmark"><b>Cost</b><span class="wm-light">Advisor</span></span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#market">Market Data</a>
+      <a href="#how">How It Works</a>
+      <a href="#security">Security</a>
+    </div>
+    <div class="nav-actions">
+      <button class="btn btn-primary" onclick="openDemoModal()">Schedule Demo</button>
+      <button class="btn btn-ghost" onclick="openAccessModal()">Request Access</button>
+      <a class="btn btn-ghost js-signin" href="https://api.costadvisor.org/auth/login">Sign in</a>
+    </div>
+    <button class="nav-burger" id="lpBurger" aria-label="Open menu" aria-expanded="false">☰</button>
+  </div>
+  <div class="nav-mobile" id="lpMobileMenu">
+    <a href="#features">Features</a>
+    <a href="#market">Market Data</a>
+    <a href="#how">How It Works</a>
+    <a href="#security">Security</a>
+    <a href="javascript:void(0)" onclick="openDemoModal()" style="color:var(--blue);font-weight:600">Schedule a Demo →</a>
+    <a href="#cta">Request Access</a>
+    <a class="js-signin" href="https://api.costadvisor.org/auth/login">Sign in</a>
+  </div>
+</nav>
+
+<main id="main">
+<!-- ── Hero ─────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="hero-dots"></div>
+  <div class="container">
+    <div class="hero-grid">
+      <div>
+<h1>Know what your products should cost —<br><span>before your supplier tells you.</span></h1>
+        <p class="hero-sub">Decompose chemical products into raw-material components, link each to a live commodity index, and calculate the defensible should-cost. Track quarterly evolution, expose the supplier gap, and export ranked negotiation briefs.</p>
+        <div class="hero-actions">
+          <button class="btn btn-primary btn-lg" onclick="openAccessModal()">Request Early Access</button>
+          <button class="btn btn-ghost btn-lg" onclick="openDemoModal()">Schedule a Demo →</button>
+        </div>
+
+
+      </div>
+
+      <div class="hero-mockup-wrap">
+        <div class="hero-mockup">
+          <div class="hero-mockup-bar">
+            <div class="hero-mockup-dot" style="background:#ef4444"></div>
+            <div class="hero-mockup-dot" style="background:#f59e0b"></div>
+            <div class="hero-mockup-dot" style="background:#10b981"></div>
+            <span class="hero-mockup-title">Ammonia Solution 25% · Q2-2026</span>
+          </div>
+          <div class="mockup-row">
+            <span class="mockup-label">SHOULD-COST</span>
+            <span class="mockup-val" style="color:var(--green)">€342.80/t</span>
+          </div>
+          <div class="mockup-row">
+            <span class="mockup-label">SUPPLIER PRICE</span>
+            <span class="mockup-val" style="color:var(--red)">€398.50/t</span>
+          </div>
+          <div class="mockup-row">
+            <span class="mockup-label">GAP</span>
+            <span class="mockup-gap-badge">▲ +16.3% over should-cost</span>
+          </div>
+          <div class="mockup-chart-area">
+            <div class="mockup-chart-legend">
+              <div class="mockup-legend-item"><div class="mockup-legend-line" style="background:var(--green)"></div>Should-cost</div>
+              <div class="mockup-legend-item"><div class="mockup-legend-line" style="background:var(--red)"></div>Supplier price</div>
+            </div>
+            <svg viewBox="0 0 420 76" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:70px">
+              <defs>
+                <linearGradient id="gFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#ef4444" stop-opacity="0.2"/>
+                  <stop offset="100%" stop-color="#ef4444" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <polyline class="draw-path" points="0,58 60,56 120,53 180,51 240,49 300,47 360,45 420,43" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round"/>
+              <polyline class="draw-path" points="0,57 60,52 120,47 180,41 240,35 300,29 360,25 420,20" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/>
+              <polygon points="0,57 60,52 120,47 180,41 240,35 300,29 360,25 420,20 420,43 360,45 300,47 240,49 180,51 120,53 60,56 0,58" fill="url(#gFill)"/>
+              <line x1="0" y1="18" x2="420" y2="18" stroke="rgba(0,0,0,0.08)" stroke-width="1"/>
+              <line x1="0" y1="38" x2="420" y2="38" stroke="rgba(0,0,0,0.08)" stroke-width="1"/>
+              <line x1="0" y1="58" x2="420" y2="58" stroke="rgba(0,0,0,0.08)" stroke-width="1"/>
+            </svg>
+            <div class="mockup-chart-labels">
+              <span>Q3-24</span><span>Q4-24</span><span>Q1-25</span><span>Q2-25</span>
+              <span>Q3-25</span><span>Q4-25</span><span>Q1-26</span><span>Q2-26</span>
+            </div>
+          </div>
+          <div class="mockup-metric-grid">
+            <div class="mockup-metric">
+              <div class="mockup-metric-label">TOTAL EXPOSURE</div>
+              <div class="mockup-metric-val" style="color:var(--red)">€2.1M/yr</div>
+            </div>
+            <div class="mockup-metric">
+              <div class="mockup-metric-label">INDEX CHANGE QoQ</div>
+              <div class="mockup-metric-val" style="color:var(--amber)">+4.2%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ticker-wrap">
+    <div class="ticker-inner" id="tickerInner"></div>
+  </div>
+</section>
+
+<!-- ── Market Pulse ──────────────────────────────────────────── -->
+<section id="market" style="background:var(--surface)">
+  <div class="container">
+    <h2 class="section-title">Commodity indices that drive your costs</h2>
+    <p class="section-sub">Every should-cost model links to these real indices. Watch them move — and know exactly what that means for your procurement position.</p>
+    <div class="pulse-grid" id="pulseGrid"></div>
+    <p class="pulse-note" id="pulseNote" style="text-align:center;font-family:var(--font-mono);font-size:11px;color:var(--dim);margin-top:14px"></p>
+
+    <div class="signal-row" id="signalRow">
+      <div class="signal-tile reveal">
+        <span class="signal-arrow" style="color:var(--green)">▲</span>
+        <div>
+          <div class="signal-tile-name">Ammonia +4.2% QoQ</div>
+          <div class="signal-tile-impact">Should-cost impact: <b style="color:var(--green)">+€8.40/t</b> on a 40%-weighted model</div>
+        </div>
+      </div>
+      <div class="signal-tile down reveal" style="transition-delay:.08s">
+        <span class="signal-arrow" style="color:var(--red)">▼</span>
+        <div>
+          <div class="signal-tile-name">Brent Crude −2.1% QoQ</div>
+          <div class="signal-tile-impact">Should-cost impact: <b style="color:var(--red)">−€3.20/t</b> on energy-linked components</div>
+        </div>
+      </div>
+      <div class="signal-tile reveal" style="transition-delay:.16s">
+        <span class="signal-arrow" style="color:var(--green)">▲</span>
+        <div>
+          <div class="signal-tile-name">Natural Gas +6.9% QoQ</div>
+          <div class="signal-tile-impact">Should-cost impact: <b style="color:var(--green)">+€5.10/t</b> on a 30%-weighted model</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FX Dashboard ──────────────────────────────────────────── -->
+<section id="fx">
+  <div class="container">
+    <h2 class="section-title">Every currency you buy in. Daily live rates.</h2>
+    <p class="section-sub">Live daily rates from ECB-backed data — across every currency pair you trade in. Quarterly averages and full history feed your costing engine, so it always uses the right rate.</p>
+    <div class="fx-inner reveal">
+      <div class="fx-pair-tabs" id="fxTabs"></div>
+      <div>
+        <div class="fx-chart-panel glass skeuo">
+          <div class="fx-chart-header">
+            <div>
+              <div class="fx-chart-label" id="fxChartLabel">EUR / USD</div>
+              <div class="fx-chart-val" id="fxChartVal">1.1600</div>
+              <div id="fxChartChg" style="margin-top:6px"></div>
+            </div>
+          </div>
+          <div class="fx-range-row" id="fxRangeRow"></div>
+          <div class="fx-chart-canvas-wrap">
+            <canvas id="fxChart" role="img" aria-label="Daily exchange-rate trend chart for the selected currency pair"></canvas>
+          </div>
+        </div>
+        <div class="fx-current-grid" id="fxCurrentGrid"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Evolution Showcase ────────────────────────────────────── -->
+<section id="evolution">
+  <div class="container">
+    <h2 class="section-title">Watch the gap open up — quarter by quarter</h2>
+    <p class="section-sub">Track how your should-cost model evolves as commodity markets move, and exactly where your supplier's price diverges. Never walk into a price negotiation blind.</p>
+    <div class="evo-inner">
+      <div class="evo-chart-panel glass skeuo reveal">
+        <div class="evo-legend">
+          <div class="evo-legend-item"><span class="evo-legend-dot" style="background:#10B981"></span>Should-Cost</div>
+          <div class="evo-legend-item"><span class="evo-legend-dot" style="background:#EF4444"></span>Supplier Price</div>
+          <div class="evo-legend-item"><span class="evo-legend-dot" style="background:rgba(239,68,68,.35)"></span>Negotiation Gap</div>
+        </div>
+        <div class="evo-chart-wrap"><canvas id="evoChart" role="img" aria-label="Quarterly should-cost versus supplier price, showing the negotiation gap widening over time"></canvas></div>
+        <p id="evoNote" style="font-family:var(--font-mono);font-size:11px;color:var(--dim);margin-top:10px"></p>
+      </div>
+      <div class="evo-stats">
+        <div class="evo-stat-card glass skeuo reveal">
+          <div class="evo-stat-label">TOTAL GAP / YEAR</div>
+          <div class="evo-stat-val" id="evoStatGap" style="color:var(--red)">€2.3M</div>
+          <div class="evo-stat-sub">Supplier price above defensible should-cost across 38,000 t/yr (illustrative).</div>
+        </div>
+        <div class="evo-stat-card glass skeuo reveal" style="transition-delay:.08s">
+          <div class="evo-stat-label">SUPPLIER OVERCHARGE</div>
+          <div class="evo-stat-val" id="evoStatOver" style="color:var(--amber)">18.4%</div>
+          <div class="evo-stat-sub">Current quarter premium over the modelled cost.</div>
+        </div>
+        <div class="evo-stat-card glass skeuo reveal" style="transition-delay:.16s">
+          <div class="evo-stat-label">QUARTERS TRACKED</div>
+          <div class="evo-stat-val" id="evoStatQ" style="color:var(--blue)">8</div>
+          <div class="evo-stat-sub">Continuous history feeding the negotiation brief.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── How It Works ─────────────────────────────────────────── -->
+<section id="how" style="background:var(--surface)">
+  <style>
+  /* Directional entrance — --enter-from set per-card in HTML */
+  @keyframes hwba1enterDir { from{opacity:0;transform:var(--enter-from,translateY(24px))}to{opacity:1;transform:none} }
+  @keyframes hwba1enter    { from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none} }
+  @keyframes hwba1float    { 0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)} }
+
+  /* Base: cards visible by default — progressive enhancement */
+  .hwb1a .hwb1-card{transition:transform .28s cubic-bezier(.22,1,.36,1),box-shadow .28s}
+  .hwb1a .hwb1-icon{transition:transform .3s cubic-bezier(.22,1,.36,1),box-shadow .3s}
+
+  /* JS gate: hide heading + cards until section enters viewport */
+  .reveal-ready .hwb1a .hwb1-title,
+  .reveal-ready .hwb1a .hwb1-sub{opacity:0;transform:translateY(12px);transition:opacity .5s ease,transform .5s ease}
+  .reveal-ready .hwb1a .hwb1-card{opacity:0}
+  .reveal-ready .hwb1a .hwb1-icon{opacity:0}
+
+  /* In-view: cascade — heading first, then cards converge from three directions */
+  .reveal-ready .hwb1a.in-view .hwb1-title{opacity:1;transform:none}
+  .reveal-ready .hwb1a.in-view .hwb1-sub  {opacity:1;transform:none;transition-delay:.07s}
+  .reveal-ready .hwb1a.in-view .hwb1-card {animation:hwba1enterDir .7s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(var(--i,0)*150ms + .05s)}
+  .reveal-ready .hwb1a.in-view .hwb1-icon {animation:hwba1enter .5s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(var(--i,0)*150ms + .22s)}
+
+  /* Hover: card lifts + icon scales with colour-matched glow */
+  .hwb1a .hwb1-card:hover{transform:translateY(-4px);box-shadow:0 16px 36px rgba(0,0,0,.10)}
+  .hwb1a .hwb1-card:hover .hwb1-icon{transform:scale(1.12)}
+  .hwb1-card--blue:hover  .hwb1-icon{box-shadow:0 8px 22px rgba(0,169,157,.28)}
+  .hwb1-card--green:hover .hwb1-icon{box-shadow:0 8px 22px rgba(16,185,129,.28)}
+  .hwb1-card--amber:hover .hwb1-icon{box-shadow:0 8px 22px rgba(245,158,11,.28)}
+
+  /* Bg-nums: desynchronised float so they feel like independent depth layers */
+  .hwb1-card--blue  .hwb1-bg-num{animation:hwba1float 11s ease-in-out -1.2s infinite}
+  .hwb1-card--green .hwb1-bg-num{animation:hwba1float 13s ease-in-out -5.4s infinite}
+  .hwb1-card--amber .hwb1-bg-num{animation:hwba1float  9s ease-in-out -2.8s infinite}
+
+  /* Reduced motion: show everything instantly */
+  @media(prefers-reduced-motion:reduce){
+    .hwb1a .hwb1-card,.hwb1a .hwb1-icon,.hwb1a .hwb1-bg-num{animation:none}
+    .reveal-ready .hwb1a .hwb1-card,.reveal-ready .hwb1a .hwb1-icon{opacity:1}
+    .reveal-ready .hwb1a .hwb1-title,.reveal-ready .hwb1a .hwb1-sub{opacity:1;transform:none}
+  }
+  </style>
+  <div class="hwb1 hwb1a">
+    <h2 class="hwb1-title">From raw material to negotiation table</h2>
+    <p class="hwb1-sub">Three steps from product to defensible cost position — in minutes, not weeks.</p>
+    <div class="hwb1-grid">
+      <div class="hwb1-card hwb1-card--blue" style="--i:0;--enter-from:translate(-32px,8px)">
+        <span class="hwb1-bg-num" aria-hidden="true">01</span>
+        <div class="hwb1-icon"><svg class="ic"><use href="#ic-flask"/></svg></div>
+        <h3 class="hwb1-h3">Decompose</h3>
+        <p class="hwb1-p">Break your product into weighted raw-material components. Map each to a commodity index by region — Ammonia 40%, Energy 30%, Packaging 20%, Labour 10%.</p>
+      </div>
+      <div class="hwb1-card hwb1-card--green" style="--i:1;--enter-from:translateY(28px)">
+        <span class="hwb1-bg-num" aria-hidden="true">02</span>
+        <div class="hwb1-icon"><svg class="ic"><use href="#ic-calc"/></svg></div>
+        <h3 class="hwb1-h3">Calculate</h3>
+        <p class="hwb1-p">CostAdvisor resolves live index values, applies FX conversion and Incoterm adjustments, and returns an auditable should-cost figure for any quarter.</p>
+      </div>
+      <div class="hwb1-card hwb1-card--amber" style="--i:2;--enter-from:translate(32px,8px)">
+        <span class="hwb1-bg-num" aria-hidden="true">03</span>
+        <div class="hwb1-icon"><svg class="ic"><use href="#ic-clipboard"/></svg></div>
+        <h3 class="hwb1-h3">Negotiate</h3>
+        <p class="hwb1-p">Compare should-cost against your supplier's actual price. Export a branded PDF brief with verdict, gap analysis, top drivers, and evidence-backed talking points.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Features ─────────────────────────────────────────────── -->
+<section id="features">
+  <style>
+  .fd3{max-width:1180px;margin:0 auto;padding:0 24px}
+  /* Primary tier: 3 differentiated cards */
+  .fd3-primary{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:48px}
+  @media(max-width:860px){.fd3-primary{grid-template-columns:1fr}}
+  .fd3-card{border-radius:14px;padding:28px 26px 24px;background:var(--surface);border:1px solid var(--border);position:relative;overflow:hidden;transition:box-shadow .28s cubic-bezier(.22,1,.36,1),transform .28s cubic-bezier(.22,1,.36,1),border-color .22s ease;display:flex;flex-direction:column}
+  .fd3-card:hover{box-shadow:0 12px 36px rgba(0,0,0,.09);transform:translateY(-3px);border-color:rgba(0,169,157,.35)}
+  .fd3-num{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--blue);margin-bottom:16px}
+  .fd3-icon{font-size:28px;line-height:1;margin-bottom:14px}
+  .fd3-card h4{font-family:var(--font-sans);font-weight:800;font-size:18px;letter-spacing:-.018em;margin-bottom:10px;line-height:1.15;color:var(--text)}
+  .fd3-card>p{font-family:var(--font-mono);font-size:12px;color:var(--muted);line-height:1.8;margin:0;flex:1}
+  .fd3-stat{margin-top:20px;padding-top:16px;border-top:1px solid var(--border)}
+  .fd3-stat-val{font-family:var(--font-mono);font-size:24px;font-weight:700;color:var(--blue);display:block;line-height:1;margin-bottom:4px}
+  .fd3-stat-desc{font-family:var(--font-mono);font-size:10px;color:var(--dim);line-height:1.5}
+  /* Secondary tier: compact bordered table grid */
+  .fd3-secondary{display:grid;grid-template-columns:repeat(4,1fr);margin-top:20px;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  @media(max-width:760px){.fd3-secondary{grid-template-columns:1fr 1fr}}
+  @media(max-width:480px){.fd3-secondary{grid-template-columns:1fr}}
+  .fd3-item{padding:22px 20px;border-right:1px solid var(--border);display:flex;gap:12px;align-items:flex-start;background:var(--surface);transition:background .18s}
+  .fd3-item:last-child{border-right:none}
+  @media(max-width:760px){.fd3-item:nth-child(2n){border-right:none}.fd3-item:nth-child(1),.fd3-item:nth-child(2){border-bottom:1px solid var(--border)}}
+  @media(max-width:480px){.fd3-item{border-right:none;border-bottom:1px solid var(--border)}.fd3-item:last-child{border-bottom:none}}
+  .fd3-item:hover{background:var(--surface2)}
+  .fd3-item-icon{font-size:20px;line-height:1;flex-shrink:0;margin-top:2px}
+  .fd3-item h5{font-family:var(--font-sans);font-weight:700;font-size:13px;margin-bottom:5px;color:var(--text);line-height:1.2}
+  .fd3-item p{font-family:var(--font-mono);font-size:11px;color:var(--muted);line-height:1.65;margin:0}
+  </style>
+  <div class="fd3">
+    <h2 class="section-title">The full procurement cost stack</h2>
+    <p class="section-sub">From raw formula to signed negotiation brief — every tool a Category Manager needs to hold the line on price.</p>
+    <div class="fd3-primary">
+      <div class="fd3-card reveal">
+        <div class="fd3-num">01 · Foundation</div>
+        <div class="fd3-icon"><svg class="ic"><use href="#ic-flask"/></svg></div>
+        <h4>Should-Cost Modelling</h4>
+        <p>Build weighted formulas from commodity components — each linked to a live index. Quarterly recalculation is automatic. No spreadsheet maintenance, no stale numbers.</p>
+        <div class="fd3-stat">
+          <span class="fd3-stat-val">13%</span>
+          <span class="fd3-stat-desc">average raw material savings from should-cost models · McKinsey</span>
+        </div>
+      </div>
+      <div class="fd3-card reveal" style="transition-delay:.07s">
+        <div class="fd3-num">02 · Intelligence</div>
+        <div class="fd3-icon"><svg class="ic"><use href="#ic-trend"/></svg></div>
+        <h4>Evolution Tracking</h4>
+        <p>See how your should-cost moves quarter-over-quarter as indices shift. Know when a supplier's price increase is justified by the market — and when it isn't.</p>
+        <div class="fd3-stat">
+          <span class="fd3-stat-val">~50%</span>
+          <span class="fd3-stat-desc">of supplier price-increase requests deflected using evolution data · AlixPartners</span>
+        </div>
+      </div>
+      <div class="fd3-card reveal" style="transition-delay:.14s">
+        <div class="fd3-num">03 · Outcome</div>
+        <div class="fd3-icon"><svg class="ic"><use href="#ic-file"/></svg></div>
+        <h4>Negotiation Brief</h4>
+        <p>Export a branded PDF with verdict, gap, ranked cost drivers, and AI talking points. One click from analysis to a brief that survives an enterprise procurement review.</p>
+        <div class="fd3-stat">
+          <span class="fd3-stat-val">1 click</span>
+          <span class="fd3-stat-desc">from gap analysis to a structured brief ready to put in front of a supplier</span>
+        </div>
+      </div>
+    </div>
+    <div class="fd3-consult reveal" style="margin:20px 0 8px;padding:16px 20px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);font-family:var(--font-mono);font-size:12px;color:var(--muted);text-align:center;line-height:1.7">
+      Backed by the numbers: <strong style="color:var(--text)">13%</strong> average raw-material savings from should-cost models (McKinsey) &middot; <strong style="color:var(--text)">~50%</strong> of supplier price-increase requests deflected (AlixPartners) &middot; <strong style="color:var(--text)">8&ndash;12%</strong> purchasing-expense reduction by world-class procurement teams (Bain)
+    </div>
+    <div class="fd3-secondary">
+      <div class="fd3-item reveal">
+        <span class="fd3-item-icon"><svg class="ic"><use href="#ic-target"/></svg></span>
+        <div><h5>Gap Analysis</h5><p>Quantify the gap in % and total financial exposure — instantly, against the live should-cost.</p></div>
+      </div>
+      <div class="fd3-item reveal" style="transition-delay:.05s">
+        <span class="fd3-item-icon"><svg class="ic"><use href="#ic-fx"/></svg></span>
+        <div><h5>FX Rate Engine</h5><p>Daily ECB-sourced live rates and quarterly averages back to 2020. Team custom overrides supported.</p></div>
+      </div>
+      <div class="fd3-item reveal" style="transition-delay:.10s">
+        <span class="fd3-item-icon"><svg class="ic"><use href="#ic-calc"/></svg></span>
+        <div><h5>Advanced Formula Mode</h5><p>Free-form expressions with variables mapped to indices, fixed values, or per-period uploads.</p></div>
+      </div>
+      <div class="fd3-item reveal" style="transition-delay:.15s">
+        <span class="fd3-item-icon"><svg class="ic"><use href="#ic-bars"/></svg></span>
+        <div><h5>Data Import &amp; Export</h5><p>CSV and XLSX for prices, volumes, FX, and index overrides. Export any view in one click.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Interactive Demo ──────────────────────────────────────── -->
+<section id="demo" style="background:var(--surface)">
+  <div class="container">
+    <h2 class="section-title">See should-cost update in real time</h2>
+    <p class="section-sub">Move the sliders to simulate commodity index changes. Watch the should-cost and negotiation gap recalculate instantly.</p>
+    <div class="demo-inner">
+      <div>
+        <div class="demo-total-panel glass skeuo reveal">
+          <div class="demo-total-label">SHOULD-COST — Chemical Product X</div>
+          <div class="demo-total-val" id="demoTotal">€342.00</div>
+          <div class="demo-total-unit">per tonne · Q2-2026 · CIF Rotterdam</div>
+          <div class="demo-gap-row">
+            <div class="demo-gap-tile">
+              <div class="demo-gap-tile-label">SUPPLIER PRICE</div>
+              <div class="demo-gap-tile-val" style="color:var(--red)" id="demoSupplier">€398.00</div>
+            </div>
+            <div class="demo-gap-tile">
+              <div class="demo-gap-tile-label">GAP</div>
+              <div class="demo-gap-tile-val" style="color:var(--amber)" id="demoGap">+16.4%</div>
+            </div>
+            <div class="demo-gap-tile">
+              <div class="demo-gap-tile-label">ANNUAL IMPACT</div>
+              <div class="demo-gap-tile-val" style="color:var(--red)" id="demoImpact">€2.1M</div>
+            </div>
+          </div>
+          <div class="demo-verdict over" id="demoVerdict">▲ Supplier €56/t over should-cost</div>
+        </div>
+        <div class="reveal" style="transition-delay:.1s">
+          <div class="slider-group">
+            <div class="slider-header">
+              <div>
+                <div class="slider-name">Ammonia index</div>
+                <div class="slider-sub">40% weight · base $340/t</div>
+              </div>
+              <span class="slider-val" id="slAmmVal">$340/t</span>
+            </div>
+            <input type="range" id="slAmm" min="200" max="600" value="340" oninput="updateDemo()">
+          </div>
+          <div class="slider-group">
+            <div class="slider-header">
+              <div>
+                <div class="slider-name">Natural gas</div>
+                <div class="slider-sub">30% weight · base $3.0/MMBtu</div>
+              </div>
+              <span class="slider-val" id="slGasVal">$3.0/MMBtu</span>
+            </div>
+            <input type="range" id="slGas" min="1" max="10" step="0.1" value="3.0" oninput="updateDemo()">
+          </div>
+          <div class="slider-group">
+            <div class="slider-header">
+              <div>
+                <div class="slider-name">Packaging</div>
+                <div class="slider-sub">20% weight · base $80/t</div>
+              </div>
+              <span class="slider-val" id="slPkgVal">$80/t</span>
+            </div>
+            <input type="range" id="slPkg" min="40" max="160" value="80" oninput="updateDemo()">
+          </div>
+          <div class="slider-group">
+            <div class="slider-header">
+              <div>
+                <div class="slider-name">Labour cost</div>
+                <div class="slider-sub">10% weight · base $50/t</div>
+              </div>
+              <span class="slider-val" id="slLabVal">$50/t</span>
+            </div>
+            <input type="range" id="slLab" min="30" max="100" value="50" oninput="updateDemo()">
+          </div>
+        </div>
+      </div>
+      <div class="demo-viz reveal" style="transition-delay:.15s">
+        <div class="demo-viz-title">COMPONENT COST BREAKDOWN · €/t</div>
+        <div class="demo-donut-wrap">
+          <canvas id="demoChart" role="img" aria-label="Should-cost component breakdown doughnut chart"></canvas>
+          <div class="demo-donut-center">
+            <div class="demo-donut-center-label">SHOULD-COST</div>
+            <div class="demo-donut-center-val" id="demoDonutTotal">€342</div>
+            <div class="demo-donut-center-unit">/tonne</div>
+          </div>
+        </div>
+        <div class="demo-legend" id="demoLegend"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Security ─────────────────────────────────────────────── -->
+<section id="security">
+  <svg class="mol-deco mol-tr" viewBox="0 0 200 160" aria-hidden="true">
+    <g class="bond">
+      <line x1="30" y1="42" x2="70" y2="30"/>
+      <line x1="73" y1="33" x2="73" y2="80"/><line x1="67" y1="33" x2="67" y2="80"/>
+      <line x1="70" y1="80" x2="110" y2="56"/>
+      <line x1="110" y1="56" x2="150" y2="40"/>
+      <line x1="110" y1="56" x2="110" y2="110"/>
+      <line x1="113" y1="110" x2="150" y2="95"/><line x1="111" y1="116" x2="148" y2="101"/>
+      <line x1="70" y1="80" x2="40" y2="112"/>
+    </g>
+    <circle cx="30" cy="42" r="5"/><circle cx="70" cy="30" r="5"/><circle cx="70" cy="80" r="5"/>
+    <circle cx="110" cy="56" r="5"/><circle cx="150" cy="40" r="5"/><circle cx="110" cy="110" r="5"/>
+    <circle cx="150" cy="95" r="5"/><circle cx="40" cy="112" r="5"/>
+  </svg>
+  <div class="container">
+    <h2 class="section-title">Enterprise-grade data protection</h2>
+    <p class="section-sub">Built for buyers who put real negotiation data into the platform. Your cost intelligence stays yours — always.</p>
+    <div class="security-grid">
+      <div class="security-tile glass skeuo reveal">
+        <div class="security-tile-icon"><svg class="ic"><use href="#ic-shield"/></svg></div>
+        <h4>Row-Level Security</h4>
+        <p>Postgres RLS enforced at the database layer. Every tenant's data is strictly isolated — not just in application logic.</p>
+      </div>
+      <div class="security-tile glass skeuo reveal" style="transition-delay:.08s">
+        <div class="security-tile-icon"><svg class="ic"><use href="#ic-lock"/></svg></div>
+        <h4>Encrypted at Rest &amp; Transit</h4>
+        <p>AES-256 at rest via Railway Postgres. TLS everywhere in transit. Internal AI calls over private Tailscale network only.</p>
+      </div>
+      <div class="security-tile glass skeuo reveal" style="transition-delay:.16s">
+        <div class="security-tile-icon"><svg class="ic"><use href="#ic-clipboard"/></svg></div>
+        <h4>Full Audit Log</h4>
+        <p>Every mutation, login, export, and role change is recorded in an append-only audit trail for compliance review.</p>
+      </div>
+      <div class="security-tile glass skeuo reveal" style="transition-delay:.24s">
+        <div class="security-tile-icon"><svg class="ic"><use href="#ic-key"/></svg></div>
+        <h4>RBAC + Permissions</h4>
+        <p>Team-scoped roles with granular permission gates. Plan ceilings enforced server-side. Invite-only sign-up.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Testimonial ───────────────────────────────────────────── -->
+<section class="quote-section">
+  <div class="container">
+    <div class="quote-card reveal">
+      <div class="quote-mark">&ldquo;</div>
+      <p class="quote-text">CostAdvisor turns a two-week analysis into a 20-minute preparation. We walked into our last ammonia negotiation with numbers our supplier simply couldn't dispute.</p>
+      <div class="quote-attr">Head of Procurement</div>
+      <div class="quote-badge">European Specialty Chemicals Manufacturer</div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA ───────────────────────────────────────────────────── -->
+<section id="cta" style="background:var(--surface)">
+  <svg class="mol-deco mol-bl" viewBox="0 0 200 200" aria-hidden="true">
+    <g class="orbit">
+      <ellipse cx="100" cy="100" rx="92" ry="34"/>
+      <ellipse cx="100" cy="100" rx="92" ry="34" transform="rotate(60 100 100)"/>
+      <ellipse cx="100" cy="100" rx="92" ry="34" transform="rotate(120 100 100)"/>
+    </g>
+    <circle cx="100" cy="100" r="9"/>
+    <circle cx="192" cy="100" r="4"/><circle cx="54" cy="20" r="4"/><circle cx="54" cy="180" r="4"/>
+  </svg>
+  <div class="container">
+    <div class="cta-grid">
+      <div class="cta-card glass skeuo reveal">
+        <h3>Request Early Access</h3>
+        <p>CostAdvisor is invite-only. Tell us about your procurement context and we'll be in touch within 48 hours.</p>
+        <div class="cta-demo-features">
+          <div class="cta-demo-feat"><span class="cta-demo-feat-check">✓</span> Free during early access</div>
+          <div class="cta-demo-feat"><span class="cta-demo-feat-check">✓</span> Guided onboarding on your first category</div>
+          <div class="cta-demo-feat"><span class="cta-demo-feat-check">✓</span> A direct line to the team building it</div>
+          <div class="cta-demo-feat"><span class="cta-demo-feat-check">✓</span> No credit card, no commitment</div>
+        </div>
+        <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center" onclick="openAccessModal()">Request Access →</button>
+      </div>
+
+      <div class="cta-card glass skeuo reveal" style="transition-delay:.1s">
+        <h3>Schedule a Demo</h3>
+        <p>See CostAdvisor working on a real category from your industry. 30 minutes — no slides, just the product.</p>
+        <div class="cta-demo-features">
+          <div class="cta-demo-feat"><span class="cta-demo-feat-check">✓</span> Live should-cost on your category</div>
+          <div class="cta-demo-feat"><span class="cta-demo-feat-check">✓</span> Gap analysis vs a real supplier price</div>
+          <div class="cta-demo-feat"><span class="cta-demo-feat-check">✓</span> PDF brief generated live on the call</div>
+          <div class="cta-demo-feat"><span class="cta-demo-feat-check">✓</span> Q&amp;A with the team building it</div>
+        </div>
+        <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center" onclick="openDemoModal()">Book a Demo →</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Legal ─────────────────────────────────────────────────── -->
+<section class="terms-section" id="terms">
+  <div class="container">
+    <h2 class="section-title">The fine print, in plain language</h2>
+    <p class="section-sub">How we handle your data, your IP, and your trust — no dark patterns.</p>
+    <div class="legal-grid">
+      <div class="legal-card reveal">
+        <div class="legal-card-icon"><svg class="ic"><use href="#ic-file"/></svg></div>
+        <h4>Terms of Service</h4>
+        <p>Use CostAdvisor to build and analyse should-cost models for your organisation's procurement. Redistribution, resale, or reverse-engineering is prohibited. It's a decision-support tool — we're not liable for commercial outcomes of the figures or briefs it generates.</p>
+      </div>
+      <div class="legal-card reveal" style="transition-delay:.07s">
+        <div class="legal-card-icon"><svg class="ic"><use href="#ic-lock"/></svg></div>
+        <h4>Privacy &amp; GDPR</h4>
+        <p>Operated from the EU on the lawful basis of contract performance and legitimate interest. You can access, correct, export, or delete your data at any time. We never sell personal data.</p>
+      </div>
+      <div class="legal-card reveal" style="transition-delay:.14s">
+        <div class="legal-card-icon"><svg class="ic"><use href="#ic-landmark"/></svg></div>
+        <h4>Your Data, Your IP</h4>
+        <p>Your cost models, uploaded data, and negotiation briefs stay your intellectual property. The platform, formulas, and UI are ours. Index data (ECB, EIA, Eurostat, FRED, World Bank) is provided for information — always validate before negotiating.</p>
+      </div>
+      <div class="legal-card reveal" style="transition-delay:.21s">
+        <div class="legal-card-icon"><svg class="ic"><use href="#ic-globe"/></svg></div>
+        <h4>Residency &amp; Retention</h4>
+        <p>Data is stored on EU (Frankfurt) Postgres, encrypted at rest (AES-256) and in transit (TLS 1.2+). Account data is kept for your subscription term; on deletion, personal data is removed within 30 days.</p>
+      </div>
+      <div class="legal-card reveal" style="transition-delay:.28s">
+        <div class="legal-card-icon"><svg class="ic"><use href="#ic-key"/></svg></div>
+        <h4>Authentication &amp; AI</h4>
+        <p>Google OAuth for sign-in — we never store passwords. AI narratives run on a self-hosted model; no data is sent to OpenAI or any third-party AI provider.</p>
+      </div>
+      <div class="legal-card reveal" style="transition-delay:.35s">
+        <div class="legal-card-icon"><svg class="ic"><use href="#ic-mail"/></svg></div>
+        <h4>Questions?</h4>
+        <p>Privacy and legal queries go to <a href="mailto:laurent.thomas@staminachem.com" style="color:var(--blue)">laurent.thomas@staminachem.com</a> (StaminaChem). We respond within two business days.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+<!-- ── Footer ────────────────────────────────────────────────── -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a href="/" class="nav-logo" style="display:inline-flex;margin-bottom:12px">
+          <span class="nav-logomark"><svg viewBox="0 0 32 32"><use href="#ca-logo"/></svg></span>
+          <span class="nav-wordmark"><b>Cost</b><span class="wm-light">Advisor</span></span>
+        </a>
+        <p>Buyer-side cost intelligence for procurement teams. Know what your products should cost before your supplier tells you.</p>
+        <p style="margin-top:14px">Built by <a href="https://staminachem.com/" target="_blank" rel="noopener noreferrer" style="color:var(--blue);font-weight:600">StaminaChem ↗</a> — chemical-industry strategy &amp; procurement consultants.</p>
+        <p style="margin-top:12px;font-size:12px;line-height:1.8">
+          <a href="mailto:laurent.thomas@staminachem.com" style="color:var(--blue)">laurent.thomas@staminachem.com</a><br>
+          +1 646 468 87 17 &nbsp;·&nbsp; +33 6 07 89 34 82<br>
+          Schubertring 14/1, Stock/1, 1010 Wien, Austria
+        </p>
+      </div>
+      <div class="footer-col">
+        <h5>Platform</h5>
+        <a href="#features">Features</a>
+        <a href="#how">How It Works</a>
+        <a href="#demo">Live Demo</a>
+        <a href="#security">Security</a>
+      </div>
+      <div class="footer-col">
+        <h5>Company</h5>
+        <a href="#cta">Request Access</a>
+        <a href="javascript:void(0)" onclick="openDemoModal()">Schedule Demo</a>
+        <a href="#terms">Privacy Policy</a>
+        <a href="#terms">Terms of Service</a>
+        <a href="https://staminachem.com/" target="_blank" rel="noopener noreferrer">StaminaChem ↗</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>© 2026 CostAdvisor — a <a href="https://staminachem.com/" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">StaminaChem</a> company. All rights reserved.</p>
+      <p style="font-family:var(--font-mono);font-size:11px;color:var(--dim)">Procurement intelligence. Not guesswork.</p>
+    </div>
+  </div>
+</footer>
+
+<!-- ── Access Request Modal ──────────────────────────────────── -->
+<div class="modal-backdrop" id="lpAccessModal" onclick="handleModalBackdrop(event)">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="lpAccessTitle">
+    <button class="modal-close" onclick="closeAccessModal()" aria-label="Close dialog">×</button>
+    <h3 id="lpAccessTitle">Request Early Access</h3>
+    <p class="modal-sub">CostAdvisor is currently invite-only. We'll review your request and reach out within 48 hours.</p>
+    <div id="lpModalForm">
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">Work email *</label>
+        <input type="email" id="lpModalEmail" placeholder="you@company.com" />
+      </div>
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">Full name</label>
+        <input type="text" id="lpModalName" placeholder="Jane Smith" />
+      </div>
+      <div class="form-group" style="margin-bottom:14px">
+        <label class="form-label">Company</label>
+        <input type="text" id="lpModalCompany" placeholder="Acme Chemicals" />
+      </div>
+      <div class="modal-error-msg" id="lpModalError"></div>
+      <button class="btn btn-primary" id="lpModalSubmit" style="width:100%;justify-content:center" onclick="submitAccessModal()">Send request</button>
+    </div>
+    <div class="modal-success" id="lpModalSuccess">
+      <div class="modal-success-icon"><svg class="ic"><use href="#ic-check"/></svg></div>
+      <h4>Request received</h4>
+      <p>We'll be in touch within 48 hours. Keep an eye on your inbox.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── Demo Scheduling Modal ─────────────────────────────────── -->
+<div class="modal-backdrop" id="lpDemoModal" onclick="handleDemoBackdrop(event)">
+  <div class="modal" style="max-width:500px" role="dialog" aria-modal="true" aria-labelledby="lpDemoTitle">
+    <button class="modal-close" onclick="closeDemoModal()" aria-label="Close dialog">×</button>
+    <h3 id="lpDemoTitle">Schedule a Demo</h3>
+    <p class="modal-sub">Pick a date and time — 30 minutes, no slides.</p>
+    <div class="demo-steps">
+      <div class="demo-step-dot active" id="lpStep1Dot"></div>
+      <div class="demo-step-line"></div>
+      <div class="demo-step-dot" id="lpStep2Dot"></div>
+      <div class="demo-step-line"></div>
+      <div class="demo-step-dot" id="lpStep3Dot"></div>
+    </div>
+
+    <!-- Step 1: Calendar -->
+    <div id="lpDemoStep1">
+      <div class="cal-nav">
+        <button class="cal-nav-btn" onclick="demoCalNav(-1)">←</button>
+        <span id="lpCalMonthLabel"></span>
+        <button class="cal-nav-btn" onclick="demoCalNav(1)">→</button>
+      </div>
+      <div class="lp-cal-grid" id="lpCal"></div>
+      <div class="demo-error-small" id="lpDemoDateError">No slots available for that date — please pick another.</div>
+    </div>
+
+    <!-- Step 2: Time slots -->
+    <div id="lpDemoStep2" style="display:none">
+      <div style="font-size:14px;font-weight:600;margin-bottom:4px">Pick a time</div>
+      <div id="lpDemoSlotSub" style="font-size:12px;color:var(--muted);margin-bottom:10px"></div>
+      <div class="slot-grid" id="lpSlotGrid"></div>
+      <div class="demo-nav"><button class="btn btn-ghost" onclick="demoGoStep(1)">← Back</button></div>
+    </div>
+
+    <!-- Step 3: Contact details -->
+    <div id="lpDemoStep3" style="display:none">
+      <div id="lpDemoDetailsSub" style="font-size:12px;color:var(--muted);margin-bottom:14px;font-family:var(--font-mono)"></div>
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">Full name *</label>
+        <input type="text" id="lpDemoName" placeholder="Jane Smith" />
+      </div>
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">Work email *</label>
+        <input type="email" id="lpDemoEmail" placeholder="jane@acme.com" />
+      </div>
+      <div class="form-group" style="margin-bottom:10px">
+        <label class="form-label">Phone *</label>
+        <input type="tel" id="lpDemoPhone" placeholder="+1 555 000 0000" />
+      </div>
+      <div class="form-group" style="margin-bottom:14px">
+        <label class="form-label">Company *</label>
+        <input type="text" id="lpDemoCompany" placeholder="Acme Chemicals" />
+      </div>
+      <div class="demo-error-small" id="lpDemoFormError"></div>
+      <div class="demo-nav">
+        <button class="btn btn-ghost" onclick="demoGoStep(2)">← Back</button>
+        <button class="btn btn-primary" id="lpDemoSubmitBtn" onclick="submitDemoRequest()" style="flex:1;justify-content:center">Book demo</button>
+      </div>
+    </div>
+
+    <!-- Success -->
+    <div id="lpDemoSuccess" style="display:none">
+      <div style="text-align:center;padding:20px 0">
+        <div style="margin-bottom:14px;color:var(--green)"><svg class="ic" style="width:48px;height:48px;margin:0 auto"><use href="#ic-check"/></svg></div>
+        <h4 style="font-size:20px;font-weight:700;margin-bottom:8px">Demo booked!</h4>
+        <p style="font-size:14px;color:var(--muted)">Check your inbox for a confirmation with Google Meet link.</p>
+      </div>
+    </div>
+
+    <!-- Error -->
+    <div id="lpDemoError" style="display:none">
+      <div style="text-align:center;padding:20px 0">
+        <div style="margin-bottom:14px;color:var(--amber)"><svg class="ic" style="width:48px;height:48px;margin:0 auto"><use href="#ic-alert"/></svg></div>
+        <h4 style="font-size:20px;font-weight:700;margin-bottom:8px">Something went wrong</h4>
+        <p id="lpDemoErrorMsg" style="font-size:14px;color:var(--muted)">Please try again or email us.</p>
+        <button class="btn btn-ghost" style="margin-top:16px" onclick="openDemoModal()">Try again</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Engagement popup ──────────────────────────────────────── -->
+<div class="pa-popup" id="lpPopup">
+  <button class="pa-close" onclick="dismissPopup()" aria-label="Dismiss">×</button>
+  <div class="pa-title">What should this product cost?</div>
+  <div class="pa-sub">20-minute live demo — your indices, your model, no slides.</div>
+  <button class="pa-cta" onclick="dismissPopup();openDemoModal()">Book a demo →</button>
+</div>
+
+<script>
+// ── Config ───────────────────────────────────────────────────
+const API_URL = window.location.hostname.includes('dev.')
+  ? 'https://api-dev.costadvisor.org'
+  : (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:8000'
+    : 'https://api.costadvisor.org';
+
+// The app lives on app.<env> (dev: app.dev.costadvisor.org); point Sign-in links at it.
+const APP_URL = window.location.hostname.includes('dev.')
+  ? 'https://app.dev.costadvisor.org'
+  : (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:5173'
+    : 'https://app.costadvisor.org';
+// Sign-in kicks off the Google OAuth flow directly at the API's /auth/login (host-aware).
+document.querySelectorAll('.js-signin').forEach(a => { a.href = `${API_URL}/auth/login`; });
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ── Static data ──────────────────────────────────────────────
+const Q_LABELS = [
+  'Q1-20','Q2-20','Q3-20','Q4-20','Q1-21','Q2-21','Q3-21','Q4-21',
+  'Q1-22','Q2-22','Q3-22','Q4-22','Q1-23','Q2-23','Q3-23','Q4-23',
+  'Q1-24','Q2-24','Q3-24','Q4-24','Q1-25','Q2-25','Q3-25','Q4-25',
+];
+
+// Colour per headline commodity (used for cards/sparklines whether live or fallback).
+const PULSE_COLORS = {
+  'Caustic Soda':'#0EA5E9','Chlorine':'#10B981','Sulfuric Acid':'#F59E0B',
+  'Natural Gas':'#8B5CF6','Naphtha':'#EF4444','Hydrochloric Acid':'#EC4899',
+};
+// Chemical formula per commodity → periodic-element badge on each card.
+const COMMODITY_FORMULA = {
+  'Caustic Soda':'NaOH','Chlorine':'Cl₂','Sulfuric Acid':'H₂SO₄',
+  'Hydrochloric Acid':'HCl','Natural Gas':'CH₄','Naphtha':'C₅–C₁₂',
+};
+// Fallback only — replaced at runtime by loadMarketData() with REAL platform index data
+// from /api/indexes/public-quarterly. Mirrors the live shape so both paths render identically.
+let MARKET_LIVE = false;
+const FALLBACK_QLABELS = ['Q3-24','Q4-24','Q1-25','Q2-25','Q3-25','Q4-25','Q1-26','Q2-26'];
+const COMMODITIES = [
+  { name:'Caustic Soda', unit:'$/mt', color:PULSE_COLORS['Caustic Soda'], labels:FALLBACK_QLABELS,
+    data:[300,295,290,288,285,283,290,280] },
+  { name:'Chlorine', unit:'$/kg', color:PULSE_COLORS['Chlorine'], labels:FALLBACK_QLABELS,
+    data:[0.40,0.39,0.39,0.38,0.38,0.37,0.37,0.36] },
+  { name:'Sulfuric Acid', unit:'$/mt', color:PULSE_COLORS['Sulfuric Acid'], labels:FALLBACK_QLABELS,
+    data:[150,145,142,140,138,137,138,132] },
+  { name:'Natural Gas', unit:'EUR/MWh', color:PULSE_COLORS['Natural Gas'], labels:FALLBACK_QLABELS,
+    data:[55,53,52,51,50,50,50,49.5] },
+  { name:'Naphtha', unit:'$/mt', color:PULSE_COLORS['Naphtha'], labels:FALLBACK_QLABELS,
+    data:[500,495,490,485,482,478,480,475] },
+];
+
+// Format a commodity value with its unit for the ticker/cards (e.g. "280 $/mt").
+function fmtCommodity(v, unit){
+  const n = (+v);
+  const s = n >= 1000 ? n.toLocaleString() : (n < 10 ? n.toFixed(2) : n.toString());
+  return unit ? `${s} ${unit}` : s;
+}
+function qoqStr(data){
+  const last=data[data.length-1], prev=data[data.length-2];
+  if(prev==null) return {txt:'', up:true};
+  const chg=(last-prev)/prev*100;
+  return {txt:(chg>=0?'+':'')+chg.toFixed(1)+'%', up:chg>=0};
+}
+
+// Labels start as a quarterly fallback; replaced with daily dates once the
+// live Frankfurter fetch (loadDailyFx) succeeds. fxIsDaily flips the headline
+// change window/label accordingly.
+let FX_LABELS = [
+  'Q1-21','Q2-21','Q3-21','Q4-21','Q1-22','Q2-22','Q3-22','Q4-22',
+  'Q1-23','Q2-23','Q3-23','Q4-23','Q1-24','Q2-24','Q3-24','Q4-24',
+  'Q1-25','Q2-25','Q3-25','Q4-25',
+];
+let fxIsDaily = false;
+const FX_DATA = {
+  'EUR/USD':{ from:'EUR', to:'USD', color:'#3B82F6', data:[1.21,1.20,1.18,1.14,1.13,1.05,1.01,1.07,1.08,1.09,1.07,1.08,1.03,1.00,1.06,1.12,1.08,1.10,1.17,1.16] },
+  'GBP/EUR':{ from:'GBP', to:'EUR', color:'#10B981', data:[0.87,0.86,0.86,0.85,0.84,0.83,0.85,0.86,0.88,0.87,0.87,0.86,0.83,0.84,0.84,0.84,0.85,0.86,0.87,0.88] },
+  'CNY/EUR':{ from:'CNY', to:'EUR', color:'#F59E0B', data:[7.8,7.8,7.7,7.4,7.2,6.9,7.0,7.1,7.3,7.6,7.8,7.8,7.9,8.1,7.8,8.0,8.2,8.4,8.3,8.1] },
+  'JPY/EUR':{ from:'JPY', to:'EUR', color:'#8B5CF6', data:[128,132,130,130,131,138,139,138,142,144,163,162,160,159,157,149,161,168,163,179] },
+  'USD/JPY':{ from:'USD', to:'JPY', color:'#0EA5E9', data:[105,109,110,113,115,120,136,143,140,134,133,145,148,150,155,148,152,158,155,150] },
+};
+
+// Load ~5y of daily rates per pair. Tries our backend first (same data the app
+// uses — reliable), then Frankfurter direct, then keeps the static fallback.
+// Returns an ascending [{date, rate}] series or null.
+async function fetchDailySeries(d){
+  // 1) our backend public endpoint
+  try{
+    const r=await fetch(`${API_URL}/api/fx-rates/public-daily?from_currency=${d.from}&to_currency=${d.to}&limit=2000`);
+    if(r.ok){
+      const rows=await r.json();
+      if(Array.isArray(rows)&&rows.length>1) return rows.map(x=>({date:x.date,rate:Number(x.rate)}));
+    }
+  }catch{}
+  // 2) Frankfurter direct (works in prod / other networks)
+  try{
+    const today=new Date(), start=new Date(); start.setFullYear(start.getFullYear()-5);
+    const iso=x=>x.toISOString().slice(0,10);
+    const r=await fetch(`https://api.frankfurter.app/${iso(start)}..${iso(today)}?from=${d.from}&to=${d.to}`);
+    if(r.ok){
+      const j=await r.json(), dts=Object.keys(j.rates||{}).sort();
+      const rows=dts.map(dt=>({date:dt,rate:j.rates[dt][d.to]})).filter(x=>x.rate!=null);
+      if(rows.length>1) return rows;
+    }
+  }catch{}
+  return null;
+}
+
+async function loadDailyFx(){
+  try{
+    const pairs=Object.keys(FX_DATA);
+    const results=await Promise.all(pairs.map(p=>fetchDailySeries(FX_DATA[p])));
+    let labels=null;
+    pairs.forEach((p,i)=>{
+      const rows=results[i];
+      if(!rows)return;
+      FX_DATA[p].data=rows.map(x=>x.rate);
+      const dts=rows.map(x=>x.date);
+      if(!labels||dts.length>labels.length)labels=dts;
+    });
+    if(!labels)return; // all sources failed → keep static fallback
+    FX_LABELS=labels; fxIsDaily=true;
+    buildFxCurrentGrid();
+    buildFxRangeRow();
+    switchFxPair(activeFxPair);  // applies the default range window
+  }catch{ /* keep static fallback */ }
+}
+
+
+// ── Live market data (real platform indices) ─────────────────
+const qlabel = (y,q)=>`Q${q}-${String(y).slice(2)}`;
+const SYM = {USD:'$', EUR:'€', GBP:'£', JPY:'¥'};
+
+// Fetch the curated headline commodities from the public endpoint and replace the
+// fallback arrays with real data, then re-render ticker / cards / signals / evolution.
+async function loadMarketData(){
+  try{
+    const r=await fetch(`${API_URL}/api/indexes/public-quarterly?limit=12`);
+    if(!r.ok) throw 0;
+    const rows=await r.json();
+    if(!Array.isArray(rows)||!rows.length) throw 0;
+    const mapped=rows.map(it=>({
+      name:it.commodity_name, unit:it.unit||'', currency:it.currency,
+      color:PULSE_COLORS[it.commodity_name]||'#0EA5E9',
+      labels:it.points.map(p=>qlabel(p.year,p.quarter)),
+      data:it.points.map(p=>p.value),
+    }));
+    COMMODITIES.length=0; COMMODITIES.push(...mapped);
+    MARKET_LIVE=true;
+    buildTicker(); buildPulseCards(); initSparklines();
+    buildSignalTiles(rows);
+    updateEvoFromLive(rows);
+  }catch{ /* keep the hardcoded fallback already on screen */ }
+}
+
+// Top-3 movers by |QoQ| → signal tiles (real names/deltas; impact kept illustrative).
+function buildSignalTiles(rows){
+  const row=document.getElementById('signalRow');
+  if(!row) return;
+  const movers=rows.filter(r=>r.qoq_pct!=null)
+    .sort((a,b)=>Math.abs(b.qoq_pct)-Math.abs(a.qoq_pct)).slice(0,3);
+  if(!movers.length) return;
+  row.innerHTML=movers.map((m,i)=>{
+    const up=m.qoq_pct>=0, col=up?'var(--green)':'var(--red)';
+    return `<div class="signal-tile${up?'':' down'} reveal" style="transition-delay:${i*80}ms">
+      <span class="signal-arrow" style="color:${col}">${up?'▲':'▼'}</span>
+      <div>
+        <div class="signal-tile-name">${m.commodity_name} ${up?'+':''}${m.qoq_pct.toFixed(1)}% QoQ</div>
+        <div class="signal-tile-impact">Moves the should-cost of every model linking <b style="color:${col}">${m.commodity_name}</b>.</div>
+      </div>
+    </div>`;
+  }).join('');
+  observeReveal();
+}
+
+// Drive the evolution chart's should-cost line from a real commodity index; the
+// supplier line is an illustrative pass-through-plus-margin scenario.
+function updateEvoFromLive(rows){
+  const pick=rows.find(r=>r.commodity_name==='Caustic Soda')
+    || rows.find(r=>(r.category||'')==='Chemical') || rows[0];
+  if(!pick||!pick.points||pick.points.length<2) return;
+  const pts=pick.points.slice(-8);
+  const labels=pts.map(p=>qlabel(p.year,p.quarter));
+  const should=pts.map(p=>p.value);
+  const n=should.length;
+  // Illustrative supplier line: margin widens 7% → 18% across the window.
+  const supplier=should.map((v,i)=>+(v*(1.07+0.11*(i/(n-1)))).toFixed(2));
+  const sym=SYM[pick.currency]||'';
+  buildEvoChart(labels, should, supplier, sym);
+  const lastGap=(supplier[n-1]-should[n-1])/should[n-1]*100;
+  const over=document.getElementById('evoStatOver'); if(over) over.textContent=lastGap.toFixed(1)+'%';
+  const q=document.getElementById('evoStatQ'); if(q) q.textContent=n;
+  const gapVal=(supplier[n-1]-should[n-1])*38000;  // illustrative annual volume
+  const gapEl=document.getElementById('evoStatGap');
+  if(gapEl) gapEl.textContent=sym+(gapVal>=1e6?(gapVal/1e6).toFixed(1)+'M':Math.round(gapVal/1e3)+'K');
+  const note=document.getElementById('evoNote');
+  if(note) note.textContent=`Should-cost line: live ${pick.commodity_name} index (${pick.region}). Supplier line illustrative.`;
+}
+
+// ── Ticker ───────────────────────────────────────────────────
+function buildTicker() {
+  // Derive from the same data the cards use — real index values when live, fallback otherwise.
+  const comm = COMMODITIES.map(c=>{
+    const q=qoqStr(c.data);
+    return {name:c.name, val:fmtCommodity(c.data[c.data.length-1], c.unit), chg:q.txt, up:q.up};
+  });
+  const fx = Object.entries(FX_DATA).slice(0,4).map(([pair,d])=>{
+    const q=qoqStr(d.data);
+    return {name:pair, val:(+d.data[d.data.length-1]).toFixed(d.data[d.data.length-1]<10?4:2), chg:q.txt, up:q.up};
+  });
+  const items = [...comm, ...fx];
+  const el = document.getElementById('tickerInner');
+  if (!el) return;
+  el.innerHTML = [...items,...items].map(i=>`
+    <div class="ticker-item">
+      <span class="ticker-name">${i.name}</span>
+      <span class="ticker-val">${i.val}</span>
+      <span class="ticker-chg ${i.up?'chg-up':'chg-dn'}">${i.chg}</span>
+    </div>`).join('');
+}
+
+// ── Market Pulse ─────────────────────────────────────────────
+function buildPulseCards() {
+  const grid = document.getElementById('pulseGrid');
+  if (!grid) return;
+  grid.innerHTML = COMMODITIES.map((c,i)=>{
+    const last=c.data[c.data.length-1], prev=c.data[c.data.length-2];
+    const chg=((last-prev)/prev*100).toFixed(1), up=chg>=0;
+    const valStr = (+last) >= 1000 ? (+last).toLocaleString() : last;
+    const period = (c.labels && c.labels.length) ? c.labels[c.labels.length-1] : '';
+    const formula = COMMODITY_FORMULA[c.name];
+    return `<div class="pulse-card skeuo reveal tilt-card" style="transition-delay:${i*70}ms">
+      ${formula?`<span class="pulse-formula" aria-hidden="true">${formula}</span>`:''}
+      <div class="pulse-card-name">${c.name}</div>
+      <div class="pulse-card-val">${valStr}</div>
+      <div class="pulse-card-unit">${c.unit}${period?' · '+period:''}</div>
+      <span class="pulse-card-chg ${up?'chg-up':'chg-dn'}">${up?'▲':'▼'} ${Math.abs(chg)}% QoQ</span>
+      <div class="pulse-canvas-wrap"><canvas id="spark${i}" role="img" aria-label="${c.name} price index, last 12 quarters"></canvas></div>
+    </div>`;
+  }).join('');
+  const note=document.getElementById('pulseNote');
+  if(note) note.textContent = MARKET_LIVE
+    ? 'Live platform index data'
+    : 'Showing sample data — live indices load as you browse';
+}
+
+function initSparklines() {
+  if (typeof Chart==='undefined'){setTimeout(initSparklines,150);return}
+  COMMODITIES.forEach((c,i)=>{
+    const canvas=document.getElementById('spark'+i);
+    if(!canvas)return;
+    const ctx=canvas.getContext('2d');
+    const grad=ctx.createLinearGradient(0,0,0,60);
+    grad.addColorStop(0,c.color+'40');grad.addColorStop(1,c.color+'00');
+    new Chart(canvas,{
+      type:'line',
+      data:{labels:(c.labels||Q_LABELS).slice(-12),datasets:[{data:c.data.slice(-12),borderColor:c.color,backgroundColor:grad,fill:true,tension:0.4,pointRadius:0,borderWidth:2}]},
+      options:{animation:false,responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items[0].label,label:item=>`${c.name}: ${item.raw} ${c.unit}`}}},
+        scales:{x:{display:false},y:{display:false}}}
+    });
+  });
+}
+
+// ── FX Chart ─────────────────────────────────────────────────
+let fxChartInst=null, activeFxPair='EUR/USD', activeRange='3M';
+const FX_UP='#10B981', FX_DN='#d64545';   // trend colours — match the app's History chart
+const FX_RANGE_DAYS={'1M':30,'3M':90,'6M':180,'1Y':365,'5Y':1825,'All':Infinity};
+const FX_RANGE_LABELS=['1M','3M','6M','1Y','5Y','All'];
+
+// Slice the active pair's series to the selected trailing window (daily only)
+function fxWindow(pair){
+  const d=FX_DATA[pair], days=FX_RANGE_DAYS[activeRange];
+  if(!fxIsDaily||days===Infinity||d.data.length<=days) return {labels:FX_LABELS, data:d.data};
+  const n=d.data.length;
+  return {labels:FX_LABELS.slice(n-days), data:d.data.slice(n-days)};
+}
+
+function buildFxRangeRow(){
+  const row=document.getElementById('fxRangeRow');
+  if(!row)return;
+  // Range windows only apply to the live daily series — disable until it loads.
+  row.innerHTML=FX_RANGE_LABELS.map(r=>`<button class="fx-range-btn${r===activeRange?' active':''}" onclick="setFxRange('${r}')"${fxIsDaily?'':' disabled title="Loading live rates…"'}>${r}</button>`).join('');
+}
+
+function setFxRange(r){
+  activeRange=r;
+  buildFxRangeRow();
+  switchFxPair(activeFxPair);
+}
+
+function buildFxTabs() {
+  const tabs=document.getElementById('fxTabs');
+  if(!tabs)return;
+  tabs.innerHTML=Object.keys(FX_DATA).map(p=>`<button class="fx-tab${p===activeFxPair?' active':''}" onclick="switchFxPair('${p}')">${p}</button>`).join('');
+  buildFxRangeRow();   // show range buttons immediately; they become active once daily data loads
+  buildFxCurrentGrid();
+}
+
+function buildFxCurrentGrid() {
+  const grid=document.getElementById('fxCurrentGrid');
+  if(!grid)return;
+  grid.innerHTML=Object.entries(FX_DATA).map(([pair,d])=>{
+    const last=d.data[d.data.length-1], prev=d.data[d.data.length-2];
+    const chg=((last-prev)/prev*100).toFixed(2), up=chg>=0;
+    return `<div class="fx-current-tile glass">
+      <div class="fx-current-tile-pair">${pair}</div>
+      <div class="fx-current-tile-val">${last.toFixed(4)}</div>
+      <div style="font-size:10px;font-family:var(--font-mono);color:${up?'var(--green)':'var(--red)'};margin-top:2px">${up?'▲':'▼'} ${Math.abs(chg)}%</div>
+    </div>`;
+  }).join('');
+}
+
+function switchFxPair(pair) {
+  activeFxPair=pair;
+  document.querySelectorAll('.fx-tab').forEach(t=>t.classList.toggle('active',t.textContent===pair));
+  const d=FX_DATA[pair];
+  const w=fxWindow(pair);                       // series sliced to the selected range
+  const arr=w.data;
+  const last=arr[arr.length-1], first=arr[0];
+  const delta=last-first, pct=delta/first*100, up=delta>=0;
+  const period=fxIsDaily?activeRange:'QoQ';
+  const doUpdate=()=>{
+    document.getElementById('fxChartLabel').textContent=pair.replace('/',' / ');
+    document.getElementById('fxChartVal').textContent=last.toFixed(4);
+    document.getElementById('fxChartChg').innerHTML=
+      `<span style="font-size:13px;font-family:var(--font-mono);color:${up?'var(--green)':'var(--red)'};font-weight:600">${up?'▲':'▼'} ${Math.abs(delta).toFixed(4)} (${pct>=0?'+':''}${pct.toFixed(2)}%)</span>`+
+      `<span style="font-size:12px;font-family:var(--font-mono);color:var(--muted);margin-left:8px">${period}</span>`;
+  };
+  if(fxChartInst){
+    const ids=['fxChartLabel','fxChartVal','fxChartChg'];
+    ids.forEach(id=>{const el=document.getElementById(id);if(el)el.classList.add('fx-val-fade')});
+    setTimeout(()=>{doUpdate();ids.forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('fx-val-fade')})},140);
+    const col=up?FX_UP:FX_DN;                 // colour by selected-range trend
+    fxChartInst.data.labels=w.labels;
+    fxChartInst.data.datasets[0].data=arr;
+    fxChartInst.data.datasets[0].borderColor=col;
+    fxChartInst.data.datasets[0].pointBackgroundColor=col;
+    const ctx=fxChartInst.canvas.getContext('2d');
+    const grad=ctx.createLinearGradient(0,0,0,200);
+    grad.addColorStop(0,col+'30');grad.addColorStop(1,col+'00');
+    fxChartInst.data.datasets[0].backgroundColor=grad;
+    fxChartInst.update();
+  }else{doUpdate()}
+}
+
+function initFxChart() {
+  if(typeof Chart==='undefined'){setTimeout(initFxChart,150);return}
+  const canvas=document.getElementById('fxChart');
+  if(!canvas)return;
+  const ctx=canvas.getContext('2d');
+  const w0=fxWindow(activeFxPair);
+  const col0=(w0.data[w0.data.length-1]>=w0.data[0])?FX_UP:FX_DN;
+  const grad=ctx.createLinearGradient(0,0,0,200);
+  grad.addColorStop(0,col0+'30');grad.addColorStop(1,col0+'00');
+  Chart.defaults.font.family="'JetBrains Mono',monospace";
+  Chart.defaults.color='#666666';
+  // Dashed vertical crosshair at the hovered point
+  const fxCrosshair={id:'fxCrosshair',afterDraw(chart){
+    const act=chart.tooltip&&chart.tooltip.getActiveElements?chart.tooltip.getActiveElements():[];
+    if(!act.length)return;
+    const x=act[0].element.x, a=chart.chartArea, g=chart.ctx;
+    g.save();g.beginPath();g.moveTo(x,a.top);g.lineTo(x,a.bottom);
+    g.lineWidth=1;g.setLineDash([3,3]);g.strokeStyle='rgba(0,0,0,.2)';g.stroke();g.restore();
+  }};
+  const w=fxWindow(activeFxPair);
+  fxChartInst=new Chart(canvas,{
+    type:'line',
+    plugins:[fxCrosshair],
+    data:{labels:w.labels,datasets:[{data:w.data,borderColor:col0,backgroundColor:grad,fill:true,tension:0.25,pointRadius:0,pointHoverRadius:4,pointBackgroundColor:col0,borderWidth:2}]},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false,callbacks:{
+        title:items=>items.length?items[0].label:'',
+        label:c=>`${activeFxPair}: ${c.raw.toFixed(4)}`,
+        afterLabel:c=>{
+          const i=c.dataIndex, arr=c.dataset.data;
+          if(i>0){const p=arr[i-1], dd=c.raw-p, pct=dd/p*100;
+            return `Δ prev day: ${dd>=0?'+':''}${dd.toFixed(4)} (${pct>=0?'+':''}${pct.toFixed(2)}%)`;}
+          return '';
+        }}}},
+      scales:{x:{grid:{color:'rgba(0,0,0,.06)'},ticks:{font:{size:10},maxTicksLimit:8,autoSkip:true}},
+              y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{font:{size:10}}}}}
+  });
+  // set initial values
+  switchFxPair(activeFxPair);
+}
+
+// ── Interactive Demo ─────────────────────────────────────────
+let demoChartInst=null;
+const DEMO_COMPONENTS=[
+  {name:'Ammonia',color:'#10B981'},
+  {name:'Natural Gas',color:'#0EA5E9'},
+  {name:'Packaging',color:'#8B5CF6'},
+  {name:'Labour',color:'#F59E0B'},
+];
+const DEMO_SUPPLIER=398, DEMO_VOLUME=38000;
+
+function updateDemo() {
+  const amm=+document.getElementById('slAmm').value;
+  const gas=+document.getElementById('slGas').value;
+  const pkg=+document.getElementById('slPkg').value;
+  const lab=+document.getElementById('slLab').value;
+  document.getElementById('slAmmVal').textContent='$'+amm+'/t';
+  document.getElementById('slGasVal').textContent='$'+gas.toFixed(1)+'/MMBtu';
+  document.getElementById('slPkgVal').textContent='$'+pkg+'/t';
+  document.getElementById('slLabVal').textContent='$'+lab+'/t';
+  const parts=[amm*0.40, gas*40*0.30, pkg*0.20, lab*0.10];
+  const total=parts.reduce((a,b)=>a+b,0);
+  const diff=DEMO_SUPPLIER-total;
+  const gap=diff/total*100;
+  const impact=diff*DEMO_VOLUME/1e6;
+
+  document.getElementById('demoTotal').textContent='€'+total.toFixed(2);
+  document.getElementById('demoDonutTotal').textContent='€'+Math.round(total);
+  document.getElementById('demoGap').textContent=(gap>0?'+':'')+gap.toFixed(1)+'%';
+  document.getElementById('demoImpact').textContent=(impact<0?'−':'')+'€'+Math.abs(impact).toFixed(1)+'M';
+
+  // Verdict + colour severity
+  const sevColor=gap>5?'var(--red)':gap<-5?'var(--blue)':'var(--green)';
+  document.getElementById('demoTotal').style.color=sevColor;
+  document.getElementById('demoDonutTotal').style.color=sevColor;
+  const verdict=document.getElementById('demoVerdict');
+  if(gap>5){verdict.className='demo-verdict over';verdict.textContent=`▲ Supplier €${Math.round(diff)}/t over should-cost`;}
+  else if(gap<-5){verdict.className='demo-verdict under';verdict.textContent=`↓ Supplier €${Math.round(-diff)}/t below should-cost`;}
+  else{verdict.className='demo-verdict fair';verdict.textContent='✓ Fair price — within range';}
+
+  if(demoChartInst){
+    demoChartInst.data.datasets[0].data=parts.map(p=>+p.toFixed(2));
+    demoChartInst.update('none');
+  }
+  renderDemoLegend(parts);
+}
+
+function renderDemoLegend(parts){
+  const el=document.getElementById('demoLegend');
+  if(!el)return;
+  el.innerHTML=DEMO_COMPONENTS.map((c,i)=>
+    `<div class="demo-leg-item"><span class="demo-leg-dot" style="color:${c.color};background:${c.color}"></span>`+
+    `<span class="demo-leg-name">${c.name}</span><span class="demo-leg-val">€${parts[i].toFixed(0)}</span></div>`
+  ).join('');
+}
+
+function initDemoChart() {
+  if(typeof Chart==='undefined'){setTimeout(initDemoChart,150);return}
+  const canvas=document.getElementById('demoChart');
+  if(!canvas)return;
+  demoChartInst=new Chart(canvas,{
+    type:'doughnut',
+    data:{
+      labels:DEMO_COMPONENTS.map(c=>c.name),
+      datasets:[{
+        data:[136,36,16,5],
+        backgroundColor:DEMO_COMPONENTS.map(c=>c.color),
+        borderColor:'#ffffff',borderWidth:3,hoverOffset:7
+      }]
+    },
+    options:{cutout:'68%',responsive:true,maintainAspectRatio:false,animation:{duration:300},
+      plugins:{legend:{display:false},
+        tooltip:{callbacks:{label:c=>` ${c.label}: €${c.raw.toFixed(2)}/t`}}}}
+  });
+  updateDemo();
+}
+
+// ── Access modal ─────────────────────────────────────────────
+let _lastFocus=null, _activeModal=null;  // for modal focus trap + restore
+function openAccessModal(){
+  _lastFocus=document.activeElement; _activeModal='lpAccessModal';
+  document.getElementById('lpModalForm').style.display='';
+  document.getElementById('lpModalSuccess').style.display='none';
+  document.getElementById('lpModalError').style.display='none';
+  ['lpModalEmail','lpModalName','lpModalCompany'].forEach(id=>{document.getElementById(id).value=''});
+  const btn=document.getElementById('lpModalSubmit');
+  btn.disabled=false;btn.textContent='Send request';
+  document.getElementById('lpAccessModal').style.display='flex';
+  document.body.style.overflow='hidden';
+  setTimeout(()=>document.getElementById('lpModalEmail').focus(),50);
+}
+function closeAccessModal(){
+  document.getElementById('lpAccessModal').style.display='none';
+  document.body.style.overflow='';
+  if(_activeModal==='lpAccessModal'){_activeModal=null; if(_lastFocus&&_lastFocus.focus)_lastFocus.focus();}
+}
+function handleModalBackdrop(e){if(e.target===document.getElementById('lpAccessModal'))closeAccessModal()}
+
+async function submitAccessModal(){
+  const email=document.getElementById('lpModalEmail').value.trim();
+  const name=document.getElementById('lpModalName').value.trim();
+  const company=document.getElementById('lpModalCompany').value.trim();
+  const errEl=document.getElementById('lpModalError');
+  const btn=document.getElementById('lpModalSubmit');
+  if(!email||!EMAIL_RE.test(email)){errEl.textContent='Please enter a valid work email.';errEl.style.display='block';return}
+  errEl.style.display='none';
+  btn.disabled=true;btn.innerHTML='<span class="btn-spin"></span>Sending…';
+  try{
+    const res=await fetch(`${API_URL}/api/access-requests`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,name:name||undefined,company:company||undefined})});
+    const data=await res.json().catch(()=>({}));
+    if(data.status==='accepted'||data.status==='exists'){
+      errEl.textContent='Access already granted — sign in to continue.';errEl.style.display='block';
+      btn.disabled=false;btn.textContent='Send request';return;
+    }
+    document.getElementById('lpModalForm').style.display='none';
+    document.getElementById('lpModalSuccess').style.display='block';
+  }catch{
+    btn.disabled=false;btn.textContent='Send request';
+    errEl.textContent='Something went wrong. Try again or email laurent.thomas@staminachem.com.';
+    errEl.style.display='block';
+  }
+}
+
+// ── Demo modal ────────────────────────────────────────────────
+let _demoYear, _demoMonth, _demoSelDate=null, _demoSelSlot=null;
+const _availDates={};
+
+function openDemoModal(){
+  _lastFocus=document.activeElement; _activeModal='lpDemoModal';
+  const now=new Date();
+  _demoYear=now.getFullYear();_demoMonth=now.getMonth();
+  _demoSelDate=null;_demoSelSlot=null;
+  _showDemoStep(1);
+  renderDemoCalendar(_demoYear,_demoMonth);
+  document.getElementById('lpDemoModal').style.display='flex';
+  document.body.style.overflow='hidden';
+}
+function closeDemoModal(){
+  document.getElementById('lpDemoModal').style.display='none';
+  document.body.style.overflow='';
+  if(_activeModal==='lpDemoModal'){_activeModal=null; if(_lastFocus&&_lastFocus.focus)_lastFocus.focus();}
+}
+function handleDemoBackdrop(e){if(e.target===document.getElementById('lpDemoModal'))closeDemoModal()}
+
+function _showDemoStep(n){
+  ['lpDemoStep1','lpDemoStep2','lpDemoStep3','lpDemoSuccess','lpDemoError'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.style.display='none';
+  });
+  const map={1:'lpDemoStep1',2:'lpDemoStep2',3:'lpDemoStep3'};
+  if(map[n])document.getElementById(map[n]).style.display='';
+  ['lpStep1Dot','lpStep2Dot','lpStep3Dot'].forEach((id,i)=>{
+    const el=document.getElementById(id);if(el)el.classList.toggle('active',i+1===n);
+  });
+}
+function demoGoStep(n){_showDemoStep(n)}
+
+function demoCalNav(dir){
+  // Prevent going to previous months
+  const now=new Date(); const curYear=now.getFullYear(); const curMonth=now.getMonth();
+  if(dir<0){
+    if(_demoYear<curYear||(_demoYear===curYear&&_demoMonth<=curMonth))return;
+    _demoMonth--;if(_demoMonth<0){_demoMonth=11;_demoYear--;}
+  } else {
+    _demoMonth++;if(_demoMonth>11){_demoMonth=0;_demoYear++;}
+  }
+  renderDemoCalendar(_demoYear,_demoMonth);
+  _fetchAvailDates(_demoYear,_demoMonth);
+}
+
+async function _fetchAvailDates(year,month){
+  const key=`${year}-${month}`;
+  if(_availDates[key]!==undefined)return;
+  _availDates[key]=null; // mark as fetching
+  try{
+    const res=await fetch(`${API_URL}/api/demos/available-dates?year=${year}&month=${month+1}`);
+    _availDates[key]=new Set(await res.json());
+  }catch{_availDates[key]=new Set()}
+  renderDemoCalendar(_demoYear,_demoMonth);
+}
+
+function renderDemoCalendar(year,month){
+  const fetching=_availDates[`${year}-${month}`]===null; // null = request in flight
+  document.getElementById('lpCalMonthLabel').textContent=
+    new Date(year,month,1).toLocaleString('default',{month:'long',year:'numeric'})
+    + (fetching?' · checking availability…':'');
+  const cal=document.getElementById('lpCal');
+  cal.innerHTML='';
+  ['Mo','Tu','We','Th','Fr','Sa','Su'].forEach(d=>{
+    const h=document.createElement('div');h.className='lp-cal-dow';h.textContent=d;cal.appendChild(h);
+  });
+  const today=new Date();today.setHours(0,0,0,0);
+  const first=new Date(year,month,1);
+  const startDow=(first.getDay()+6)%7;
+  for(let i=0;i<startDow;i++){const e=document.createElement('div');e.className='lp-cal-empty';cal.appendChild(e)}
+  const availKey=`${year}-${month}`;
+  const availSet=_availDates[availKey];
+  const days=new Date(year,month+1,0).getDate();
+  for(let d=1;d<=days;d++){
+    const dayDate=new Date(year,month,d);
+    const dateStr=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    if(dayDate<today){const e=document.createElement('div');e.className='lp-cal-empty';cal.appendChild(e);continue}
+    const btn=document.createElement('button');
+    btn.className='lp-cal-day';btn.textContent=d;
+    if(availSet&&!availSet.has(dateStr)){btn.classList.add('lp-cal-day--disabled')}
+    else{btn.onclick=()=>selectDemoDate(dateStr)}
+    if(dateStr===_demoSelDate)btn.classList.add('lp-cal-day--selected');
+    if(dayDate.getTime()===today.getTime())btn.classList.add('lp-cal-day--today');
+    cal.appendChild(btn);
+  }
+  if(availSet===undefined)_fetchAvailDates(year,month);
+}
+
+async function selectDemoDate(dateStr){
+  _demoSelDate=dateStr;
+  renderDemoCalendar(_demoYear,_demoMonth);
+  document.getElementById('lpDemoDateError').style.display='none';
+  try{
+    const res=await fetch(`${API_URL}/api/demos/available-slots?date=${dateStr}`);
+    const slots=await res.json();
+    if(!Array.isArray(slots)||slots.length===0){document.getElementById('lpDemoDateError').style.display='';return}
+    renderDemoSlots(slots,dateStr);
+    _showDemoStep(2);
+  }catch{document.getElementById('lpDemoDateError').style.display=''}
+}
+
+function renderDemoSlots(slots,dateStr){
+  const d=new Date(dateStr+'T00:00:00');
+  document.getElementById('lpDemoSlotSub').textContent=
+    d.toLocaleDateString('default',{weekday:'long',month:'long',day:'numeric'});
+  const grid=document.getElementById('lpSlotGrid');
+  grid.innerHTML='';_demoSelSlot=null;
+  slots.forEach(s=>{
+    const btn=document.createElement('button');
+    btn.className='lp-slot-btn';
+    btn.textContent=`${s.start_time}–${s.end_time}`;
+    btn.onclick=()=>selectDemoSlot(s.start_time,s.end_time,btn);
+    grid.appendChild(btn);
+  });
+}
+
+function selectDemoSlot(start,end,btn){
+  _demoSelSlot={start,end};
+  document.querySelectorAll('.lp-slot-btn').forEach(b=>b.classList.remove('lp-slot-btn--selected'));
+  btn.classList.add('lp-slot-btn--selected');
+  const d=new Date(_demoSelDate+'T00:00:00');
+  document.getElementById('lpDemoDetailsSub').textContent=
+    d.toLocaleDateString('default',{weekday:'long',month:'long',day:'numeric'})+` · ${start}–${end} UTC`;
+  setTimeout(()=>_showDemoStep(3),200);
+}
+
+async function submitDemoRequest(){
+  const name=document.getElementById('lpDemoName').value.trim();
+  const email=document.getElementById('lpDemoEmail').value.trim();
+  const phone=document.getElementById('lpDemoPhone').value.trim();
+  const company=document.getElementById('lpDemoCompany').value.trim();
+  const errEl=document.getElementById('lpDemoFormError');
+  errEl.style.display='none';
+  if(!name||!email||!phone||!company){errEl.textContent='Please fill in all required fields.';errEl.style.display='';return}
+  if(!EMAIL_RE.test(email)){errEl.textContent='Please enter a valid email address.';errEl.style.display='';return}
+  if(!_demoSelDate||!_demoSelSlot){errEl.textContent='Please go back and select a date and time.';errEl.style.display='';return}
+  const btn=document.getElementById('lpDemoSubmitBtn');
+  btn.disabled=true;btn.textContent='Sending…';
+  try{
+    const res=await fetch(`${API_URL}/api/demos/`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name,email,phone,company,
+        requested_date:_demoSelDate,
+        requested_start:_demoSelSlot.start,
+        requested_end:_demoSelSlot.end,
+        visitor_timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'})
+    });
+    btn.disabled=false;btn.textContent='Book demo';
+    if(res.status===409){errEl.textContent='A request already exists for this email. Check your inbox.';errEl.style.display='';return}
+    if(!res.ok){
+      const data=await res.json().catch(()=>({}));
+      document.getElementById('lpDemoErrorMsg').textContent=data.detail||'Something went wrong.';
+      ['lpDemoStep1','lpDemoStep2','lpDemoStep3'].forEach(id=>document.getElementById(id).style.display='none');
+      document.getElementById('lpDemoError').style.display='';return;
+    }
+    ['lpDemoStep1','lpDemoStep2','lpDemoStep3'].forEach(id=>document.getElementById(id).style.display='none');
+    document.getElementById('lpDemoSuccess').style.display='';
+  }catch{
+    btn.disabled=false;btn.textContent='Book demo';
+    document.getElementById('lpDemoErrorMsg').textContent='Network error. Please try again.';
+    ['lpDemoStep1','lpDemoStep2','lpDemoStep3'].forEach(id=>document.getElementById(id).style.display='none');
+    document.getElementById('lpDemoError').style.display='';
+  }
+}
+
+// ── Evolution chart ──────────────────────────────────────────
+let evoChartInst=null;
+// Build (or rebuild) the evolution chart. `sym` is the value-axis currency symbol.
+function buildEvoChart(labels, should, supplier, sym){
+  const canvas=document.getElementById('evoChart');
+  if(!canvas)return;
+  if(evoChartInst){evoChartInst.destroy();evoChartInst=null;}
+  const ctx=canvas.getContext('2d');
+  const gapFill=ctx.createLinearGradient(0,0,0,300);
+  gapFill.addColorStop(0,'rgba(239,68,68,.22)');gapFill.addColorStop(1,'rgba(239,68,68,.02)');
+  evoChartInst=new Chart(canvas,{
+    type:'line',
+    data:{labels,datasets:[
+      {label:'Supplier Price',data:supplier,borderColor:'#EF4444',backgroundColor:gapFill,fill:'+1',tension:.35,pointRadius:3,pointBackgroundColor:'#EF4444',borderWidth:2.5},
+      {label:'Should-Cost',data:should,borderColor:'#10B981',backgroundColor:'transparent',fill:false,tension:.35,pointRadius:3,pointBackgroundColor:'#10B981',borderWidth:2.5}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${sym}${c.raw}`,afterBody:items=>{
+        const s=items.find(i=>i.dataset.label==='Supplier Price'),m=items.find(i=>i.dataset.label==='Should-Cost');
+        if(s&&m){const gap=((s.raw-m.raw)/m.raw*100).toFixed(1);return `\nGap: +${gap}%`}return ''}}}},
+      scales:{x:{grid:{color:'rgba(0,0,0,.06)'},ticks:{font:{size:10}}},
+              y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{font:{size:10},callback:v=>sym+v}}}}
+  });
+}
+function initEvoChart(){
+  if(typeof Chart==='undefined'){setTimeout(initEvoChart,150);return}
+  // Fallback illustrative series (replaced by real index data via updateEvoFromLive).
+  buildEvoChart(
+    ['Q1-24','Q2-24','Q3-24','Q4-24','Q1-25','Q2-25','Q3-25','Q4-25'],
+    [310,318,325,332,328,335,342,348],
+    [340,345,355,372,368,382,398,405], '€');
+}
+
+// ── Animated counters ─────────────────────────────────────────
+function animateCount(el,target,duration){
+  const prefix=el.dataset.prefix||'',suffix=el.dataset.suffix||'';
+  const start=performance.now();
+  function step(now){
+    const p=Math.min((now-start)/duration,1);
+    const ease=1-Math.pow(1-p,4);
+    el.textContent=prefix+Math.round(ease*target)+suffix;
+    if(p<1)requestAnimationFrame(step);
+    else el.textContent=prefix+target+suffix;
+  }
+  requestAnimationFrame(step);
+}
+const countObs=new IntersectionObserver(entries=>{
+  entries.forEach(e=>{
+    if(e.isIntersecting){
+      const t=parseInt(e.target.dataset.count,10);
+      if(!isNaN(t))animateCount(e.target,t,1300);
+      countObs.unobserve(e.target);
+    }
+  });
+},{threshold:.5});
+function observeCounters(){document.querySelectorAll('.count-stat').forEach(el=>countObs.observe(el))}
+
+// ── Mouse-tilt cards ──────────────────────────────────────────
+function initTilt(){
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  if(window.matchMedia('(hover: none)').matches)return; // skip on touch
+  document.querySelectorAll('.tilt-card').forEach(card=>{
+    card.addEventListener('mousemove',e=>{
+      const r=card.getBoundingClientRect();
+      const x=e.clientX-r.left-r.width/2;
+      const y=e.clientY-r.top-r.height/2;
+      card.style.transition='transform .08s ease-out';
+      card.style.transform=`perspective(600px) rotateX(${-(y/r.height)*9}deg) rotateY(${(x/r.width)*9}deg) translateZ(6px)`;
+    });
+    card.addEventListener('mouseleave',()=>{
+      card.style.transition='transform .5s cubic-bezier(.23,1,.32,1)';
+      card.style.transform='';
+    });
+  });
+}
+
+// ── Slider fill ───────────────────────────────────────────────
+function updateSliderFill(s){
+  const min=+s.min,max=+s.max,val=+s.value;
+  const pct=((val-min)/(max-min))*100;
+  s.style.background=`linear-gradient(to right,var(--blue) ${pct}%,#eef2f6 ${pct}%)`;
+}
+function initSliderFills(){
+  document.querySelectorAll('input[type=range]').forEach(s=>{
+    updateSliderFill(s);
+    // Throttle the track repaint to one per animation frame (smoother on touch drags).
+    let raf=null;
+    s.addEventListener('input',()=>{
+      if(raf)return;
+      raf=requestAnimationFrame(()=>{raf=null;updateSliderFill(s);});
+    });
+  });
+}
+
+// ── Engagement popup ──────────────────────────────────────────
+let _popupShown=false;
+function showPopup(){
+  try{if(sessionStorage.getItem('ca_popup_dismissed'))return}catch{}
+  const p=document.getElementById('lpPopup');if(p)p.classList.add('show');
+}
+function dismissPopup(){
+  const p=document.getElementById('lpPopup');if(p)p.classList.remove('show');
+  try{sessionStorage.setItem('ca_popup_dismissed','1')}catch{}
+}
+function maybePopup(){
+  if(_popupShown)return;
+  if(window.scrollY>window.innerHeight*1.3){_popupShown=true;showPopup()}
+}
+window.addEventListener('scroll',maybePopup,{passive:true});
+setTimeout(()=>{if(!_popupShown){_popupShown=true;showPopup()}},16000);
+
+// ── Keyboard ─────────────────────────────────────────────────
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){closeAccessModal();closeDemoModal();return}
+  // Trap Tab within the open modal (focus can't escape to background content).
+  if(e.key==='Tab'&&_activeModal){
+    const modal=document.querySelector('#'+_activeModal+' .modal');
+    if(!modal)return;
+    const list=[...modal.querySelectorAll('a[href],button:not([disabled]),input,select,textarea,[tabindex]:not([tabindex="-1"])')]
+      .filter(el=>el.offsetParent!==null);
+    if(!list.length)return;
+    const first=list[0], last=list[list.length-1];
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+  }
+});
+
+// ── Nav burger ────────────────────────────────────────────────
+document.getElementById('lpBurger').addEventListener('click',()=>{
+  const menu=document.getElementById('lpMobileMenu');
+  const open=menu.classList.toggle('open');
+  document.getElementById('lpBurger').setAttribute('aria-expanded',String(open));
+});
+document.getElementById('lpMobileMenu').querySelectorAll('a').forEach(a=>{
+  a.addEventListener('click',()=>{
+    document.getElementById('lpMobileMenu').classList.remove('open');
+    document.getElementById('lpBurger').setAttribute('aria-expanded','false');
+  });
+});
+
+// ── Nav scroll state ──────────────────────────────────────────
+(function(){
+  const nav=document.querySelector('.nav');if(!nav)return;
+  window.addEventListener('scroll',()=>nav.classList.toggle('scrolled',window.scrollY>40),{passive:true});
+})();
+
+// ── How-it-works scroll entrance ──────────────────────────────
+(function(){
+  const sec=document.querySelector('.hwb1a');if(!sec)return;
+  const obs=new IntersectionObserver(entries=>{
+    if(entries[0].isIntersecting){sec.classList.add('in-view');obs.disconnect()}
+  },{threshold:.12});
+  obs.observe(sec);
+})();
+
+// ── Scroll progress ───────────────────────────────────────────
+(function(){
+  const bar=document.getElementById('lpProgress');if(!bar)return;
+  let ticking=false;
+  function update(){
+    const max=document.documentElement.scrollHeight-window.innerHeight;
+    bar.style.transform=`scaleX(${max>0?window.scrollY/max:0})`;ticking=false;
+  }
+  window.addEventListener('scroll',()=>{if(!ticking){ticking=true;requestAnimationFrame(update)}},{passive:true});
+  update();
+})();
+
+// ── Scroll reveal ─────────────────────────────────────────────
+// Add class to body first so CSS can hide reveals; without JS they remain visible.
+document.body.classList.add('reveal-ready');
+const revealObs=new IntersectionObserver(entries=>{
+  entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');revealObs.unobserve(e.target)}});
+},{threshold:0.08,rootMargin:'0px 0px -24px 0px'});
+
+function observeReveal(){document.querySelectorAll('.reveal').forEach(el=>revealObs.observe(el))}
+
+// ── Boot ──────────────────────────────────────────────────────
+buildTicker();
+buildPulseCards();
+buildFxTabs();
+
+function boot(){
+  observeReveal();
+  observeCounters();
+  initSliderFills();
+  initDemoChart();
+  initFxChart();   // draws instantly with fallback data — no network
+  // Lazy-load the live daily FX series only when the FX section scrolls into view,
+  // keeping the network call off the initial render path (protects LCP / Core Web Vitals).
+  const fxSection = document.getElementById('fx');
+  if (fxSection && 'IntersectionObserver' in window) {
+    const fxObs = new IntersectionObserver((entries, o) => {
+      if (entries.some(e => e.isIntersecting)) { o.disconnect(); loadDailyFx(); }
+    }, { rootMargin: '200px' });
+    fxObs.observe(fxSection);
+  } else {
+    loadDailyFx();
+  }
+  // Lazy-load real commodity index data when the Market section nears the viewport
+  // (off the initial render path, same CWV rationale as FX). Falls back silently.
+  const mktSection = document.getElementById('market');
+  if (mktSection && 'IntersectionObserver' in window) {
+    const mktObs = new IntersectionObserver((entries, o) => {
+      if (entries.some(e => e.isIntersecting)) { o.disconnect(); loadMarketData(); }
+    }, { rootMargin: '200px' });
+    mktObs.observe(mktSection);
+  } else {
+    loadMarketData();
+  }
+  initEvoChart();
+  // sparklines + tilt need cards in DOM — slight delay to ensure they've rendered
+  setTimeout(()=>{initSparklines();initTilt();observeReveal();},250);
+}
+
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded',boot);
+}else{
+  boot();
+}
+</script>
+<!-- impeccable-live-start -->
+<script src="http://localhost:8400/live.js"></script>
+<!-- impeccable-live-end -->
+</body>
+</html>

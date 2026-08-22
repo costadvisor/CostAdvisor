@@ -4,8 +4,25 @@ Run with: python -m app.seed
 """
 from app.database import SessionLocal, engine, Base
 from app.models import (
-    CommodityIndex, IndexValue, CostScenario, ChemicalFamily,
+    CommodityIndex, IndexValue, CostScenario, ChemicalFamily, Region,
 )
+
+# Region reference data (Scrum 56): 7 top-level regions + GLOBAL sentinel, plus a
+# few subregions reconciling feed grain finer than the top level.
+REGIONS_SEED = [
+    ("GLOBAL", "Global", None),
+    ("Europe", "Europe", None),
+    ("NA", "North America", None),
+    ("Latam", "Latin America", None),
+    ("Asia", "Asia", None),
+    ("ME", "Middle East", None),
+    ("Africa", "Africa", None),
+    ("Oceania", "Oceania", None),
+    ("NWE", "Northwest Europe", "Europe"),
+    ("France", "France", "Europe"),
+    ("USA", "United States", "NA"),
+    ("China", "China", "Asia"),
+]
 
 # ── Commodity indices ────────────────────────────────────────────────────────
 # Only real data from verified public sources.
@@ -329,6 +346,19 @@ def seed():
         if existing:
             print("Database already seeded. Skipping.")
             return
+
+        # Regions must exist before index values (region is an FK to regions.code).
+        print("Seeding regions...")
+        by_code = {}
+        for code, name, _ in REGIONS_SEED:
+            r = Region(code=code, name=name)
+            db.add(r)
+            by_code[code] = r
+        db.flush()
+        for code, _, parent_code in REGIONS_SEED:
+            if parent_code:
+                by_code[code].parent_id = by_code[parent_code].id
+        db.flush()
 
         print("Seeding chemical families...")
         for name in FAMILIES:

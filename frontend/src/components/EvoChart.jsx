@@ -1,7 +1,12 @@
 import { PIE_COLORS } from '../utils/constants';
 
-export default function EvoChart({ periods, theoretical, actual, refCost, componentSeries }) {
-  const W = 880, H = 230;
+/* `height` sets the viewBox height (default 230, unchanged for existing callers).
+ * Because the SVG renders at `width: 100%` with `height: auto`, the viewBox aspect
+ * ratio decides the on-screen height — on a 1250px-wide card the default becomes
+ * ~327px tall, which is a lot of room to give a chart that has only one flat line
+ * to draw. Callers with nothing to compare can pass something shorter. */
+export default function EvoChart({ periods, theoretical, actual, refCost, componentSeries, height = 230 }) {
+  const W = 880, H = height;
   const PAD = { l: 50, r: 16, t: 16, b: 34 };
 
   const visibleComps = (componentSeries || []).filter(cs => cs.visible);

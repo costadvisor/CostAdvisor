@@ -1,0 +1,73 @@
+.lp-strip {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  padding: 16px 0;
+  overflow: hidden;
+  /* fade out left/right edges for infinite-scroll illusion */
+  mask-image: linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
+}
+
+/* ─── Scrolling track ─── */
+.lp-strip-track {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  animation: lp-marquee 42s linear infinite;
+  will-change: transform;
+}
+
+.lp-strip:hover .lp-strip-track {
+  animation-play-state: paused;
+}
+
+/* Track contains items duplicated — translate exactly -50% for seamless loop */
+@keyframes lp-marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* ─── Items ─── */
+.lp-strip-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  letter-spacing: 0.2px;
+  padding: 0 28px;
+  white-space: nowrap;
+}
+
+.lp-strip-dot {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+
+.lp-strip-sep {
+  display: block;
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* Coloured source dots per provider */
+.lp-strip-src {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.lp-strip-src-ecb      { background: #4fffb0; }
+.lp-strip-src-eia      { background: #f5a623; }
+.lp-strip-src-eurostat { background: #74b9ff; }
+.lp-strip-src-fred     { background: #a29bfe; }
+.lp-strip-src-wb       { background: #55efc4; }

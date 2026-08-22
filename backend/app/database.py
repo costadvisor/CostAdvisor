@@ -22,6 +22,8 @@ class Base(DeclarativeBase):
 # against the correct identity.
 current_user_id_var: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 bypass_rls_var: ContextVar[bool] = ContextVar("bypass_rls", default=False)
+# Set to the admin's email when a request is executing on behalf of an impersonated user.
+impersonating_admin_email_var: ContextVar[str | None] = ContextVar("impersonating_admin_email", default=None)
 
 
 @event.listens_for(SASession, "after_begin")

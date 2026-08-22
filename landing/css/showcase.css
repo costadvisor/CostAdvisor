@@ -1,0 +1,384 @@
+.lp-showcase {
+  padding-bottom: 120px;
+  border-bottom: 1px solid var(--border);
+}
+
+.lp-showcase-headline {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(32px, 4.5vw, 56px);
+  font-weight: 800;
+  letter-spacing: -1.5px;
+  line-height: 1.08;
+  margin: 14px 0 72px;
+}
+
+/* ─── Alternating rows ─── */
+.lp-showcase-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 80px;
+  align-items: center;
+  padding: 80px 0;
+  border-top: 1px solid var(--border);
+  max-width: var(--max-w);
+  margin: 0 auto;
+  padding-left: 40px;
+  padding-right: 40px;
+}
+
+.lp-showcase-row-flip {
+  direction: rtl;
+}
+.lp-showcase-row-flip > * {
+  direction: ltr;
+}
+
+/* ─── Text side ─── */
+.lp-showcase-text p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.9;
+  margin-top: 16px;
+  max-width: 400px;
+}
+
+.lp-showcase-h3 {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(22px, 2.8vw, 32px);
+  font-weight: 800;
+  letter-spacing: -0.8px;
+  line-height: 1.15;
+  margin-top: 10px;
+}
+
+/* ─── Visual cards ─── */
+.lp-showcase-visual {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.lp-sv-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px 26px;
+  width: 100%;
+  max-width: 340px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+}
+
+.lp-sv-header {
+  font-family: 'Syne', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* shared dot used across all cards */
+.lp-sv-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+/* ─── Card A: formula builder ─── */
+.lp-sv-formula {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.lp-sv-comp {
+  display: grid;
+  grid-template-columns: 10px 1fr 1fr 32px;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.lp-sv-comp:last-child { border-bottom: none; }
+
+.lp-sv-comp-label {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.lp-sv-index-src {
+  font-size: 9px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lp-sv-comp-margin .lp-sv-comp-label { color: var(--muted); font-style: italic; }
+
+.lp-sv-w {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  text-align: right;
+}
+
+.lp-sv-result {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.lp-sv-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* ─── Card B: stacked evolution chart ─── */
+.lp-sv-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.lp-sv-chart-area {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 110px;
+  padding-bottom: 20px;
+  position: relative;
+}
+
+.lp-sv-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.lp-sv-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  overflow: hidden;
+  gap: 1px;
+}
+
+.lp-sv-seg {
+  width: 100%;
+  min-height: 4px;
+  opacity: 0.75;
+}
+
+/* Actual price dot: positioned at the top of the theoretical bar */
+.lp-sv-act-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
+.lp-sv-act-match { bottom: 46%; background: var(--accent);  }
+.lp-sv-act-above { bottom: 54%; background: var(--accent2); }
+.lp-sv-act-gap   { bottom: 68%; background: var(--accent2); }
+
+.lp-sv-qlabel {
+  position: absolute;
+  bottom: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.lp-sv-legend {
+  display: flex;
+  gap: 10px;
+  font-size: 9px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.lp-sv-legend span { display: flex; align-items: center; gap: 5px; }
+
+.lp-sv-leg-swatch {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  opacity: 0.75;
+}
+
+.lp-sv-leg-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.lp-sv-leg-act { background: var(--accent2); }
+
+/* ─── Card C: brief ─── */
+.lp-sv-brief-verdict {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: rgba(255,107,107,0.08);
+  border: 1px solid rgba(255,107,107,0.2);
+  border-radius: 7px;
+}
+
+.lp-sv-brief-label {
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.lp-sv-brief-challenge {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent2);
+}
+
+.lp-sv-brief-metrics {
+  margin-bottom: 12px;
+}
+
+.lp-sv-brief-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-secondary);
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.lp-sv-brief-gap { font-weight: 600; }
+.lp-sv-brief-gap span:first-child { color: var(--text); }
+.lp-sv-accent2 { color: var(--accent2); font-weight: 700; }
+
+/* Drivers mini-table */
+.lp-sv-drivers {
+  font-size: 9px;
+  margin-bottom: 12px;
+}
+
+.lp-sv-drivers-head {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1fr 1fr;
+  gap: 6px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.lp-sv-driver-row {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1fr 1fr;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.lp-sv-driver-row span:first-child {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.lp-sv-muted { color: var(--muted); }
+.lp-sv-up    { color: var(--accent2); font-weight: 600; text-align: right; }
+.lp-sv-down  { color: var(--accent);  font-weight: 600; text-align: right; }
+
+.lp-sv-brief-narrative {
+  font-size: 9px;
+  color: var(--muted);
+  line-height: 1.65;
+  font-style: italic;
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+}
+
+/* ─── Coming soon badge ─── */
+.lp-coming-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--accent3);
+  background: var(--info-bg);
+  border-radius: 3px;
+  padding: 2px 7px;
+  vertical-align: middle;
+  margin-left: 8px;
+  position: relative;
+  top: -1px;
+}
+
+/* ─── Portfolio gap table mockup ─── */
+.lp-sv-gap-table { width: 100%; border-collapse: collapse; }
+.lp-sv-gap-table th {
+  font-size: 8px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--muted); font-weight: 500; padding: 0 0 8px; text-align: left;
+}
+.lp-sv-gap-table td {
+  font-size: 10px; color: var(--text); padding: 7px 0;
+  border-top: 1px solid var(--border);
+}
+.lp-sv-gap-bar {
+  display: inline-block; height: 6px; border-radius: 2px;
+  background: var(--accent2); opacity: 0.75; vertical-align: middle;
+}
+.lp-sv-gap-ok  { color: var(--accent);  font-weight: 600; }
+.lp-sv-gap-bad { color: var(--accent2); font-weight: 600; }
+.lp-sv-gap-warn{ color: var(--warning,#f59e0b); font-weight: 600; }
+
+@media (max-width: 900px) {
+  .lp-showcase-row,
+  .lp-showcase-row-flip {
+    grid-template-columns: 1fr;
+    direction: ltr;
+    gap: 40px;
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .lp-sv-card { max-width: 100%; }
+}

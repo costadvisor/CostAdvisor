@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import EvoChart from '../components/EvoChart';
-import api from '../api';
+import api, { formatApiError } from '../api';
 
 export default function Brief() {
   const { costModelId } = useParams();
@@ -15,7 +15,7 @@ export default function Brief() {
     setLoading(true);
     api.post('/api/costing/brief', { cost_model_id: costModelId })
       .then(({ data }) => { setData(data); setError(null); })
-      .catch(err => setError(err.response?.data?.detail || 'Failed to load'))
+      .catch(err => setError(formatApiError(err)))
       .finally(() => setLoading(false));
   }, [costModelId]);
 
@@ -26,19 +26,35 @@ export default function Brief() {
   const {
     product_name, supplier_name, destination_country, currency, unit,
     current_should_cost, current_actual_price, gap, gap_pct,
-    total_impact, period_label, evolution, narrative, drivers,
+    total_impact, volumes_missing, period_label, evolution, narrative, drivers,
   } = data;
   const sym = currency === 'EUR' ? '\u20AC' : '$';
 
   const verdictColor = gap === null ? 'var(--muted)' : gap > 0 ? 'var(--accent2)' : 'var(--accent)';
   const verdictLabel = gap === null ? 'No actual price data' : gap > 0 ? 'Above should-cost' : 'Below should-cost';
 
+  const handleExportPDF = () => {
+    const slug = (s) => (s || '').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
+    const prev = document.title;
+    document.title = `brief-${slug(product_name)}-${slug(supplier_name)}-${period_label || ''}`;
+    window.print();
+    setTimeout(() => { document.title = prev; }, 500);
+  };
+
   const theoretical = evolution.map(p => p.theoretical);
-  const actual = evolution.map(p => p.actual ?? 0);
+  // Pass null through \u2014 EvoChart skips null points instead of connecting to zero
+  const actual = evolution.map(p => p.actual);
   const periodLabels = evolution.map(p => p.period);
 
   return (
     <div className="ca-page ca-fade-in ca-print-page">
+      <nav className="ca-no-print" style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, display: 'flex', gap: 6, alignItems: 'center' }}>
+        <button className="ca-btn-link" style={{ fontSize: 11 }} onClick={() => navigate('/dashboard')}>Dashboard</button>
+        <span>›</span>
+        <button className="ca-btn-link" style={{ fontSize: 11 }} onClick={() => navigate(`/cost-models/${costModelId}`)}>{product_name}</button>
+        <span>›</span>
+        <span>Brief</span>
+      </nav>
       {/* Header with print button */}
       <div className="ca-no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <div className="ca-h1">Negotiation Brief</div>
@@ -46,14 +62,26 @@ export default function Brief() {
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}`)}>View Model</button>
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/pricing`)}>Pricing</button>
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/evolution`)}>Evolution</button>
-          <button className="ca-btn ca-btn-primary" onClick={() => window.print()}>Export PDF</button>
+          <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/squeeze`)}>Squeeze</button>
+          <button className="ca-btn ca-btn-primary" onClick={handleExportPDF}>Export PDF</button>
         </div>
       </div>
 
-      {/* Print-only header */}
-      <div className="ca-print-only" style={{ marginBottom: 20 }}>
-        <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 22, fontWeight: 800 }}>Negotiation Brief</div>
-        <div style={{ fontSize: 10, color: 'var(--muted)' }}>Generated {new Date().toLocaleDateString()}</div>
+      {/* Print-only masthead */}
+      <div className="ca-print-only" style={{ marginBottom: 24, borderBottom: '2px solid #111', paddingBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#111' }}>CostAdvisor</div>
+            <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 20, fontWeight: 800, color: '#111', lineHeight: 1.2, marginTop: 2 }}>Negotiation Brief</div>
+          </div>
+          <div style={{ textAlign: 'right', fontSize: 11, color: '#444', lineHeight: 1.8 }}>
+            <div><strong>{product_name}</strong></div>
+            {supplier_name && <div>Supplier: {supplier_name}</div>}
+            {destination_country && <div>Destination: {destination_country}</div>}
+            <div>Period: {period_label}</div>
+            <div>Generated: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+          </div>
+        </div>
       </div>
 
       {/* Verdict card */}
@@ -91,15 +119,23 @@ export default function Brief() {
         </div>
       </div>
 
-      {/* Total impact */}
-      {total_impact !== null && (
-        <div className="ca-metric" style={{ marginBottom: 16 }}>
-          <div className="ca-metric-lbl">Total Financial Impact (Gap x Volume)</div>
-          <div className="ca-metric-val" style={{ color: total_impact > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
-            {total_impact > 0 ? '+' : ''}{sym}{total_impact.toFixed(0)}
+      {/* Total impact — always shown; prompts to add volumes when missing */}
+      <div className="ca-metric" style={{ marginBottom: 16 }}>
+        <div className="ca-metric-lbl">Total Financial Impact (Gap × Volume)</div>
+        {volumes_missing ? (
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
+            Upload volumes in the{' '}
+            <button className="ca-btn-link" onClick={() => navigate(`/cost-models/${costModelId}/pricing`)}>
+              Pricing tab
+            </button>{' '}
+            to calculate your total financial exposure.
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="ca-metric-val" style={{ color: total_impact > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
+            {total_impact > 0 ? '+' : ''}{sym}{total_impact?.toFixed(0) ?? '0'}
+          </div>
+        )}
+      </div>
 
       {/* Chart */}
       <div className="ca-card" style={{ marginBottom: 16 }}>
@@ -195,6 +231,7 @@ export default function Brief() {
                     display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
                     background: d.direction === 'up' ? 'var(--danger-bg)' : d.direction === 'down' ? 'var(--success-bg)' : 'var(--neutral-bg)',
                     color: d.direction === 'up' ? 'var(--accent2)' : d.direction === 'down' ? 'var(--accent)' : 'var(--muted)',
+                    borderLeft: '3px solid currentColor',
                   }}>
                     {d.direction === 'up' ? '\u2191 Up' : d.direction === 'down' ? '\u2193 Down' : '\u2194 Flat'}
                   </span>
@@ -209,7 +246,7 @@ export default function Brief() {
       <div className="ca-card">
         <div className="ca-card-title">Narrative Summary</div>
         <div style={{ fontSize: 13, lineHeight: 1.9, color: 'var(--text-secondary)', whiteSpace: 'pre-line' }}>
-          {narrative}
+          {narrative ?? <span style={{ color: 'var(--muted)', fontStyle: 'italic' }}>AI narrative unavailable.</span>}
         </div>
       </div>
     </div>

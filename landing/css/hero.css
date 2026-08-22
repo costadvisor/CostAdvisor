@@ -1,0 +1,312 @@
+.lp-hero {
+  padding: 100px 0 80px;
+  position: relative;
+  overflow: hidden;
+}
+
+.lp-hero::before {
+  content: '';
+  position: absolute;
+  top: -80px;
+  left: 0;
+  width: 60%;
+  height: 700px;
+  background: radial-gradient(ellipse at 30% 40%, var(--accent-glow) 0%, transparent 65%);
+  pointer-events: none;
+}
+
+/* faint engineering-grid backdrop, faded radially so it never competes with text */
+.lp-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 56px 56px;
+  opacity: 0.3;
+  mask-image: radial-gradient(ellipse 75% 70% at 35% 25%, black 0%, transparent 72%);
+  -webkit-mask-image: radial-gradient(ellipse 75% 70% at 35% 25%, black 0%, transparent 72%);
+  pointer-events: none;
+}
+
+.lp-hero-inner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── Left: text ─── */
+.lp-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  font-weight: 600;
+  margin-bottom: 28px;
+}
+
+.lp-eyebrow-dot {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.lp-hero-title {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(40px, 5.5vw, 72px);
+  font-weight: 800;
+  letter-spacing: -2px;
+  line-height: 1.04;
+  margin-bottom: 24px;
+}
+
+.lp-hero-title .lp-accent {
+  color: var(--accent);
+}
+
+.lp-hero-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.9;
+  max-width: 440px;
+  margin-bottom: 36px;
+}
+
+/* ─── Inline trust stats (Auth0-style "3 billion+" row) ─── */
+.lp-hero-trust {
+  display: flex;
+  align-items: center;
+  margin-bottom: 32px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  max-width: 440px;
+}
+
+.lp-hero-trust-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  padding: 0 16px;
+}
+
+.lp-hero-trust-item:first-child { padding-left: 0; }
+
+.lp-hero-trust-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+
+.lp-hero-trust-label {
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: 0.2px;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.lp-hero-trust-sep {
+  width: 1px;
+  height: 28px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.lp-hero-cta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* ─── Right: mockup card ─── */
+.lp-hero-mockup {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.lp-mock-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px 28px;
+  width: 100%;
+  max-width: 360px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.3);
+}
+
+.lp-mock-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.lp-mock-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  display: block;
+  margin-bottom: 3px;
+}
+
+.lp-mock-period {
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: 0.3px;
+  display: block;
+}
+
+.lp-mock-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.lp-mock-badge-challenge {
+  background: rgba(255,107,107,0.12);
+  color: var(--accent2);
+}
+
+/* KPI row */
+.lp-mock-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.lp-mock-kpi {
+  background: var(--surface2);
+  padding: 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lp-mock-kpi-label {
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.lp-mock-kpi-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Driver rows */
+.lp-mock-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 12px 0 10px;
+}
+
+.lp-mock-drivers-label {
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.lp-mock-row {
+  display: grid;
+  grid-template-columns: 10px 1fr 1fr 44px;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+}
+
+.lp-mock-cat {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  display: block;
+}
+
+.lp-mock-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lp-mock-src {
+  font-size: 8px;
+  color: var(--muted);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  flex-shrink: 0;
+}
+
+.lp-mock-bar {
+  height: 3px;
+  background: var(--surface2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.lp-mock-bar span {
+  display: block;
+  height: 100%;
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.lp-mock-val {
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  text-align: right;
+}
+
+.lp-mock-up   { color: var(--accent2); }
+.lp-mock-down { color: var(--accent);  }
+
+.lp-mock-accent  { color: var(--accent);  font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.lp-mock-accent2 { color: var(--accent2); font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+
+@media (max-width: 900px) {
+  .lp-hero-inner {
+    grid-template-columns: 1fr;
+    gap: 48px;
+  }
+  .lp-hero-mockup { justify-content: flex-start; }
+  .lp-mock-card   { max-width: 100%; }
+}

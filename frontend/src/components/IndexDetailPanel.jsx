@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import api from '../api';
+import { useState, useEffect, useRef } from 'react';
+import api, { formatApiError } from '../api';
+import { useConfirm } from './ConfirmDialog';
 
 export default function IndexDetailPanel({ commodity_id, commodity_name, region, teamId, source, globalScraper, onSourceChanged, onRemoved }) {
   const [editing, setEditing] = useState(false);
@@ -10,8 +11,13 @@ export default function IndexDetailPanel({ commodity_id, commodity_name, region,
   );
   const [saving, setSaving] = useState(false);
   const [scraping, setScraping] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadPreview, setUploadPreview] = useState(null);
+  const [pendingFile, setPendingFile] = useState(null);
   const [message, setMessage] = useState(null);
   const [detectedSource, setDetectedSource] = useState(null);
+  const fileRef = useRef(null);
+  const confirm = useConfirm();
 
   // Detect source type when URL changes
   useEffect(() => {
@@ -49,7 +55,7 @@ export default function IndexDetailPanel({ commodity_id, commodity_name, region,
       setEditing(false);
       setMessage({ type: 'success', text: 'Source saved.' });
     } catch (err) {
-      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to save source.' });
+      setMessage({ type: 'error', text: formatApiError(err) });
     } finally {
       setSaving(false);
     }
@@ -74,8 +80,50 @@ export default function IndexDetailPanel({ commodity_id, commodity_name, region,
     }
   };
 
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setMessage(null);
+    setUploadPreview(null);
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await api.post(`/api/indexes/overrides?team_id=${teamId}&dry_run=true`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setPendingFile(file);
+      setUploadPreview({ filename: res.data.filename || file.name, rows_processed: res.data.rows_processed, errors: res.data.errors || [] });
+    } catch (err) {
+      setMessage({ type: 'error', text: formatApiError(err) });
+    } finally {
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const handleConfirmUpload = async () => {
+    if (!pendingFile) return;
+    setUploading(true);
+    const formData = new FormData();
+    formData.append('file', pendingFile);
+    try {
+      const res = await api.post(`/api/indexes/overrides?team_id=${teamId}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const count = res.data?.rows_processed ?? '?';
+      setMessage({ type: 'success', text: `${count} row(s) imported.` });
+      setUploadPreview(null);
+      setPendingFile(null);
+      onSourceChanged(source);
+    } catch (err) {
+      setMessage({ type: 'error', text: formatApiError(err) });
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleResetAll = async () => {
-    if (!confirm(`Reset ALL overrides for ${commodity_name} / ${region}? This cannot be undone.`)) return;
+    const ok = await confirm({ title: `Reset ALL overrides for ${commodity_name} / ${region}?`, message: 'This cannot be undone.', confirmLabel: 'Reset', danger: true });
+    if (!ok) return;
     setMessage(null);
     try {
       const res = await api.delete('/api/indexes/overrides/bulk', {
@@ -90,7 +138,8 @@ export default function IndexDetailPanel({ commodity_id, commodity_name, region,
 
   const handleRemove = async () => {
     if (!source) return;
-    if (!confirm(`Remove index source for ${commodity_name} / ${region}? This will delete the source configuration.`)) return;
+    const ok = await confirm({ title: `Remove index source for ${commodity_name} / ${region}?`, message: 'This will delete the source configuration.', confirmLabel: 'Remove', danger: true });
+    if (!ok) return;
     try {
       await api.delete(`/api/indexes/sources/${source.id}`);
       onRemoved();
@@ -194,24 +243,77 @@ export default function IndexDetailPanel({ commodity_id, commodity_name, region,
           </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-          <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => setEditing(true)}>
-            {source ? 'Change Source' : 'Configure Source'}
-          </button>
-          {source?.source_type === 'scrape_url' && (
-            <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={handleScrapeNow} disabled={scraping}>
-              {scraping ? 'Scraping...' : 'Re-scrape Now'}
+        <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+            <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => setEditing(true)}>
+              {source ? 'Change Source' : 'Configure Source'}
             </button>
-          )}
-          <button className="ca-btn ca-btn-danger" onClick={handleResetAll}>
-            Reset All Overrides
-          </button>
-          {source && (
-            <button className="ca-btn ca-btn-danger" onClick={handleRemove}>
-              Remove Index
+            {source?.source_type === 'scrape_url' && (
+              <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={handleScrapeNow} disabled={scraping}>
+                {scraping ? 'Scraping...' : 'Re-scrape Now'}
+              </button>
+            )}
+            {source?.source_type === 'upload' && (
+              <>
+                <a
+                  href={`/api/indexes/template?team_id=${teamId}`}
+                  download="index_overrides_template.csv"
+                  className="ca-btn ca-btn-ghost ca-btn-sm"
+                  style={{ fontSize: 11 }}
+                >
+                  Template
+                </a>
+                <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} style={{ display: 'none' }} />
+                <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
+                  {uploading ? 'Uploading...' : 'Upload CSV / Excel'}
+                </button>
+              </>
+            )}
+            <button className="ca-btn ca-btn-danger" onClick={handleResetAll}>
+              Reset All Overrides
             </button>
+            {source && (
+              <button className="ca-btn ca-btn-danger" onClick={handleRemove}>
+                Remove Index
+              </button>
+            )}
+          </div>
+          {uploadPreview && (
+            <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                    {uploadPreview.filename} &middot; {uploadPreview.rows_processed} row{uploadPreview.rows_processed !== 1 ? 's' : ''} ready
+                  </div>
+                  {uploadPreview.errors.length > 0 && (
+                    <div style={{ color: 'var(--accent3)' }}>
+                      <span style={{ fontWeight: 600 }}>{uploadPreview.errors.length} row{uploadPreview.errors.length !== 1 ? 's' : ''} skipped:</span>
+                      <ul style={{ margin: '3px 0 0 14px', padding: 0 }}>
+                        {uploadPreview.errors.slice(0, 4).map((e, i) => <li key={i}>{e.row ? `Row ${e.row}: ` : ''}{e.message}</li>)}
+                        {uploadPreview.errors.length > 4 && <li>…and {uploadPreview.errors.length - 4} more</li>}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                  <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => { setUploadPreview(null); setPendingFile(null); }}>Cancel</button>
+                  <button
+                    className="ca-btn ca-btn-primary ca-btn-sm"
+                    onClick={handleConfirmUpload}
+                    disabled={uploading || uploadPreview.rows_processed === 0}
+                  >
+                    {uploading ? 'Importing…' : `Import ${uploadPreview.rows_processed}`}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
-        </div>
+          {source?.source_type === 'upload' && !uploadPreview && (
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 14 }}>
+              CSV columns: <code>material</code>, <code>region</code>, <code>period</code> (Q1-2024), <code>value</code>
+            </div>
+          )}
+        </>
       )}
 
       {/* Feedback */}

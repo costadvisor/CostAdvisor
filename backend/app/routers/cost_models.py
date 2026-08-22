@@ -8,13 +8,13 @@ from app.models.user import User
 from app.models.product import Product
 from app.models.cost_model import CostModel, FormulaVersion, FormulaComponent
 from app.models.index_data import CommodityIndex
-from app.models.team import TeamMembership
 from app.routers.auth import get_current_user
 from app.schemas.cost_model import (
     CostModelCreate, CostModelUpdate, CostModelOut,
     FormulaVersionCreate, FormulaVersionOut,
 )
 from app.services.audit import log_event
+from app.services.permissions import require_permission
 
 router = APIRouter()
 
@@ -24,15 +24,6 @@ def resolve_commodity_id(db: Session, name: str) -> int | None:
         return None
     commodity = db.query(CommodityIndex).filter(CommodityIndex.name == name).first()
     return commodity.id if commodity else None
-
-
-def require_team_access(db: Session, user: User, team_id: uuid.UUID):
-    membership = db.query(TeamMembership).filter(
-        TeamMembership.user_id == user.id,
-        TeamMembership.team_id == team_id,
-    ).first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Not a member of this team")
 
 
 def _build_cost_model_out(cm: CostModel) -> CostModelOut:
@@ -51,7 +42,7 @@ def list_cost_models(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_team_access(db, current_user, team_id)
+    require_permission(db, current_user, team_id, "cost_models.view")
     models = db.query(CostModel).filter(CostModel.team_id == team_id).all()
     return [_build_cost_model_out(cm) for cm in models]
 
@@ -63,7 +54,7 @@ def create_cost_model(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_team_access(db, current_user, team_id)
+    require_permission(db, current_user, team_id, "cost_models.edit")
 
     # Verify product exists and belongs to team
     product = db.query(Product).filter(Product.id == data.product_id).first()
@@ -99,6 +90,9 @@ def create_cost_model(
         named_place=data.formula.named_place,
         landed_cost_adjustments=data.formula.landed_cost_adjustments,
         notes=data.formula.notes,
+        formula_type=data.formula.formula_type,
+        expression=data.formula.expression,
+        variables=data.formula.variables,
     )
     db.add(fv)
     db.flush()
@@ -112,12 +106,13 @@ def create_cost_model(
         )
         db.add(fc)
 
-    db.commit()
-    db.refresh(cm)
     log_event(db, team_id, current_user.id, "create", "cost_model", str(cm.id),
               new_value={"product_id": str(data.product_id), "region": data.region, "currency": data.currency})
+    # Build response while still in transaction so lazy-loaded relationships (product, supplier)
+    # are accessible without opening a second transaction after commit.
+    result = _build_cost_model_out(cm)
     db.commit()
-    return _build_cost_model_out(cm)
+    return result
 
 
 @router.get("/{cost_model_id}", response_model=CostModelOut)
@@ -129,7 +124,7 @@ def get_cost_model(
     cm = db.query(CostModel).filter(CostModel.id == cost_model_id).first()
     if not cm:
         raise HTTPException(status_code=404, detail="Cost model not found")
-    require_team_access(db, current_user, cm.team_id)
+    require_permission(db, current_user, cm.team_id, "cost_models.view")
     return _build_cost_model_out(cm)
 
 
@@ -143,7 +138,7 @@ def update_cost_model(
     cm = db.query(CostModel).filter(CostModel.id == cost_model_id).first()
     if not cm:
         raise HTTPException(status_code=404, detail="Cost model not found")
-    require_team_access(db, current_user, cm.team_id)
+    require_permission(db, current_user, cm.team_id, "cost_models.edit")
 
     changes = {}
     for field in ["supplier_id", "destination_country", "destination_region", "region", "currency", "incoterm"]:
@@ -152,12 +147,11 @@ def update_cost_model(
             changes[field] = {"old": str(getattr(cm, field)), "new": str(val)}
             setattr(cm, field, val)
 
-    db.commit()
-    db.refresh(cm)
     if changes:
         log_event(db, cm.team_id, current_user.id, "update", "cost_model", str(cm.id), new_value=changes)
-        db.commit()
-    return _build_cost_model_out(cm)
+    result = _build_cost_model_out(cm)
+    db.commit()
+    return result
 
 
 @router.delete("/{cost_model_id}")
@@ -169,7 +163,7 @@ def delete_cost_model(
     cm = db.query(CostModel).filter(CostModel.id == cost_model_id).first()
     if not cm:
         raise HTTPException(status_code=404, detail="Cost model not found")
-    require_team_access(db, current_user, cm.team_id)
+    require_permission(db, current_user, cm.team_id, "cost_models.delete")
     team_id = cm.team_id
     log_event(db, team_id, current_user.id, "delete", "cost_model", str(cm.id),
               previous_value={"product_id": str(cm.product_id), "region": cm.region})
@@ -189,7 +183,7 @@ def renegotiate(
     cm = db.query(CostModel).filter(CostModel.id == cost_model_id).first()
     if not cm:
         raise HTTPException(status_code=404, detail="Cost model not found")
-    require_team_access(db, current_user, cm.team_id)
+    require_permission(db, current_user, cm.team_id, "cost_models.edit")
 
     # Check if a version exists for this quarter
     existing = db.query(FormulaVersion).filter(
@@ -207,6 +201,9 @@ def renegotiate(
         existing.named_place = data.named_place
         existing.landed_cost_adjustments = data.landed_cost_adjustments
         existing.notes = data.notes
+        existing.formula_type = data.formula_type
+        existing.expression = data.expression
+        existing.variables = data.variables
         existing.updated_at = datetime.now(timezone.utc)
 
         # Delete old components, create new ones
@@ -223,14 +220,20 @@ def renegotiate(
             )
             db.add(fc)
 
-        db.commit()
-        db.refresh(existing)
+        db.flush()
         log_event(db, cm.team_id, current_user.id, "update", "formula_version", str(existing.id),
                   new_value={"cost_model_id": str(cost_model_id),
                              "quarter": f"Q{data.base_quarter}-{data.base_year}",
                              "base_price": str(existing.base_price), "margin_type": existing.margin_type})
+        # Build the response while the session is live: expire first so the
+        # freshly-swapped components reload (the bulk delete + add left the
+        # cached collection stale), and so each component's commodity_name — a
+        # lazy relationship — resolves before commit. Expunging first (the old
+        # pattern) detached the components and 500'd on that lazy load.
+        db.expire(existing)
+        out = FormulaVersionOut.model_validate(existing)
         db.commit()
-        return existing
+        return out
     else:
         # New quarter — create new version
         fv = FormulaVersion(
@@ -244,6 +247,9 @@ def renegotiate(
             named_place=data.named_place,
             landed_cost_adjustments=data.landed_cost_adjustments,
             notes=data.notes,
+            formula_type=data.formula_type,
+            expression=data.expression,
+            variables=data.variables,
         )
         db.add(fv)
         db.flush()
@@ -257,14 +263,17 @@ def renegotiate(
             )
             db.add(fc)
 
-        db.commit()
-        db.refresh(fv)
+        db.flush()
         log_event(db, cm.team_id, current_user.id, "create", "formula_version", str(fv.id),
                   new_value={"cost_model_id": str(cost_model_id),
                              "quarter": f"Q{data.base_quarter}-{data.base_year}",
                              "base_price": str(fv.base_price), "margin_type": fv.margin_type})
+        # Build the response while session-bound so components (and each lazy
+        # commodity_name) load; expire first so the just-added components attach.
+        db.expire(fv)
+        out = FormulaVersionOut.model_validate(fv)
         db.commit()
-        return fv
+        return out
 
 
 @router.get("/{cost_model_id}/versions", response_model=list[FormulaVersionOut])
@@ -276,7 +285,7 @@ def list_versions(
     cm = db.query(CostModel).filter(CostModel.id == cost_model_id).first()
     if not cm:
         raise HTTPException(status_code=404, detail="Cost model not found")
-    require_team_access(db, current_user, cm.team_id)
+    require_permission(db, current_user, cm.team_id, "cost_models.view")
     return (
         db.query(FormulaVersion)
         .filter(FormulaVersion.cost_model_id == cost_model_id)
@@ -295,7 +304,7 @@ def delete_version(
     cm = db.query(CostModel).filter(CostModel.id == cost_model_id).first()
     if not cm:
         raise HTTPException(status_code=404, detail="Cost model not found")
-    require_team_access(db, current_user, cm.team_id)
+    require_permission(db, current_user, cm.team_id, "cost_models.delete")
 
     fv = db.query(FormulaVersion).filter(
         FormulaVersion.id == version_id,
@@ -327,7 +336,7 @@ def clone_cost_model(
     original = db.query(CostModel).filter(CostModel.id == cost_model_id).first()
     if not original:
         raise HTTPException(status_code=404, detail="Cost model not found")
-    require_team_access(db, current_user, original.team_id)
+    require_permission(db, current_user, original.team_id, "cost_models.edit")
 
     clone = CostModel(
         team_id=original.team_id,
@@ -356,6 +365,9 @@ def clone_cost_model(
             incoterm=current_fv.incoterm,
             named_place=current_fv.named_place,
             landed_cost_adjustments=current_fv.landed_cost_adjustments,
+            formula_type=current_fv.formula_type,
+            expression=current_fv.expression,
+            variables=current_fv.variables,
         )
         db.add(fv)
         db.flush()
@@ -371,6 +383,6 @@ def clone_cost_model(
 
     log_event(db, clone.team_id, current_user.id, "clone", "cost_model", str(clone.id),
               new_value={"source_cost_model_id": str(original.id)})
+    result = _build_cost_model_out(clone)
     db.commit()
-    db.refresh(clone)
-    return _build_cost_model_out(clone)
+    return result

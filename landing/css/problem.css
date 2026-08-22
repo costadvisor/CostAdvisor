@@ -1,0 +1,39 @@
+.lp-problem {
+  padding: 120px 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+}
+
+.lp-problem-quote {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(28px, 4vw, 52px);
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.15;
+  letter-spacing: -1px;
+  max-width: 780px;
+  margin: 0 auto 40px;
+}
+
+.lp-problem-quote em {
+  color: var(--accent);
+  font-style: normal;
+}
+
+.lp-problem-answer {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.9;
+  max-width: 560px;
+  margin: 0 auto 20px;
+}
+
+.lp-problem-statement {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(18px, 2.5vw, 26px);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.4px;
+}

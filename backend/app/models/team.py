@@ -20,6 +20,11 @@ class Team(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+    plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("plans.id", ondelete="SET NULL"), nullable=True
+    )
+    # Scrum 24 — team-level Slack webhook for alert delivery
+    slack_webhook_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     # Relationships
     memberships = relationship("TeamMembership", back_populates="team", lazy="selectin")

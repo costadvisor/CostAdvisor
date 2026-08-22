@@ -9,6 +9,10 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        // FastAPI 307-redirects no-slash paths (e.g. /api/indexes → /api/indexes/) to an
+        // absolute backend URL, which would jump out of the proxy and fail CORS. Follow the
+        // redirect inside the proxy so the browser only ever sees a same-origin response.
+        followRedirects: true,
       },
       '/auth': {
         target: 'http://localhost:8000',

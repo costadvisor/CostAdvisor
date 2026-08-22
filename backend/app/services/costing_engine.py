@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.cost_model import CostModel
 from app.models.price_data import ActualPrice
 from app.models.actual_volume import ActualVolume
-from app.services.data_resolver import get_single_index_value
+from app.services.data_resolver import get_single_index_value, get_single_index_value_detailed
 from app.services.volume_projector import project_volumes
 from app.services.narrative import generate_narrative
 from app.services.fx_converter import convert_price
@@ -19,7 +19,117 @@ from app.schemas.costing import (
     SqueezeRequest, SqueezeResult, SqueezePeriod,
     BriefRequest, BriefResult, BriefDriver,
     PriceChangeRequest, PriceChangeResult, PriceChangeComponent,
+    DataGap,
 )
+
+# ── Advanced formula evaluator ─────────────────────────────────
+import ast as _ast
+import operator as _op
+
+_SAFE_OPS: dict = {
+    _ast.Add: _op.add,
+    _ast.Sub: _op.sub,
+    _ast.Mult: _op.mul,
+    _ast.Div: _op.truediv,
+    _ast.Pow: _op.pow,
+    _ast.Mod: _op.mod,
+    _ast.USub: _op.neg,
+    _ast.UAdd: _op.pos,
+}
+
+# Comparison operators — enable threshold / conditional formulas via `x if x < 100 else 100`.
+_SAFE_CMP: dict = {
+    _ast.Lt: _op.lt, _ast.LtE: _op.le,
+    _ast.Gt: _op.gt, _ast.GtE: _op.ge,
+    _ast.Eq: _op.eq, _ast.NotEq: _op.ne,
+}
+
+
+def _step(x, threshold, below, above):
+    """Step function: `below` when x < threshold, else `above`."""
+    return below if x < threshold else above
+
+
+def _clamp(x, lo, hi):
+    """Bound x to [lo, hi] — min/max bounds in one call."""
+    return max(lo, min(hi, x))
+
+
+# Whitelisted functions for advanced formulas (Scrum 28: bounds, steps, yield
+# factors). No builtins beyond these — the call node only accepts these names.
+_SAFE_FUNCS: dict = {
+    "min": min,
+    "max": max,
+    "abs": abs,
+    "round": round,
+    "clamp": _clamp,
+    "step": _step,
+}
+
+
+def _eval_node(node, ctx: dict):
+    if isinstance(node, _ast.Constant):
+        return float(node.value) if isinstance(node.value, (int, float)) else node.value
+    if isinstance(node, _ast.Name):
+        if node.id not in ctx:
+            raise ValueError(f"Undefined variable '{node.id}'")
+        return float(ctx[node.id])
+    if isinstance(node, _ast.BinOp):
+        fn = _SAFE_OPS.get(type(node.op))
+        if fn is None:
+            raise ValueError(f"Unsupported operator: {type(node.op).__name__}")
+        return fn(_eval_node(node.left, ctx), _eval_node(node.right, ctx))
+    if isinstance(node, _ast.UnaryOp):
+        # `not` is boolean; the rest are numeric sign operators
+        if isinstance(node.op, _ast.Not):
+            return not _eval_node(node.operand, ctx)
+        fn = _SAFE_OPS.get(type(node.op))
+        if fn is None:
+            raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
+        return fn(_eval_node(node.operand, ctx))
+    if isinstance(node, _ast.Call):
+        # Only bare `name(...)` calls against the whitelist — no attributes, no kwargs.
+        if not isinstance(node.func, _ast.Name):
+            raise ValueError("Only direct function calls are allowed")
+        fn = _SAFE_FUNCS.get(node.func.id)
+        if fn is None:
+            raise ValueError(f"Unsupported function: {getattr(node.func, 'id', '?')}")
+        if node.keywords:
+            raise ValueError("Keyword arguments are not allowed")
+        return float(fn(*[_eval_node(a, ctx) for a in node.args]))
+    if isinstance(node, _ast.IfExp):
+        # ternary — `body if test else orelse` (threshold / conditional logic)
+        return _eval_node(node.body, ctx) if _eval_node(node.test, ctx) else _eval_node(node.orelse, ctx)
+    if isinstance(node, _ast.Compare):
+        left = _eval_node(node.left, ctx)
+        for op, comparator in zip(node.ops, node.comparators):
+            cmpfn = _SAFE_CMP.get(type(op))
+            if cmpfn is None:
+                raise ValueError(f"Unsupported comparison: {type(op).__name__}")
+            right = _eval_node(comparator, ctx)
+            if not cmpfn(left, right):
+                return False
+            left = right   # support chained comparisons (a < b < c)
+        return True
+    if isinstance(node, _ast.BoolOp):
+        vals = [_eval_node(v, ctx) for v in node.values]
+        if isinstance(node.op, _ast.And):
+            return all(vals)
+        if isinstance(node.op, _ast.Or):
+            return any(vals)
+        raise ValueError(f"Unsupported boolean operator: {type(node.op).__name__}")
+    raise ValueError(f"Unsupported expression node: {type(node).__name__}")
+
+
+def safe_eval_expr(expression: str, context: dict) -> float:
+    """Safely evaluate a mathematical expression.
+    Square brackets are accepted as grouping (common in contract formulas).
+    Only arithmetic operators and variable lookups are allowed — no builtins,
+    no attribute access, no function calls."""
+    expr = expression.replace('[', '(').replace(']', ')')
+    tree = _ast.parse(expr, mode='eval')
+    return _eval_node(tree.body, context)
+
 
 # ── Period helpers ─────────────────────────────────────────────
 
@@ -68,12 +178,18 @@ def _available_index_range(db: Session, cost_model: CostModel):
 
     min_yq, max_yq = None, None
 
-    # Check index data for this model's commodity components
+    # Check index data for this model's commodity components (simple + advanced)
     commodity_ids = set()
     for fv in cost_model.formula_versions:
         for c in fv.components:
             if c.commodity_id:
                 commodity_ids.add(c.commodity_id)
+        # Advanced mode: collect commodity ids from variable definitions
+        fv_type = getattr(fv, 'formula_type', 'simple') or 'simple'
+        if fv_type == 'advanced' and fv.variables:
+            for var_def in fv.variables.values():
+                if var_def.get('type') == 'index' and var_def.get('commodity_id'):
+                    commodity_ids.add(var_def['commodity_id'])
 
     if commodity_ids:
         row = db.query(
@@ -139,10 +255,10 @@ def _default_period_range(db: Session, cost_model: CostModel):
 
 # ── Conversion helpers ────────────────────────────────────────
 
-def _apply_fx(db: Session, value: float, from_ccy: str, to_ccy: str | None, year: int, quarter: int) -> float:
+def _apply_fx(db: Session, value: float, from_ccy: str, to_ccy: str | None, year: int, quarter: int, team_id=None) -> float:
     if not to_ccy or to_ccy == from_ccy:
         return value
-    return convert_price(db, value, from_ccy, to_ccy, year, quarter)
+    return convert_price(db, value, from_ccy, to_ccy, year, quarter, team_id=team_id)
 
 
 def _apply_unit(value: float, from_unit: str, to_unit: str | None) -> float:
@@ -212,9 +328,12 @@ def _apply_margin(indexed_cost: float, margin_type: str, margin_value: float | N
 # ── Should-Cost ────────────────────────────────────────────────
 
 def _resolve_basis(cost_model: CostModel, fv) -> tuple[str | None, dict | None]:
-    """The Incoterm a price is *quoted under* and the price-level adjustments."""
+    """The Incoterm a price is *quoted under* and the price-level adjustments.
+    `landed_cost_adjustments` lives only on FormulaVersion — CostModel has no such
+    column, so there is no model-level fallback (previously crashed with
+    AttributeError whenever fv had no adjustments of its own)."""
     incoterm = (fv.incoterm if fv and fv.incoterm else cost_model.incoterm)
-    adjustments = (fv.landed_cost_adjustments if fv else None) or cost_model.landed_cost_adjustments
+    adjustments = fv.landed_cost_adjustments if fv else None
     return _norm_incoterm(incoterm), adjustments
 
 
@@ -267,9 +386,15 @@ def calculate_should_cost(
         db, fv, cost_model, region, ref_year, ref_quarter, t_year, t_quarter, base_price
     )
 
-    should_cost, margin_amount = _apply_margin(
-        indexed_cost, fv.margin_type, fv.margin_value, base_price
-    )
+    # Advanced formulas embed margin in the expression — skip the margin step.
+    formula_type = getattr(fv, 'formula_type', 'simple') or 'simple'
+    if formula_type == 'advanced':
+        should_cost = indexed_cost
+        margin_amount = 0.0
+    else:
+        should_cost, margin_amount = _apply_margin(
+            indexed_cost, fv.margin_type, fv.margin_value, base_price
+        )
 
     target_inc = _norm_incoterm(normalize_to_incoterm)
     if target_inc:
@@ -340,7 +465,7 @@ def calculate_evolution(
 
     # Convert reference cost for display (use current/latest formula)
     ref_cost_display = _apply_unit(
-        _apply_fx(db, base_price, model_ccy, out_ccy, ref_year, ref_quarter),
+        _apply_fx(db, base_price, model_ccy, out_ccy, ref_year, ref_quarter, team_id=cost_model.team_id),
         model_unit, out_unit
     )
 
@@ -365,6 +490,7 @@ def calculate_evolution(
                     ))
 
     periods_out = []
+    data_gaps: list[DataGap] = []
     for year, quarter, month, label in periods:
         # Period-aware: get the formula for this specific period
         period_fv = fv if use_active else _get_period_formula(cost_model, year, quarter)
@@ -389,11 +515,17 @@ def calculate_evolution(
                 cur_val = get_single_index_value(
                     db, cost_model.team_id, comp.commodity_id, region, year, quarter
                 )
+                if not ref_val or not cur_val:
+                    data_gaps.append(DataGap(
+                        component_label=comp.label,
+                        period=label,
+                        reason="no index value found",
+                    ))
                 ratio = (cur_val / ref_val) if (ref_val and cur_val) else 1.0
             else:
                 ratio = 1.0
             comp_cost = comp_base * weight * ratio
-            comp_cost = _apply_unit(_apply_fx(db, comp_cost, model_ccy, out_ccy, year, quarter), model_unit, out_unit)
+            comp_cost = _apply_unit(_apply_fx(db, comp_cost, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
             comp_costs[comp.label] = round(comp_cost, 4)
 
         theoretical, _ = _apply_margin(indexed_cost, period_fv.margin_type, period_fv.margin_value, period_base_price)
@@ -413,12 +545,12 @@ def calculate_evolution(
                 actual = normalize_with_lane(actual, a_inc, target_inc, a_adj, lane_adj)
 
         # Apply FX and unit conversions
-        theoretical = _apply_unit(_apply_fx(db, theoretical, model_ccy, out_ccy, year, quarter), model_unit, out_unit)
+        theoretical = _apply_unit(_apply_fx(db, theoretical, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
         if actual is not None:
-            actual = _apply_unit(_apply_fx(db, actual, model_ccy, out_ccy, year, quarter), model_unit, out_unit)
+            actual = _apply_unit(_apply_fx(db, actual, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
 
         gap = (actual - theoretical) if actual is not None else None
-        bp_display = _apply_unit(_apply_fx(db, period_base_price, model_ccy, out_ccy, year, quarter), model_unit, out_unit)
+        bp_display = _apply_unit(_apply_fx(db, period_base_price, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
         gap_pct = (gap / bp_display * 100) if (gap is not None and bp_display) else None
 
         periods_out.append(EvolutionPeriod(
@@ -451,6 +583,7 @@ def calculate_evolution(
         available_from_quarter=avail_min_q,
         available_to_year=avail_max_y,
         available_to_quarter=avail_max_q,
+        data_gaps=data_gaps,
     )
 
 
@@ -501,7 +634,7 @@ def calculate_squeeze(
     volume_data = project_volumes(raw_volumes, request.volume_projection, period_keys)
 
     ref_cost_display = _apply_unit(
-        _apply_fx(db, base_price, model_ccy, out_ccy, ref_year, ref_quarter),
+        _apply_fx(db, base_price, model_ccy, out_ccy, ref_year, ref_quarter, team_id=cost_model.team_id),
         model_unit, out_unit
     )
 
@@ -528,12 +661,12 @@ def calculate_squeeze(
 
         actual = actuals.get((year, quarter))
 
-        theoretical = _apply_unit(_apply_fx(db, theoretical, model_ccy, out_ccy, year, quarter), model_unit, out_unit)
+        theoretical = _apply_unit(_apply_fx(db, theoretical, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
         if actual is not None:
-            actual = _apply_unit(_apply_fx(db, actual, model_ccy, out_ccy, year, quarter), model_unit, out_unit)
+            actual = _apply_unit(_apply_fx(db, actual, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
 
         gap = (actual - theoretical) if actual is not None else None
-        bp_display = _apply_unit(_apply_fx(db, period_base_price, model_ccy, out_ccy, year, quarter), model_unit, out_unit)
+        bp_display = _apply_unit(_apply_fx(db, period_base_price, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
         gap_pct = (gap / bp_display * 100) if (gap is not None and bp_display) else None
 
         vol, vol_projected = volume_data.get((year, quarter), (0.0, True))
@@ -638,12 +771,12 @@ def calculate_brief(
         theoretical, _ = _apply_margin(indexed_cost, period_fv.margin_type, period_fv.margin_value, period_base_price)
         actual = actuals.get((year, quarter))
 
-        theoretical = _apply_unit(_apply_fx(db, theoretical, model_ccy, out_ccy, year, quarter), model_unit, out_unit)
+        theoretical = _apply_unit(_apply_fx(db, theoretical, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
         if actual is not None:
-            actual = _apply_unit(_apply_fx(db, actual, model_ccy, out_ccy, year, quarter), model_unit, out_unit)
+            actual = _apply_unit(_apply_fx(db, actual, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
 
         gap = (actual - theoretical) if actual is not None else None
-        bp_display = _apply_unit(_apply_fx(db, period_base_price, model_ccy, out_ccy, year, quarter), model_unit, out_unit)
+        bp_display = _apply_unit(_apply_fx(db, period_base_price, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
         gap_pct = (gap / bp_display * 100) if (gap is not None and bp_display) else None
 
         evo_periods.append(EvolutionPeriod(
@@ -660,6 +793,7 @@ def calculate_brief(
     current_gap = last_period.gap if last_period else None
     current_gap_pct = last_period.gap_pct if last_period else None
 
+    volumes_missing = not bool(raw_volumes)
     total_impact = None
     if raw_volumes:
         total_impact = 0.0
@@ -670,8 +804,10 @@ def calculate_brief(
 
     # Compute drivers using latest formula
     last_y, last_q = periods[-1][0], periods[-1][1]
+    last_label = periods[-1][3]
     comp_base = _component_base(base_price, fv.margin_type, fv.margin_value)
     drivers = []
+    data_gaps: list[DataGap] = []
     for comp in fv.components:
         weight = float(comp.weight)
         idx_name = None
@@ -685,6 +821,12 @@ def calculate_brief(
             cur_val = get_single_index_value(
                 db, cost_model.team_id, comp.commodity_id, region, last_y, last_q
             )
+            if not ref_val or not cur_val:
+                data_gaps.append(DataGap(
+                    component_label=comp.label,
+                    period=last_label,
+                    reason="no index value found",
+                ))
             if ref_val is not None and cur_val is not None and ref_val != 0:
                 ratio = cur_val / ref_val
                 idx_change_pct = (ratio - 1) * 100
@@ -692,11 +834,11 @@ def calculate_brief(
                 idx_name = comp.commodity.name
 
         contribution = _apply_unit(
-            _apply_fx(db, comp_base * weight * (idx_change_pct / 100), model_ccy, out_ccy, last_y, last_q),
+            _apply_fx(db, comp_base * weight * (idx_change_pct / 100), model_ccy, out_ccy, last_y, last_q, team_id=cost_model.team_id),
             model_unit, out_unit
         )
         comp_cost = _apply_unit(
-            _apply_fx(db, comp_base * weight * ratio, model_ccy, out_ccy, last_y, last_q),
+            _apply_fx(db, comp_base * weight * ratio, model_ccy, out_ccy, last_y, last_q, team_id=cost_model.team_id),
             model_unit, out_unit
         )
         direction = "up" if idx_change_pct > 1 else "down" if idx_change_pct < -1 else "flat"
@@ -737,10 +879,12 @@ def calculate_brief(
         gap=current_gap,
         gap_pct=current_gap_pct,
         total_impact=round(total_impact, 2) if total_impact is not None else None,
+        volumes_missing=volumes_missing,
         period_label=period_label,
         evolution=evo_periods,
         narrative=narrative,
         drivers=drivers,
+        data_gaps=data_gaps,
     )
 
 
@@ -866,6 +1010,10 @@ def _compute_indexed_cost(
     base_price: float,
 ) -> float:
     """Compute the indexed cost for a given period using the formula components."""
+    formula_type = getattr(fv, 'formula_type', 'simple') or 'simple'
+    if formula_type == 'advanced':
+        return _compute_advanced_cost(db, fv, cost_model, region, target_year, target_quarter)
+
     comp_base = _component_base(base_price, fv.margin_type, fv.margin_value)
     indexed_cost = 0.0
     for comp in fv.components:
@@ -882,3 +1030,210 @@ def _compute_indexed_cost(
             ratio = 1.0
         indexed_cost += comp_base * weight * ratio
     return indexed_cost
+
+
+def _period_label(year: int, quarter: int) -> str:
+    return f"Q{quarter}-{str(year)[-2:]}"
+
+
+def _compute_indexed_cost_detailed(
+    db: Session,
+    fv,
+    cost_model: CostModel,
+    region: str,
+    ref_year: int,
+    ref_quarter: int,
+    target_year: int,
+    target_quarter: int,
+    base_price: float,
+) -> tuple[float, list, list]:
+    """Scrum 17 — per-component breakdown alongside the indexed-cost total. Mirrors
+    `_compute_indexed_cost`'s simple-mode loop exactly (same comp_base/weight/ratio
+    math), but also records base/current index values, ratio, contribution and
+    provenance per component, plus a DataGap entry for any component riding flat for
+    want of data. Advanced-mode formulas have no discrete components to break down —
+    callers should check `fv.formula_type` and fall back to a single opaque line."""
+    from app.schemas.costing import ComponentBreakdown, DataGap
+
+    comp_base = _component_base(base_price, fv.margin_type, fv.margin_value)
+    indexed_cost = 0.0
+    components: list[ComponentBreakdown] = []
+    data_gaps: list[DataGap] = []
+    ref_label = _period_label(ref_year, ref_quarter)
+    cur_label = _period_label(target_year, target_quarter)
+
+    for comp in fv.components:
+        weight = float(comp.weight)
+        ref_val = cur_val = None
+        source = None
+        has_data = True
+        if comp.commodity_id:
+            ref_val, _ = get_single_index_value_detailed(
+                db, cost_model.team_id, comp.commodity_id, region, ref_year, ref_quarter
+            )
+            cur_val, source = get_single_index_value_detailed(
+                db, cost_model.team_id, comp.commodity_id, region, target_year, target_quarter
+            )
+            ratio = (cur_val / ref_val) if (ref_val and cur_val) else 1.0
+            if not ref_val or not cur_val:
+                has_data = False
+                data_gaps.append(DataGap(
+                    component_label=comp.label, period=cur_label,
+                    reason="no index value found",
+                ))
+        else:
+            ratio = 1.0
+        contribution = comp_base * weight * ratio
+        indexed_cost += contribution
+        components.append(ComponentBreakdown(
+            label=comp.label,
+            commodity_id=comp.commodity_id,
+            commodity_name=comp.commodity.name if comp.commodity_id and comp.commodity else None,
+            weight_pct=round(weight * 100, 4),
+            base_value=round(ref_val, 4) if ref_val is not None else None,
+            current_value=round(cur_val, 4) if cur_val is not None else None,
+            ratio=round(ratio, 6),
+            contribution=round(contribution, 4),
+            source=source,
+            base_period=ref_label,
+            current_period=cur_label,
+            has_data=has_data,
+        ))
+    return indexed_cost, components, data_gaps
+
+
+def calculate_should_cost_breakdown(
+    db: Session,
+    cost_model: CostModel,
+    target_year: int | None = None,
+    target_quarter: int | None = None,
+    normalize_to_incoterm: str | None = None,
+    display_currency: str | None = None,
+    display_unit: str | None = None,
+):
+    """Scrum 17 — the should-cost, itemized: per-component index name/weight/base/
+    current/ratio/contribution, plus margin, FX, unit and Incoterm adjustments — all
+    numbers summing exactly to the displayed should-cost. Mirrors calculate_should_cost's
+    orchestration exactly but calls the *_detailed variants to keep the per-component
+    math alongside the total, rather than recomputing it."""
+    from app.schemas.costing import ShouldCostBreakdown
+
+    if target_year and target_quarter:
+        fv = _get_period_formula(cost_model, target_year, target_quarter)
+    else:
+        fv = cost_model.current_formula
+
+    if not fv:
+        return ShouldCostBreakdown(
+            should_cost=0, cost_before_margin=0, margin_amount=0, margin_type="unknown",
+            components=[], data_gaps=[], currency=cost_model.currency,
+            unit=cost_model.product.unit,
+        )
+
+    base_price = _effective_base_price(db, cost_model.id, fv)
+    region = cost_model.region
+    ref_year = fv.base_year
+    ref_quarter = fv.base_quarter
+    t_year = target_year or ref_year
+    t_quarter = target_quarter or ref_quarter
+
+    formula_type = getattr(fv, 'formula_type', 'simple') or 'simple'
+    if formula_type == 'advanced':
+        # Advanced (expression-based) formulas have no discrete weighted components —
+        # report the whole result as a single opaque line rather than fabricating a
+        # per-component split that doesn't exist in the formula's own definition.
+        indexed_cost = _compute_advanced_cost(db, fv, cost_model, region, t_year, t_quarter)
+        components, data_gaps = [], []
+        should_cost = indexed_cost
+        margin_amount = 0.0
+    else:
+        indexed_cost, components, data_gaps = _compute_indexed_cost_detailed(
+            db, fv, cost_model, region, ref_year, ref_quarter, t_year, t_quarter, base_price
+        )
+        should_cost, margin_amount = _apply_margin(
+            indexed_cost, fv.margin_type, fv.margin_value, base_price
+        )
+
+    should_cost_pre_incoterm = should_cost
+    target_inc = _norm_incoterm(normalize_to_incoterm)
+    if target_inc:
+        should_cost = _normalize_to(db, cost_model, fv, should_cost, target_inc)
+    incoterm_adjustment = (
+        round(should_cost - should_cost_pre_incoterm, 4) if target_inc else None
+    )
+
+    # Display currency/unit — applied to the total AND proportionally to each
+    # component's contribution, so the breakdown still sums exactly in the
+    # requested display units (ShouldCostRequest carries these fields but they were
+    # previously never wired through to the engine).
+    out_ccy = cost_model.currency
+    out_unit = cost_model.product.unit
+    fx_rate_used = None
+    unit_factor_used = None
+    if display_currency and display_currency != cost_model.currency:
+        converted = _apply_fx(db, should_cost, cost_model.currency, display_currency, t_year, t_quarter, team_id=cost_model.team_id)
+        fx_rate_used = (converted / should_cost) if should_cost else None
+        if fx_rate_used is not None:
+            for c in components:
+                c.contribution = round(c.contribution * fx_rate_used, 4)
+            should_cost = round(converted, 4)
+            out_ccy = display_currency
+    if display_unit and display_unit != cost_model.product.unit:
+        converted = _apply_unit(should_cost, cost_model.product.unit, display_unit)
+        unit_factor_used = (converted / should_cost) if should_cost else None
+        if unit_factor_used is not None:
+            for c in components:
+                c.contribution = round(c.contribution * unit_factor_used, 4)
+            should_cost = round(converted, 4)
+            out_unit = display_unit
+
+    return ShouldCostBreakdown(
+        should_cost=round(should_cost, 4),
+        cost_before_margin=round(indexed_cost, 4),
+        margin_amount=round(margin_amount, 4),
+        margin_type=getattr(fv, 'margin_type', 'unknown') or 'unknown',
+        components=components,
+        data_gaps=data_gaps,
+        incoterm_adjustment=incoterm_adjustment,
+        fx_rate_used=round(fx_rate_used, 6) if fx_rate_used is not None else None,
+        unit_factor_used=round(unit_factor_used, 6) if unit_factor_used is not None else None,
+        currency=out_ccy,
+        unit=out_unit,
+        incoterm=(fv.incoterm if fv and fv.incoterm else cost_model.incoterm),
+        normalized_to_incoterm=target_inc,
+    )
+
+
+def _compute_advanced_cost(
+    db: Session,
+    fv,
+    cost_model: CostModel,
+    region: str,
+    target_year: int,
+    target_quarter: int,
+) -> float:
+    """Evaluate an advanced free-form expression for the given period.
+
+    Each variable in fv.variables maps to either an absolute index value for the
+    target period or a user-supplied fixed constant. The expression result IS the
+    should-cost — no margin step is applied on top.
+    """
+    if not fv.expression:
+        return float(fv.base_price)
+
+    context: dict[str, float] = {}
+    for var_name, var_def in (fv.variables or {}).items():
+        if var_def.get('type') == 'index' and var_def.get('commodity_id'):
+            val = get_single_index_value(
+                db, cost_model.team_id, var_def['commodity_id'],
+                region, target_year, target_quarter,
+            )
+            context[var_name] = float(val) if val is not None else 0.0
+        else:
+            context[var_name] = float(var_def.get('value', 0))
+
+    try:
+        return safe_eval_expr(fv.expression, context)
+    except Exception:
+        # Fall back to base_price so callers always get a numeric result.
+        return float(fv.base_price)

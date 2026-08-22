@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Integer, String, DateTime, UniqueConstraint
+from sqlalchemy import Integer, String, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,8 +20,8 @@ class FreightLane(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    origin_region: Mapped[str] = mapped_column(String(20), nullable=False)
-    destination_region: Mapped[str] = mapped_column(String(20), nullable=False)
+    origin_region: Mapped[str] = mapped_column(String(20), ForeignKey("regions.code"), nullable=False)
+    destination_region: Mapped[str] = mapped_column(String(20), ForeignKey("regions.code"), nullable=False)
     mode: Mapped[str] = mapped_column(String(10), nullable=False, default="sea")
     adjustments: Mapped[dict] = mapped_column(JSONB, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
