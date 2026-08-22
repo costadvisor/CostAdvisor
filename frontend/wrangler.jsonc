@@ -1,4 +1,8 @@
 {
+  // The app SPA, on its own "app." subdomain — costadvisor.org / www are the
+  // landing page (see landing/wrangler.jsonc), never this worker:
+  //   dev branch  → costadvisor-web-dev, custom domain app.dev.costadvisor.org
+  //   main branch → costadvisor-web,     custom domain app.costadvisor.org
   "name": "costadvisor-web",
   "compatibility_date": "2025-09-01",
   "assets": {
