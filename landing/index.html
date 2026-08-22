@@ -5,16 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>CostAdvisor — Procurement Cost Intelligence</title>
   <meta name="description" content="Know what your products should cost before your supplier tells you. Should-cost models from live commodity indices — for procurement teams in chemicals, paper, food &amp; beverage, and more." />
-  <link rel="canonical" href="https://www.costadvisor.org/" />
+  <link rel="canonical" href="https://costadvisor.org/" />
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://www.costadvisor.org/" />
+  <meta property="og:url" content="https://costadvisor.org/" />
   <meta property="og:title" content="CostAdvisor — Procurement Cost Intelligence" />
   <meta property="og:description" content="Know if your supplier's price increase is justified — before you negotiate." />
-  <meta property="og:image" content="https://www.costadvisor.org/og-cover.png" />
+  <meta property="og:image" content="https://costadvisor.org/og-cover.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="CostAdvisor — know what your products should cost. A StaminaChem company." />
-  <meta name="twitter:image" content="https://www.costadvisor.org/og-cover.png" />
+  <meta name="twitter:image" content="https://costadvisor.org/og-cover.png" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="CostAdvisor — Procurement Cost Intelligence" />
   <meta name="twitter:description" content="Should-cost models. Live market indices. AI negotiation briefs." />
@@ -26,7 +26,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
   <noscript><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" /></noscript>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"CostAdvisor","url":"https://www.costadvisor.org/","applicationCategory":"BusinessApplication","operatingSystem":"Web","description":"Buyer-side should-cost intelligence for procurement teams.","publisher":{"@type":"Organization","name":"StaminaChem","url":"https://staminachem.com/","email":"laurent.thomas@staminachem.com","address":{"@type":"PostalAddress","streetAddress":"Schubertring 14/1, Stock/1","postalCode":"1010","addressLocality":"Wien","addressCountry":"AT"}}}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"CostAdvisor","url":"https://costadvisor.org/","applicationCategory":"BusinessApplication","operatingSystem":"Web","description":"Buyer-side should-cost intelligence for procurement teams.","publisher":{"@type":"Organization","name":"StaminaChem","url":"https://staminachem.com/","email":"laurent.thomas@staminachem.com","address":{"@type":"PostalAddress","streetAddress":"Schubertring 14/1, Stock/1","postalCode":"1010","addressLocality":"Wien","addressCountry":"AT"}}}</script>
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
     {"@type":"Question","name":"What does CostAdvisor do?","acceptedAnswer":{"@type":"Answer","text":"CostAdvisor builds buyer-side should-cost models: decompose a product into raw-material components, link each to a live commodity index, and calculate what it should cost today — then compare against your supplier's price to quantify the negotiation gap."}},
     {"@type":"Question","name":"Is my data secure?","acceptedAnswer":{"@type":"Answer","text":"Yes. Every tenant is isolated at the database level via Postgres row-level security. Data is encrypted at rest (AES-256) and in transit (TLS 1.2+), and all mutations are audit-logged."}},
@@ -45,7 +45,7 @@
   --blue:#00A99D;--teal:#00c8bc;--green:#10B981;
   --amber:#c8911a;--red:#d64545;--purple:#7c5cbf;
   --ink:#062a26;--ink2:#0a3a34;  /* deep teal for dark contrast bands */
-  --text:#0f2228;--muted:#54666d;--dim:#7c8b91;
+  --text:#0f2228;--muted:#54666d;--dim:#63737a;
   --font-display:'Space Grotesk',system-ui,sans-serif;
   --font-sans:'Inter',system-ui,sans-serif;
   --font-mono:'JetBrains Mono',monospace;
@@ -289,7 +289,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 .security-tile{border-radius:16px;padding:28px 22px;text-align:center;transition:transform .3s,box-shadow .3s}
 .security-tile:hover{transform:translateY(-4px);box-shadow:0 12px 32px rgba(0,0,0,.09)}
 .security-tile-icon{font-size:26px;margin:0 auto 14px;width:54px;height:54px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:rgba(0,169,157,.1);border:1px solid rgba(0,169,157,.2);box-shadow:0 2px 12px rgba(0,169,157,.12),inset 0 1px 0 rgba(255,255,255,.5)}
-.security-tile h4{font-size:14px;font-weight:700;margin-bottom:8px}
+.security-tile h3{font-size:14px;font-weight:700;margin-bottom:8px}
 .security-tile p{font-size:12px;color:var(--muted);line-height:1.6}
 
 /* ── CTA ─────────────────────────────────────────────────── */
@@ -326,7 +326,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 .footer-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:48px;margin-bottom:40px}
 @media(max-width:640px){.footer-grid{grid-template-columns:1fr;gap:28px}}
 .footer-brand p{font-size:13px;color:var(--muted);margin-top:12px;line-height:1.7;max-width:280px}
-.footer-col h5{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--dim);margin-bottom:14px}
+.footer-col h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--dim);margin-bottom:14px}
 .footer-col a{display:block;font-size:13px;color:var(--muted);margin-bottom:10px;transition:color .15s}
 .footer-col a:hover{color:var(--text)}
 .footer-bottom{padding-top:22px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
@@ -446,7 +446,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 .legal-card{border-radius:16px;padding:26px 24px;background:var(--surface2);border:1px solid var(--border)}
 .legal-card:hover{box-shadow:0 8px 32px rgba(0,0,0,.1),inset 0 1px 0 rgba(255,255,255,.9);border-color:rgba(0,169,157,.3)}
 .legal-card-icon{width:46px;height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:21px;background:rgba(0,169,157,.1);border:1px solid rgba(0,169,157,.18);margin-bottom:15px;box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}
-.legal-card h4{font-size:15px;font-weight:700;margin-bottom:10px}
+.legal-card h3{font-size:15px;font-weight:700;margin-bottom:10px}
 .legal-card p{font-size:13px;color:var(--muted);line-height:1.7}
 
 /* ── Engagement popup ─────────────────────────────────────── */
@@ -654,7 +654,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     <a href="#market">Market Data</a>
     <a href="#how">How It Works</a>
     <a href="#security">Security</a>
-    <a href="javascript:void(0)" onclick="openDemoModal()" style="color:var(--blue);font-weight:600">Schedule a Demo →</a>
+    <a href="#cta" onclick="openDemoModal();return false;" style="color:var(--blue);font-weight:600">Schedule a Demo →</a>
     <a href="#cta">Request Access</a>
     <a class="js-signin" href="https://api.costadvisor.org/auth/login">Sign in</a>
   </div>
@@ -918,7 +918,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
   .fd3-card:hover{box-shadow:0 12px 36px rgba(0,0,0,.09);transform:translateY(-3px);border-color:rgba(0,169,157,.35)}
   .fd3-num{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--blue);margin-bottom:16px}
   .fd3-icon{font-size:28px;line-height:1;margin-bottom:14px}
-  .fd3-card h4{font-family:var(--font-sans);font-weight:800;font-size:18px;letter-spacing:-.018em;margin-bottom:10px;line-height:1.15;color:var(--text)}
+  .fd3-card h3{font-family:var(--font-sans);font-weight:800;font-size:18px;letter-spacing:-.018em;margin-bottom:10px;line-height:1.15;color:var(--text)}
   .fd3-card>p{font-family:var(--font-mono);font-size:12px;color:var(--muted);line-height:1.8;margin:0;flex:1}
   .fd3-stat{margin-top:20px;padding-top:16px;border-top:1px solid var(--border)}
   .fd3-stat-val{font-family:var(--font-mono);font-size:24px;font-weight:700;color:var(--blue);display:block;line-height:1;margin-bottom:4px}
@@ -933,7 +933,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
   @media(max-width:480px){.fd3-item{border-right:none;border-bottom:1px solid var(--border)}.fd3-item:last-child{border-bottom:none}}
   .fd3-item:hover{background:var(--surface2)}
   .fd3-item-icon{font-size:20px;line-height:1;flex-shrink:0;margin-top:2px}
-  .fd3-item h5{font-family:var(--font-sans);font-weight:700;font-size:13px;margin-bottom:5px;color:var(--text);line-height:1.2}
+  .fd3-item h4{font-family:var(--font-sans);font-weight:700;font-size:13px;margin-bottom:5px;color:var(--text);line-height:1.2}
   .fd3-item p{font-family:var(--font-mono);font-size:11px;color:var(--muted);line-height:1.65;margin:0}
   </style>
   <div class="fd3">
@@ -943,27 +943,27 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
       <div class="fd3-card reveal">
         <div class="fd3-num">01 · Foundation</div>
         <div class="fd3-icon"><svg class="ic"><use href="#ic-flask"/></svg></div>
-        <h4>Should-Cost Modelling</h4>
+        <h3>Should-Cost Modelling</h3>
         <p>Build weighted formulas from commodity components — each linked to a live index. Quarterly recalculation is automatic. No spreadsheet maintenance, no stale numbers.</p>
         <div class="fd3-stat">
           <span class="fd3-stat-val">13%</span>
-          <span class="fd3-stat-desc">average raw material savings from should-cost models · McKinsey</span>
+          <span class="fd3-stat-desc">average raw material savings from should-cost models · <a href="https://www.mckinsey.com/capabilities/operations/our-insights/transforming-procurement-functions-for-an-ai-driven-world" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">McKinsey</a></span>
         </div>
       </div>
       <div class="fd3-card reveal" style="transition-delay:.07s">
         <div class="fd3-num">02 · Intelligence</div>
         <div class="fd3-icon"><svg class="ic"><use href="#ic-trend"/></svg></div>
-        <h4>Evolution Tracking</h4>
+        <h3>Evolution Tracking</h3>
         <p>See how your should-cost moves quarter-over-quarter as indices shift. Know when a supplier's price increase is justified by the market — and when it isn't.</p>
         <div class="fd3-stat">
           <span class="fd3-stat-val">~50%</span>
-          <span class="fd3-stat-desc">of supplier price-increase requests deflected using evolution data · AlixPartners</span>
+          <span class="fd3-stat-desc">of supplier price-increase requests deflected using evolution data · <a href="https://www.alixpartners.com/insights/102hu6p/weathering-cost-volatility-managing-margins-amid-chemical-industrys-250-billio/" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">AlixPartners</a></span>
         </div>
       </div>
       <div class="fd3-card reveal" style="transition-delay:.14s">
         <div class="fd3-num">03 · Outcome</div>
         <div class="fd3-icon"><svg class="ic"><use href="#ic-file"/></svg></div>
-        <h4>Negotiation Brief</h4>
+        <h3>Negotiation Brief</h3>
         <p>Export a branded PDF with verdict, gap, ranked cost drivers, and AI talking points. One click from analysis to a brief that survives an enterprise procurement review.</p>
         <div class="fd3-stat">
           <span class="fd3-stat-val">1 click</span>
@@ -972,24 +972,24 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
       </div>
     </div>
     <div class="fd3-consult reveal" style="margin:20px 0 8px;padding:16px 20px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);font-family:var(--font-mono);font-size:12px;color:var(--muted);text-align:center;line-height:1.7">
-      Backed by the numbers: <strong style="color:var(--text)">13%</strong> average raw-material savings from should-cost models (McKinsey) &middot; <strong style="color:var(--text)">~50%</strong> of supplier price-increase requests deflected (AlixPartners) &middot; <strong style="color:var(--text)">8&ndash;12%</strong> purchasing-expense reduction by world-class procurement teams (Bain)
+      Backed by the numbers: <strong style="color:var(--text)">13%</strong> average raw-material savings from should-cost models (<a href="https://www.mckinsey.com/capabilities/operations/our-insights/transforming-procurement-functions-for-an-ai-driven-world" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">McKinsey</a>) &middot; <strong style="color:var(--text)">~50%</strong> of supplier price-increase requests deflected (<a href="https://www.alixpartners.com/insights/102hu6p/weathering-cost-volatility-managing-margins-amid-chemical-industrys-250-billio/" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">AlixPartners</a>) &middot; <strong style="color:var(--text)">8&ndash;12%</strong> purchasing-expense reduction by world-class procurement teams (<a href="https://www.bain.com/insights/unearthing-hidden-treasure-of-procurement/" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">Bain</a>)
     </div>
     <div class="fd3-secondary">
       <div class="fd3-item reveal">
         <span class="fd3-item-icon"><svg class="ic"><use href="#ic-target"/></svg></span>
-        <div><h5>Gap Analysis</h5><p>Quantify the gap in % and total financial exposure — instantly, against the live should-cost.</p></div>
+        <div><h4>Gap Analysis</h4><p>Quantify the gap in % and total financial exposure — instantly, against the live should-cost.</p></div>
       </div>
       <div class="fd3-item reveal" style="transition-delay:.05s">
         <span class="fd3-item-icon"><svg class="ic"><use href="#ic-fx"/></svg></span>
-        <div><h5>FX Rate Engine</h5><p>Daily ECB-sourced live rates and quarterly averages back to 2020. Team custom overrides supported.</p></div>
+        <div><h4>FX Rate Engine</h4><p>Daily ECB-sourced live rates and quarterly averages back to 2020. Team custom overrides supported.</p></div>
       </div>
       <div class="fd3-item reveal" style="transition-delay:.10s">
         <span class="fd3-item-icon"><svg class="ic"><use href="#ic-calc"/></svg></span>
-        <div><h5>Advanced Formula Mode</h5><p>Free-form expressions with variables mapped to indices, fixed values, or per-period uploads.</p></div>
+        <div><h4>Advanced Formula Mode</h4><p>Free-form expressions with variables mapped to indices, fixed values, or per-period uploads.</p></div>
       </div>
       <div class="fd3-item reveal" style="transition-delay:.15s">
         <span class="fd3-item-icon"><svg class="ic"><use href="#ic-bars"/></svg></span>
-        <div><h5>Data Import &amp; Export</h5><p>CSV and XLSX for prices, volumes, FX, and index overrides. Export any view in one click.</p></div>
+        <div><h4>Data Import &amp; Export</h4><p>CSV and XLSX for prices, volumes, FX, and index overrides. Export any view in one click.</p></div>
       </div>
     </div>
   </div>
@@ -1031,7 +1031,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
               </div>
               <span class="slider-val" id="slAmmVal">$340/t</span>
             </div>
-            <input type="range" id="slAmm" min="200" max="600" value="340" oninput="updateDemo()">
+            <input type="range" id="slAmm" min="200" max="600" value="340" oninput="updateDemo()" aria-label="Ammonia index">
           </div>
           <div class="slider-group">
             <div class="slider-header">
@@ -1041,7 +1041,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
               </div>
               <span class="slider-val" id="slGasVal">$3.0/MMBtu</span>
             </div>
-            <input type="range" id="slGas" min="1" max="10" step="0.1" value="3.0" oninput="updateDemo()">
+            <input type="range" id="slGas" min="1" max="10" step="0.1" value="3.0" oninput="updateDemo()" aria-label="Natural gas">
           </div>
           <div class="slider-group">
             <div class="slider-header">
@@ -1051,7 +1051,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
               </div>
               <span class="slider-val" id="slPkgVal">$80/t</span>
             </div>
-            <input type="range" id="slPkg" min="40" max="160" value="80" oninput="updateDemo()">
+            <input type="range" id="slPkg" min="40" max="160" value="80" oninput="updateDemo()" aria-label="Packaging">
           </div>
           <div class="slider-group">
             <div class="slider-header">
@@ -1061,7 +1061,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
               </div>
               <span class="slider-val" id="slLabVal">$50/t</span>
             </div>
-            <input type="range" id="slLab" min="30" max="100" value="50" oninput="updateDemo()">
+            <input type="range" id="slLab" min="30" max="100" value="50" oninput="updateDemo()" aria-label="Labour cost">
           </div>
         </div>
       </div>
@@ -1103,22 +1103,22 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     <div class="security-grid">
       <div class="security-tile glass skeuo reveal">
         <div class="security-tile-icon"><svg class="ic"><use href="#ic-shield"/></svg></div>
-        <h4>Row-Level Security</h4>
+        <h3>Row-Level Security</h3>
         <p>Postgres RLS enforced at the database layer. Every tenant's data is strictly isolated — not just in application logic.</p>
       </div>
       <div class="security-tile glass skeuo reveal" style="transition-delay:.08s">
         <div class="security-tile-icon"><svg class="ic"><use href="#ic-lock"/></svg></div>
-        <h4>Encrypted at Rest &amp; Transit</h4>
+        <h3>Encrypted at Rest &amp; Transit</h3>
         <p>AES-256 at rest via Railway Postgres. TLS everywhere in transit. Internal AI calls over private Tailscale network only.</p>
       </div>
       <div class="security-tile glass skeuo reveal" style="transition-delay:.16s">
         <div class="security-tile-icon"><svg class="ic"><use href="#ic-clipboard"/></svg></div>
-        <h4>Full Audit Log</h4>
+        <h3>Full Audit Log</h3>
         <p>Every mutation, login, export, and role change is recorded in an append-only audit trail for compliance review.</p>
       </div>
       <div class="security-tile glass skeuo reveal" style="transition-delay:.24s">
         <div class="security-tile-icon"><svg class="ic"><use href="#ic-key"/></svg></div>
-        <h4>RBAC + Permissions</h4>
+        <h3>RBAC + Permissions</h3>
         <p>Team-scoped roles with granular permission gates. Plan ceilings enforced server-side. Invite-only sign-up.</p>
       </div>
     </div>
@@ -1185,32 +1185,32 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     <div class="legal-grid">
       <div class="legal-card reveal">
         <div class="legal-card-icon"><svg class="ic"><use href="#ic-file"/></svg></div>
-        <h4>Terms of Service</h4>
+        <h3>Terms of Service</h3>
         <p>Use CostAdvisor to build and analyse should-cost models for your organisation's procurement. Redistribution, resale, or reverse-engineering is prohibited. It's a decision-support tool — we're not liable for commercial outcomes of the figures or briefs it generates.</p>
       </div>
       <div class="legal-card reveal" style="transition-delay:.07s">
         <div class="legal-card-icon"><svg class="ic"><use href="#ic-lock"/></svg></div>
-        <h4>Privacy &amp; GDPR</h4>
+        <h3>Privacy &amp; GDPR</h3>
         <p>Operated from the EU on the lawful basis of contract performance and legitimate interest. You can access, correct, export, or delete your data at any time. We never sell personal data.</p>
       </div>
       <div class="legal-card reveal" style="transition-delay:.14s">
         <div class="legal-card-icon"><svg class="ic"><use href="#ic-landmark"/></svg></div>
-        <h4>Your Data, Your IP</h4>
+        <h3>Your Data, Your IP</h3>
         <p>Your cost models, uploaded data, and negotiation briefs stay your intellectual property. The platform, formulas, and UI are ours. Index data (ECB, EIA, Eurostat, FRED, World Bank) is provided for information — always validate before negotiating.</p>
       </div>
       <div class="legal-card reveal" style="transition-delay:.21s">
         <div class="legal-card-icon"><svg class="ic"><use href="#ic-globe"/></svg></div>
-        <h4>Residency &amp; Retention</h4>
+        <h3>Residency &amp; Retention</h3>
         <p>Data is stored on EU (Frankfurt) Postgres, encrypted at rest (AES-256) and in transit (TLS 1.2+). Account data is kept for your subscription term; on deletion, personal data is removed within 30 days.</p>
       </div>
       <div class="legal-card reveal" style="transition-delay:.28s">
         <div class="legal-card-icon"><svg class="ic"><use href="#ic-key"/></svg></div>
-        <h4>Authentication &amp; AI</h4>
+        <h3>Authentication &amp; AI</h3>
         <p>Google OAuth for sign-in — we never store passwords. AI narratives run on a self-hosted model; no data is sent to OpenAI or any third-party AI provider.</p>
       </div>
       <div class="legal-card reveal" style="transition-delay:.35s">
         <div class="legal-card-icon"><svg class="ic"><use href="#ic-mail"/></svg></div>
-        <h4>Questions?</h4>
+        <h3>Questions?</h3>
         <p>Privacy and legal queries go to <a href="mailto:laurent.thomas@staminachem.com" style="color:var(--blue)">laurent.thomas@staminachem.com</a> (StaminaChem). We respond within two business days.</p>
       </div>
     </div>
@@ -1236,16 +1236,16 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
         </p>
       </div>
       <div class="footer-col">
-        <h5>Platform</h5>
+        <h4>Platform</h4>
         <a href="#features">Features</a>
         <a href="#how">How It Works</a>
         <a href="#demo">Live Demo</a>
         <a href="#security">Security</a>
       </div>
       <div class="footer-col">
-        <h5>Company</h5>
+        <h4>Company</h4>
         <a href="#cta">Request Access</a>
-        <a href="javascript:void(0)" onclick="openDemoModal()">Schedule Demo</a>
+        <a href="#cta" onclick="openDemoModal();return false;">Schedule Demo</a>
         <a href="#terms">Privacy Policy</a>
         <a href="#terms">Terms of Service</a>
         <a href="https://staminachem.com/" target="_blank" rel="noopener noreferrer">StaminaChem ↗</a>
@@ -1266,15 +1266,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     <p class="modal-sub">CostAdvisor is currently invite-only. We'll review your request and reach out within 48 hours.</p>
     <div id="lpModalForm">
       <div class="form-group" style="margin-bottom:10px">
-        <label class="form-label">Work email *</label>
+        <label class="form-label" for="lpModalEmail">Work email *</label>
         <input type="email" id="lpModalEmail" placeholder="you@company.com" />
       </div>
       <div class="form-group" style="margin-bottom:10px">
-        <label class="form-label">Full name</label>
+        <label class="form-label" for="lpModalName">Full name</label>
         <input type="text" id="lpModalName" placeholder="Jane Smith" />
       </div>
       <div class="form-group" style="margin-bottom:14px">
-        <label class="form-label">Company</label>
+        <label class="form-label" for="lpModalCompany">Company</label>
         <input type="text" id="lpModalCompany" placeholder="Acme Chemicals" />
       </div>
       <div class="modal-error-msg" id="lpModalError"></div>
@@ -1325,19 +1325,19 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     <div id="lpDemoStep3" style="display:none">
       <div id="lpDemoDetailsSub" style="font-size:12px;color:var(--muted);margin-bottom:14px;font-family:var(--font-mono)"></div>
       <div class="form-group" style="margin-bottom:10px">
-        <label class="form-label">Full name *</label>
+        <label class="form-label" for="lpDemoName">Full name *</label>
         <input type="text" id="lpDemoName" placeholder="Jane Smith" />
       </div>
       <div class="form-group" style="margin-bottom:10px">
-        <label class="form-label">Work email *</label>
+        <label class="form-label" for="lpDemoEmail">Work email *</label>
         <input type="email" id="lpDemoEmail" placeholder="jane@acme.com" />
       </div>
       <div class="form-group" style="margin-bottom:10px">
-        <label class="form-label">Phone *</label>
+        <label class="form-label" for="lpDemoPhone">Phone *</label>
         <input type="tel" id="lpDemoPhone" placeholder="+1 555 000 0000" />
       </div>
       <div class="form-group" style="margin-bottom:14px">
-        <label class="form-label">Company *</label>
+        <label class="form-label" for="lpDemoCompany">Company *</label>
         <input type="text" id="lpDemoCompany" placeholder="Acme Chemicals" />
       </div>
       <div class="demo-error-small" id="lpDemoFormError"></div>
@@ -2272,8 +2272,5 @@ if(document.readyState==='loading'){
   boot();
 }
 </script>
-<!-- impeccable-live-start -->
-<script src="http://localhost:8400/live.js"></script>
-<!-- impeccable-live-end -->
 </body>
 </html>
