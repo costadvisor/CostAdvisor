@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import TeamSelector from './TeamSelector';
+import ThemeSelector from './ThemeSelector';
 
 
 export default function Navbar() {
@@ -153,6 +154,7 @@ export default function Navbar() {
       ))}
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
         <TeamSelector />
+        <ThemeSelector />
         {/* The company used to be a pill here, up to 160px wide. `.ca-nav` has no
             wrap or overflow handling, and a super-admin with 8 tabs + the team
             selector was already close to overflowing at 1280px — so it moved into
