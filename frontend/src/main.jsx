@@ -10,6 +10,15 @@ import './styles.css';
 
 applyTheme(getCachedTheme());
 
+// Registered after `load` so it never competes with the initial render for
+// bandwidth/CPU; a failed registration (unsupported browser, dev server
+// quirks) is non-fatal, so it's swallowed rather than surfaced.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ErrorBoundary>

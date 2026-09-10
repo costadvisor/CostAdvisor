@@ -31,6 +31,18 @@ data runs 99.9-110 (margin and rounding ride on top of the raw lines).
 Run:      python -m seed_combos             # validate + load
 Dry run:  python -m seed_combos --dry-run   # validate + diff report, no writes
 """
+
+# SUPERSEDED by the catalog retarget (Scrum 74/3b).
+#
+# This loads the older 257-formula / 676-combo drop into
+# formula_region_coverage and formula_template_components. The 2026-07 drop now
+# owns those tables via app/services/drop/catalog_loader.py, and two loaders
+# cannot both be authoritative for the same rows — running either overwrites
+# the other's recipes for the 340 overlapping templates.
+#
+# Kept, not deleted: the parser and validation logic here still documents how
+# the previous drop was shaped, and its parser tests still pass. Do not run
+# run() against a database that has been retargeted.
 from __future__ import annotations
 
 import json
@@ -452,8 +464,12 @@ def run(db, dry_run: bool = False, verbose: bool = True) -> dict:
             "margin_pct": float(c["margin"]),
             "data_confidence": c["data_confidence"],
             "coverage_tier": c["coverage_tier"],
-            # CONF-LOW = proportional-scaling placeholder — flag, don't trust.
-            "needs_review": c["data_confidence"] == "CONF-LOW",
+            # SCRUM-78: `needs_review` is no longer derived here. It was set
+            # from `data_confidence == "CONF-LOW"`; the July sheet dropped that
+            # column, and the flag is now the output of `services/trust`'s
+            # derived grade — computed from the resolution layer and the weight
+            # set, which is information this seeder does not have at this point.
+            # Run the trust recompute after a seed.
             "reviewed_by": c["reviewed_by"],
             "review_metadata": (
                 {"source_combo_id": c["combo_id"], "correction_plan": log[c["formula_id"]]}
@@ -473,7 +489,8 @@ def run(db, dry_run: bool = False, verbose: bool = True) -> dict:
             if row.reviewed_at is not None:
                 # An expert signed this combo off in-app; the source carries no
                 # review state of its own, so a re-run must not clobber it.
-                target.pop("needs_review")
+                # `needs_review` is no longer written by this seeder at all
+                # (SCRUM-78), so only the reviewer attribution needs protecting.
                 target.pop("reviewed_by")
             changed = [k for k, v in target.items()
                        if (float(getattr(row, k)) if k == "margin_pct" and getattr(row, k) is not None

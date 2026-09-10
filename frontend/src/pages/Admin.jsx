@@ -4,6 +4,7 @@ import { useAuth } from '../AuthContext';
 import { useConfirm, useAlert } from '../components/ConfirmDialog';
 import Tooltip from '../components/Tooltip';
 import { invalidateRegions } from '../components/RegionSelect';
+import SupportAdminTab from '../components/SupportAdminTab';
 
 export default function Admin() {
   const { user, refreshUser } = useAuth();
@@ -189,6 +190,7 @@ export default function Admin() {
             })(),
           },
           { key: 'regions', label: regions.length ? `Regions (${regions.length})` : 'Regions' },
+          { key: 'support', label: 'Support' },
           { key: 'settings', label: 'Settings' },
         ].map(t => (
           <button
@@ -241,6 +243,8 @@ export default function Admin() {
         />
       ) : tab === 'regions' ? (
         <RegionsTab regions={regions} onRefresh={fetchRegions} />
+      ) : tab === 'support' ? (
+        <SupportAdminTab />
       ) : tab === 'settings' ? (
         <AdminSettingsTab users={users} />
       ) : (

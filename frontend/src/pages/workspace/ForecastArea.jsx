@@ -5,23 +5,19 @@ import { qLabel } from '../../utils/quarters';
 import exportCsv from '../../utils/exportCsv';
 import { MultiLineChart } from './wsCharts';
 
-/* Forecast area (Scrum 64 — "shell only").
+/* Forecast area.
  * REAL data, no fabricated forward numbers:
  *  - chart: a composite commodity index (headline feeds from /api/indexes/public-quarterly,
- *    each rebased to base 100 and averaged) as real history, then an HONEST dashed ±band stub
- *    (the same pattern as IntelligenceDetailArea) — no invented trajectory.
+ *    each rebased to base 100 and averaged) as real history — no invented trajectory.
  *  - table + KPIs: present-day should-cost / gap from /api/portfolio/summary (the Monitor source).
  *  - assumption cards: each headline index's REAL latest QoQ %.
- * The forward-projection engine is Wave 3; the dashed segment is clearly labelled a stub. */
-
-const FORECAST_STEPS = 2;      // quarters of stub past the last real quarter
-const FORECAST_BAND = 0.015;   // ±1.5% illustrative band
-
-function nextQuarters(year, quarter, n) {
-  const out = []; let y = year, q = quarter;
-  for (let i = 0; i < n; i++) { q += 1; if (q > 4) { q = 1; y += 1; } out.push(qLabel(y, q)); }
-  return out;
-}
+ * Scrum 70 shipped a real per-series projection engine (Index Library →
+ * commodity detail) and a per-cost-model lock/hold verdict (buy-windows
+ * verdict endpoint) — this page composites several headline indices into one
+ * synthetic average, and those projections are per single (commodity,
+ * region) series, so there's no 1:1 substitute here without a page redesign.
+ * A flat illustrative band used to fill that gap; removed rather than kept
+ * around as a placeholder that looks like a forecast but isn't one. */
 
 export default function ForecastArea() {
   const { activeTeamId } = useAuth();
@@ -42,7 +38,7 @@ export default function ForecastArea() {
       .finally(() => setLoading(false));
   }, [activeTeamId]);
 
-  // ── Composite commodity index (real history) + honest forward stub ──
+  // ── Composite commodity index (real history only — no forward band) ──
   const keyed = new Map();
   indices.forEach(ix => (ix.points || []).forEach(p => keyed.set(`${p.year}-${p.quarter}`, { year: p.year, quarter: p.quarter })));
   const timeline = [...keyed.values()].sort((a, b) => a.year - b.year || a.quarter - b.quarter).slice(-12);
@@ -57,22 +53,10 @@ export default function ForecastArea() {
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   });
   const N = timeline.length;
-  const last = N ? timeline[N - 1] : null;
-  const lastVal = [...composite].reverse().find(v => v != null) ?? null;
-  const fLabels = last ? nextQuarters(last.year, last.quarter, FORECAST_STEPS) : [];
-  const pad = Array(FORECAST_STEPS).fill(null);
-  const at = (i, v) => { const a = Array(N + FORECAST_STEPS).fill(null); a[i] = v; return a; };
-  const stub = (mult) => { const a = at(N - 1, lastVal); for (let i = 0; i < FORECAST_STEPS; i++) a[N + i] = lastVal * mult; return a; };
-  const hasStub = lastVal != null && N >= 2;
 
-  const xLabels = [...timeline.map(t => qLabel(t.year, t.quarter)), ...fLabels];
+  const xLabels = timeline.map(t => qLabel(t.year, t.quarter));
   const series = [
-    { name: 'Commodity index (base 100)', color: 'var(--accent)', values: [...composite, ...pad] },
-    ...(hasStub ? [
-      { name: 'Forecast (stub)', color: 'var(--accent3)', values: stub(1), dashed: true },
-      { color: 'var(--muted)', values: stub(1 + FORECAST_BAND), dashed: true },
-      { color: 'var(--muted)', values: stub(1 - FORECAST_BAND), dashed: true },
-    ] : []),
+    { name: 'Commodity index (base 100)', color: 'var(--accent)', values: composite },
   ];
 
   // ── Real present-day KPIs from the portfolio ──
@@ -104,7 +88,7 @@ export default function ForecastArea() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
         <div>
           <div className="ca-h1">Cost forecast</div>
-          <p className="ca-subtitle">Real commodity-index history and current portfolio should-cost. The forward projection engine is a Wave-3 build — the dashed band is an illustrative ±1.5% stub, not a prediction.</p>
+          <p className="ca-subtitle">Real commodity-index history and current portfolio should-cost. For a real forward projection of a specific index, or a lock/hold verdict on a specific product, see the Index Library and the product's buy-window verdict.</p>
         </div>
         <button className="ca-btn ca-btn-ghost" onClick={doExport} disabled={!models.length}>↓ Export</button>
       </div>
@@ -119,11 +103,10 @@ export default function ForecastArea() {
       </div>
 
       <div className="ca-card" style={{ marginBottom: 20 }}>
-        <div className="ca-card-title">Commodity index — history &amp; forecast stub</div>
+        <div className="ca-card-title">Commodity index — history</div>
         {N >= 2
-          ? <MultiLineChart series={series} xLabels={xLabels} refValue={100} refLabel="base 100" splitIndex={hasStub ? N : null} splitLabel="Forecast" height={220} />
+          ? <MultiLineChart series={series} xLabels={xLabels} refValue={100} refLabel="base 100" height={220} />
           : <div style={{ padding: 20, color: 'var(--muted)' }}>Not enough index history to chart yet.</div>}
-        {hasStub && <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>Dashed segment past “Forecast” is an illustrative ±1.5% stub — no forecast engine yet.</p>}
       </div>
 
       <div className="ca-card" style={{ marginBottom: 20 }}>
@@ -134,7 +117,7 @@ export default function ForecastArea() {
               <thead>
                 <tr>
                   <th>Ref</th><th>Product</th><th>Supplier</th><th>Region</th>
-                  <th className="right">Should-cost</th><th className="right">Actual</th><th className="right">Gap %</th><th className="right">Forecast</th>
+                  <th className="right">Should-cost</th><th className="right">Actual</th><th className="right">Gap %</th>
                 </tr>
               </thead>
               <tbody>
@@ -147,7 +130,6 @@ export default function ForecastArea() {
                     <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{m.current_should_cost?.toLocaleString()}</td>
                     <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{m.latest_actual_price != null ? m.latest_actual_price.toLocaleString() : '—'}</td>
                     <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace", color: m.gap_pct == null ? 'var(--muted)' : m.gap_pct > 0 ? 'var(--accent2)' : 'var(--accent)' }}>{m.gap_pct != null ? `${m.gap_pct > 0 ? '+' : ''}${m.gap_pct}%` : '—'}</td>
-                    <td className="right" style={{ color: 'var(--muted)', fontSize: 11 }}>— · Wave 3</td>
                   </tr>
                 ))}
               </tbody>

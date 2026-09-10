@@ -469,7 +469,12 @@ def test_mark_coverage_reviewed(db, tenant_a, tenant_b, client_as):
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["needs_review"] is False
-        assert body["reviewed_by"] and body["reviewed_at"]
+        # SCRUM-78 moved the reviewer onto a users FK: `reviewed_by` held the
+        # actor's email, so the record decayed when they changed it. The legacy
+        # column is no longer written; the display identity is resolved from the
+        # FK on read.
+        assert body["reviewed_by_id"] and body["reviewed_at"]
+        assert body["reviewed_by_name"]
 
         # Another team can't review — 404 (RLS-hidden) or 403 (permission gate)
         r = client_as(tenant_b).post(f"/api/formulas/{t.id}/coverage/Europe/review")

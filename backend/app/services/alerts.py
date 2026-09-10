@@ -19,6 +19,7 @@ from app.models.index_data import CommodityIndex, IndexValue
 from app.models.price_data import ActualPrice
 from app.models.team import Team
 from app.models.user import User
+from app.services.thresholds import effective_threshold
 
 settings = get_settings()
 
@@ -97,10 +98,42 @@ def _buy_window_trigger(db, cm):
     }
 
 
+def _negotiation_window_trigger(db, sub: AlertSubscription):
+    """Yield one trigger per OPEN negotiation window in scope (SCRUM-79).
+
+    Delivery still lands in `alert_events` — windows have their own store and
+    lifecycle, but this is the existing fired/delivered ledger and a second one
+    alongside it would be two histories of the same notification. A closed or
+    dismissed window is not returned, which is what makes "a window that has
+    already closed does not deliver" true.
+    """
+    from app.services.trigger_radar import open_windows_for_subscription
+
+    for win in open_windows_for_subscription(db, sub):
+        yield {
+            "dedup": f"negotiation_window:{win.id}:{win.opens_on.isoformat()}",
+            "message": win.headline,
+            "detail": {
+                "window_id": str(win.id),
+                "driver": win.driver,
+                "scope_type": win.scope_type,
+                "coverage": win.coverage,
+                "opens_on": win.opens_on.isoformat(),
+                "closes_on": win.closes_on.isoformat() if win.closes_on else None,
+                "close_basis": win.close_basis,
+            },
+        }
+
+
 def _triggers_for_subscription(db: Session, sub: AlertSubscription):
     """Yield trigger dicts for one subscription, expanding portfolio-wide scope."""
-    thr = sub.threshold_pct
-    if sub.trigger_type == "index_move":
+    # SCRUM-79: read through the single accessor, never off the column. This is
+    # what makes changing the team default move the fire boundary for every
+    # subscription that has not overridden it.
+    thr = effective_threshold(db, sub.team_id, sub).value
+    if sub.trigger_type == "negotiation_window":
+        yield from _negotiation_window_trigger(db, sub)
+    elif sub.trigger_type == "index_move":
         if sub.commodity_id:
             t = _index_move_trigger(db, sub.commodity_id, thr)
             if t:

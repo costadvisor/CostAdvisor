@@ -5,12 +5,36 @@ Kept as plain tuples (like constants/incoterms.py) rather than DB enums so the
 admin proxy editor (SCRUM-67) and FD-1 executor (SCRUM-80) can share them.
 """
 
-# How the real feed is licensed.
-ACCESS_TIERS = ("Free", "Partial", "Subscription")
+# How the real feed is licensed. "Proxy" arrived with the 2026-07 drop, which
+# states access AFTER proxying — a feed reachable only through a stand-in is
+# neither free nor licensed to us.
+ACCESS_TIERS = ("Free", "Partial", "Proxy", "Subscription")
 
 # Refresh cadence. `frequency` already exists on CommodityIndex — this is its
 # canonical vocabulary (also reused for a proxy's recalibration cadence).
-FREQUENCIES = ("Daily", "Weekly", "Monthly", "Quarterly", "Annual", "Irregular")
+#
+# The 2026-07 drop states cadences this tuple used to reject outright, which
+# made otherwise-valid rows unloadable: compound cadences where a series is
+# published at different rates per region, an explicit "Unknown" (better than
+# a silent blank — somebody looked and could not tell), and half-yearly.
+# Rejecting them bought nothing; the vocabulary now covers what the sources
+# actually say.
+FREQUENCIES = (
+    "Daily",
+    "Weekly",
+    "Monthly",
+    "Quarterly",
+    "Annual",
+    "Semi-annual",
+    "Irregular",
+    "Unknown",
+    # Compound cadences, stated verbatim by the source.
+    "Daily/Monthly",
+    "Daily/Weekly news",
+    "Monthly/Quarterly",
+    "Quarterly / Monthly",
+    "Annual (est.)",
+)
 
 # What the index feeds in a should-cost formula.
 ROLES = ("feedstock", "energy", "fixed")

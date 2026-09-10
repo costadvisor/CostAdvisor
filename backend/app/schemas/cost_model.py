@@ -48,8 +48,20 @@ def _validate_adjustments(v: dict | None) -> dict | None:
 
 class FormulaComponentItem(BaseModel):
     label: str
-    commodity_name: str | None = None  # resolved to commodity_id on backend
+    commodity_name: str | None = None  # fallback: resolved to commodity_id on backend
+    # Explicit id, when the caller already resolved one (e.g. via GET
+    # /formulas/{id}/resolve) — takes priority over commodity_name, closing
+    # the exact-case-sensitive-name-match fragility at the root (Scrum 28b).
+    commodity_id: int | None = None
     weight: float
+    # "index" | "fixed" | None — server infers from commodity_name/commodity_id
+    # presence when not supplied (see cost_models.py), so existing callers
+    # that never send this keep behaving exactly as before.
+    component_type: Literal['index', 'fixed'] | None = None
+    depth: int | None = None
+    via_template_id: uuid.UUID | None = None
+    line_region: str | None = None
+    is_proxy: bool | None = None
 
 
 class FormulaVersionCreate(BaseModel):
@@ -67,6 +79,13 @@ class FormulaVersionCreate(BaseModel):
     expression: str | None = None
     variables: dict | None = None
     notes: str | None = None
+    # Scrum 28b — which catalog combo this version was priced from, and
+    # whether it's frozen ("pinned") or recomputed live from the catalog
+    # recipe on every evaluation ("tracking"). Both None = not catalog-linked,
+    # today's exact behavior (advanced-mode formulas always leave both None —
+    # tracking/pinned only applies to weighted recipes).
+    source_coverage_id: uuid.UUID | None = None
+    link_mode: Literal['pinned', 'tracking'] | None = None
 
     @field_validator("base_price")
     @classmethod
@@ -81,6 +100,8 @@ class FormulaVersionCreate(BaseModel):
             raise ValueError("At least one formula component is required for simple mode")
         if self.formula_type == 'advanced' and not self.expression:
             raise ValueError("An expression is required for advanced formula mode")
+        if (self.source_coverage_id is None) != (self.link_mode is None):
+            raise ValueError("source_coverage_id and link_mode must be set together, or not at all")
         return self
 
     @field_validator("margin_type")
@@ -139,6 +160,13 @@ class FormulaComponentOut(BaseModel):
     commodity_id: int | None
     commodity_name: str | None = None
     weight: float
+    # Scrum 28b — provenance (None for hand-built/legacy components)
+    component_type: str | None = None
+    depth: int | None = None
+    via_template_id: uuid.UUID | None = None
+    via_template_name: str | None = None
+    line_region: str | None = None
+    is_proxy: bool | None = None
 
     model_config = {"from_attributes": True}
 
@@ -160,6 +188,12 @@ class FormulaVersionOut(BaseModel):
     created_at: datetime
     updated_at: datetime | None = None
     components: list[FormulaComponentOut] = []
+    # Scrum 28b — which catalog combo (if any) this version came from, and
+    # whether it's frozen or tracking the live recipe. Both None = not
+    # catalog-linked (every cost model before this scrum, and every
+    # hand-built/advanced-mode one after it).
+    source_coverage_id: uuid.UUID | None = None
+    link_mode: str | None = None
 
     @computed_field
     @property

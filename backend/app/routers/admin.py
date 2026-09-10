@@ -233,7 +233,7 @@ def impersonate(
     target_token = create_jwt(target.id)
 
     is_prod = settings.environment != "development"
-    samesite = "none" if is_prod else "lax"
+    samesite = settings.cookie_samesite if is_prod else "lax"
 
     response.set_cookie("ca_admin_token", admin_token, httponly=True, secure=is_prod,
                         samesite=samesite, max_age=3600 * 24)
@@ -301,7 +301,7 @@ def stop_impersonate(
         bypass_rls_var.set(False)
 
     is_prod = settings.environment != "development"
-    samesite = "none" if is_prod else "lax"
+    samesite = settings.cookie_samesite if is_prod else "lax"
     response.set_cookie("ca_token", admin_token, httponly=True, secure=is_prod,
                         samesite=samesite, max_age=3600 * 24)
     # Must pass the same samesite/secure params used when setting, otherwise browsers ignore the delete

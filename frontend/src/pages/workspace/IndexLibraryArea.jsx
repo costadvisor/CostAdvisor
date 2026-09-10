@@ -5,6 +5,7 @@ import { useToast } from '../../components/Toast';
 import IndexPopupModal from '../../components/IndexPopupModal';
 import AddIndexModal from '../../components/AddIndexModal';
 import DerivedIndexesModal from '../../components/DerivedIndexesModal';
+import ResolutionModal from '../../components/ResolutionModal';
 import EditCellModal from '../../components/EditCellModal';
 import FxCustomEditModal from '../../components/FxCustomEditModal';
 import exportCsv from '../../utils/exportCsv';
@@ -241,6 +242,7 @@ export default function IndexLibraryArea() {
   const { activeTeamId, user } = useAuth();
   const isSuperAdmin = !!user?.is_super_admin;
   const [showDerived, setShowDerived] = useState(false);
+  const [showResolution, setShowResolution] = useState(false);
   const { addToast } = useToast();
   const [syncing, setSyncing] = useState(false);
   const [data, setData] = useState([]);
@@ -278,7 +280,13 @@ export default function IndexLibraryArea() {
     try {
       const now = new Date();
       const toY = now.getFullYear(), toQ = Math.ceil((now.getMonth() + 1) / 3);
-      const params = { team_id: activeTeamId, from_year: toY - 2, from_quarter: toQ, to_year: toY, to_quarter: toQ };
+      // No from_year/from_quarter: resolve_index_values only filters a lower
+      // bound when one is given, so omitting it returns a commodity's FULL
+      // history. The old `toY - 2` cap silently capped the detail popup's own
+      // "All" range option and the Historical Data table to 2 years, no
+      // matter how much real history existed — this is what actually backs
+      // both, so the cap has to come off here, not in the popup.
+      const params = { team_id: activeTeamId, to_year: toY, to_quarter: toQ };
       const [valRes, comRes, srcRes, cmRes] = await Promise.all([
         api.get('/api/indexes/values', { params }),
         api.get('/api/indexes'),
@@ -579,6 +587,61 @@ export default function IndexLibraryArea() {
     }
   };
 
+  // Project forecasts (Scrum 70) — fits a new vintage for every (commodity,
+  // region) series with history, via POST /api/indexes/project-all. Same
+  // "run the weekly job right now" pattern as handleSyncIndexes above — the
+  // weekly Celery task exists, but waiting up to 7 days to see a brand-new
+  // feature work for the first time isn't a substitute for an on-demand run.
+  const [projecting, setProjecting] = useState(false);
+  const handleProjectIndexes = async () => {
+    setProjecting(true);
+    try {
+      const { data: res } = await api.post('/api/indexes/project-all');
+      addToast(`Forecasts updated — ${res?.series_projected ?? 0} series (${res?.fitted ?? 0} fitted, ${res?.hold ?? 0} held flat, ${res?.no_history ?? 0} no history).`, 'success');
+    } catch (err) {
+      addToast(formatApiError(err) || 'Projection failed', 'error');
+    } finally {
+      setProjecting(false);
+    }
+  };
+
+  // Recompute the two derived platform scales. Both change a number every
+  // consumer reads — the volatility percentile on every series and the seasonal
+  // profile behind every combo's amplitude — so both are super-admin, and both
+  // are on-demand siblings of their own scheduled jobs.
+  //
+  // The volatility ladder is REGENERATED rather than imported: the shipped one
+  // deviates from this library's real dispersion by enough to pin the single
+  // most volatile series below the top rung. Recalibrating is expected to move
+  // percentiles; that is a correct diff, not a regression.
+  const [recalibrating, setRecalibrating] = useState(false);
+  const handleRecalibrate = async () => {
+    setRecalibrating(true);
+    try {
+      const { data: cal } = await api.post('/api/dossiers/volatility-calibration/recompute', {});
+      addToast(`Volatility recalibrated — ${cal?.n_rungs} rungs over ${cal?.n_series} series (${cal?.step?.toFixed(1)} pts per rung).`, 'success');
+    } catch (err) {
+      addToast(formatApiError(err) || 'Recalibration failed', 'error');
+    } finally {
+      setRecalibrating(false);
+    }
+  };
+
+  const [reseasoning, setReseasoning] = useState(false);
+  const handleRecomputeSeasonality = async () => {
+    setReseasoning(true);
+    try {
+      const { data: rep } = await api.post('/api/seasonality/recompute');
+      // `insufficient` is reported, never filled with a flat 100 — a series that
+      // cannot support a fit has no profile rather than a fake calm one.
+      addToast(`Seasonality recomputed — ${rep?.computed ?? 0} updated, ${rep?.unchanged ?? 0} unchanged, ${rep?.insufficient ?? 0} without enough history.`, 'success');
+    } catch (err) {
+      addToast(formatApiError(err) || 'Seasonality recompute failed', 'error');
+    } finally {
+      setReseasoning(false);
+    }
+  };
+
   // Export exactly what's on screen, in display order — same filtered set the
   // table renders, so the CSV can never disagree with the grid.
   const handleExport = () => {
@@ -640,6 +703,28 @@ export default function IndexLibraryArea() {
               {syncingIdx ? 'Syncing…' : '⟳ Sync indexes'}
             </button>
           )}
+          {isSuperAdmin && (
+            <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={handleProjectIndexes} disabled={projecting}
+              title="Fit a new forecast vintage for every index series with history — feeds the lock/hold verdict on product pages (super-admin)">
+              {projecting ? 'Projecting…' : '⟳ Project forecasts'}
+            </button>
+          )}
+          {isSuperAdmin && (
+            <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={handleRecalibrate} disabled={recalibrating}
+              title="Refit the platform volatility ladder over every series' month-over-month dispersion. Percentiles will move — the ladder is regenerated, not imported (super-admin)">
+              {recalibrating ? 'Recalibrating…' : '⟳ Recalibrate volatility'}
+            </button>
+          )}
+          {isSuperAdmin && (
+            <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={handleRecomputeSeasonality} disabled={reseasoning}
+              title="Refit the 12-month seasonal profile for every series with enough monthly history (super-admin)">
+              {reseasoning ? 'Recomputing…' : '⟳ Recompute seasonality'}
+            </button>
+          )}
+          <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={() => setShowResolution(true)}
+            title="Which series the catalog actually stands on, what cannot be priced and why, and what to source next">
+            Resolution
+          </button>
           {isSuperAdmin && (
             <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={() => setShowDerived(true)}
               title="Manage composite (calculated) and proxy indexes">Derived indexes</button>
@@ -914,6 +999,10 @@ export default function IndexLibraryArea() {
         isSuperAdmin={isSuperAdmin}
         onAdded={fetchData}
       />
+
+      {showResolution && (
+        <ResolutionModal onClose={() => setShowResolution(false)} />
+      )}
 
       {showDerived && (
         <DerivedIndexesModal onClose={() => { setShowDerived(false); fetchData(); }} />

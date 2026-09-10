@@ -6,7 +6,11 @@ from app.models.region import Region
 from app.models.product import Product
 from app.models.supplier import Supplier
 from app.models.cost_model import CostModel, FormulaVersion, FormulaComponent
-from app.models.index_data import CommodityIndex, IndexValue, IndexOverride, TeamIndexSource
+from app.models.index_data import (
+    CommodityIndex, IndexValue, IndexOverride, TeamIndexSource, TeamProviderCredential,
+)
+from app.models.index_layer import IndexCard, IndexMonthlyValue, TypeCode
+from app.models.drop_issue import DropIssueRecord
 from app.models.price_data import ActualPrice
 from app.models.actual_volume import ActualVolume
 from app.models.fx_rate import FxRate
@@ -21,8 +25,26 @@ from app.models.formula_template import FormulaTemplate, FormulaTemplateComponen
 from app.models.demo import DemoHost, DemoBlockedSlot, DemoRequest
 from app.models.collaboration import CostModelNote
 from app.models.alerts import AlertSubscription, AlertEvent
+from app.models.contract import Contract, ContractClause, ContractCostModel
+from app.models.radar import (
+    MarketSignal, NegotiationWindow, NegotiationWindowCostModel,
+)
+from app.models.editorial import EditorialBlock, EditorialBlockVersion
+from app.models.dimension import (
+    DimensionAlias, DimensionAssertion, DimensionTerm, UnresolvedValue,
+)
+from app.models.producer import Producer, ProducerAlias, ProducerFormula
+from app.models.index_seasonality import IndexSeasonalFactor
+from app.models.index_dossier import (
+    IndexChainNode, IndexDossier, IndexDriver, IndexNegotiationPointer,
+    IndexProducerRole, IndexRoleFlag, IndexSplit, VolatilityBreakpoint,
+    VolatilityCalibration,
+)
 from app.models.refresh_token import RefreshToken
 from app.models.auth_event import AuthEvent
+from app.models.index_projection import IndexProjectionRun, IndexProjectionPoint
+from app.models.sheet_import_run import SheetImportRun, SheetImportRowDiff
+from app.models.support import SupportThread, SupportMessage, SupportCannedResponse, SupportFAQ
 
 __all__ = [
     "User",
@@ -40,6 +62,11 @@ __all__ = [
     "IndexValue",
     "IndexOverride",
     "TeamIndexSource",
+    "TeamProviderCredential",
+    "TypeCode",
+    "IndexCard",
+    "IndexMonthlyValue",
+    "DropIssueRecord",
     "ActualPrice",
     "ActualVolume",
     "FxRate",
@@ -64,4 +91,37 @@ __all__ = [
     "DemoRequest",
     "RefreshToken",
     "AuthEvent",
+    "IndexProjectionRun",
+    "IndexProjectionPoint",
+    "SheetImportRun",
+    "SheetImportRowDiff",
+    "SupportThread",
+    "SupportMessage",
+    "SupportCannedResponse",
+    "SupportFAQ",
+    "Contract",
+    "ContractClause",
+    "ContractCostModel",
+    "NegotiationWindow",
+    "NegotiationWindowCostModel",
+    "MarketSignal",
+    "EditorialBlock",
+    "EditorialBlockVersion",
+    "DimensionTerm",
+    "DimensionAlias",
+    "DimensionAssertion",
+    "UnresolvedValue",
+    "Producer",
+    "ProducerAlias",
+    "ProducerFormula",
+    "IndexDossier",
+    "IndexDriver",
+    "IndexChainNode",
+    "IndexRoleFlag",
+    "IndexSplit",
+    "IndexProducerRole",
+    "IndexNegotiationPointer",
+    "VolatilityCalibration",
+    "VolatilityBreakpoint",
+    "IndexSeasonalFactor",
 ]

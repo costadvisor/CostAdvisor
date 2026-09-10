@@ -6,7 +6,10 @@ from sqlalchemy.orm import Session
 from app.models.cost_model import CostModel
 from app.models.price_data import ActualPrice
 from app.models.actual_volume import ActualVolume
-from app.services.data_resolver import get_single_index_value, get_single_index_value_detailed
+from app.services.data_resolver import (
+    get_single_index_value, get_single_index_value_detailed, get_forward_index_value,
+)
+from app.services.formula_resolver import get_effective_lines
 from app.services.volume_projector import project_volumes
 from app.services.narrative import generate_narrative
 from app.services.fx_converter import convert_price
@@ -19,7 +22,7 @@ from app.schemas.costing import (
     SqueezeRequest, SqueezeResult, SqueezePeriod,
     BriefRequest, BriefResult, BriefDriver,
     PriceChangeRequest, PriceChangeResult, PriceChangeComponent,
-    DataGap,
+    DataGap, ForwardShouldCostResult,
 )
 
 # ── Advanced formula evaluator ─────────────────────────────────
@@ -178,12 +181,14 @@ def _available_index_range(db: Session, cost_model: CostModel):
 
     min_yq, max_yq = None, None
 
-    # Check index data for this model's commodity components (simple + advanced)
+    # Check index data for this model's commodity components (simple + advanced).
+    # Scrum 28b: reads effective lines, not the raw snapshot, so a tracking-mode
+    # version's live-only commodities aren't invisible to the chart's date range.
     commodity_ids = set()
     for fv in cost_model.formula_versions:
-        for c in fv.components:
-            if c.commodity_id:
-                commodity_ids.add(c.commodity_id)
+        for line in get_effective_lines(db, fv, cost_model)[0]:
+            if line.commodity_id:
+                commodity_ids.add(line.commodity_id)
         # Advanced mode: collect commodity ids from variable definitions
         fv_type = getattr(fv, 'formula_type', 'simple') or 'simple'
         if fv_type == 'advanced' and fv.variables:
@@ -382,16 +387,24 @@ def calculate_should_cost(
     t_year = target_year or ref_year
     t_quarter = target_quarter or ref_quarter
 
-    indexed_cost = _compute_indexed_cost(
-        db, fv, cost_model, region, ref_year, ref_quarter, t_year, t_quarter, base_price
-    )
-
     # Advanced formulas embed margin in the expression — skip the margin step.
     formula_type = getattr(fv, 'formula_type', 'simple') or 'simple'
     if formula_type == 'advanced':
+        indexed_cost = _compute_indexed_cost(
+            db, fv, cost_model, region, ref_year, ref_quarter, t_year, t_quarter, base_price
+        )
         should_cost = indexed_cost
         margin_amount = 0.0
+        data_gaps = []
     else:
+        # Reuses the already-tested detailed path (Scrum 17) purely for its
+        # data_gaps list — the per-component breakdown itself is discarded
+        # here (ShouldCostBreakdown is the endpoint for that), so this is one
+        # extra call site touched instead of widening _compute_indexed_cost's
+        # own signature everywhere it's called (Scrum 28b).
+        indexed_cost, _components, data_gaps = _compute_indexed_cost_detailed(
+            db, fv, cost_model, region, ref_year, ref_quarter, t_year, t_quarter, base_price
+        )
         should_cost, margin_amount = _apply_margin(
             indexed_cost, fv.margin_type, fv.margin_value, base_price
         )
@@ -411,6 +424,7 @@ def calculate_should_cost(
         unit=cost_model.product.unit,
         incoterm=(fv.incoterm if fv and fv.incoterm else cost_model.incoterm),
         normalized_to_incoterm=target_inc,
+        data_gaps=data_gaps,
     )
 
 
@@ -469,24 +483,26 @@ def calculate_evolution(
         model_unit, out_unit
     )
 
-    # Build component info list for display.
-    # In versioned mode, collect the union of labels across all formula versions
-    # so every period's component costs can be matched by the frontend.
+    # Build component info list for display — reads the *effective* lines
+    # (Scrum 28b) so a tracking-mode version's labels/commodities match what
+    # the per-period comp_costs loop below actually computes, not a stale
+    # snapshot. In versioned mode, collect the union of labels across all
+    # formula versions so every period's component costs can be matched.
     if use_active:
         comp_info = [
-            ComponentInfo(label=c.label, commodity_name=c.commodity.name if c.commodity else None)
-            for c in fv.components
+            ComponentInfo(label=line.label, commodity_name=line.commodity_name)
+            for line in get_effective_lines(db, fv, cost_model)[0]
         ]
     else:
         seen = set()
         comp_info = []
         for ver in cost_model.formula_versions:
-            for c in ver.components:
-                if c.label not in seen:
-                    seen.add(c.label)
+            for line in get_effective_lines(db, ver, cost_model)[0]:
+                if line.label not in seen:
+                    seen.add(line.label)
                     comp_info.append(ComponentInfo(
-                        label=c.label,
-                        commodity_name=c.commodity.name if c.commodity else None,
+                        label=line.label,
+                        commodity_name=line.commodity_name,
                     ))
 
     periods_out = []
@@ -503,21 +519,26 @@ def calculate_evolution(
             period_ref_year, period_ref_quarter, year, quarter, period_base_price
         )
 
-        # Compute per-component costs using period formula
+        # Compute per-component costs using period formula (Scrum 28b: effective
+        # lines, so a tracking-mode version's chart breakdown tracks the live
+        # recipe exactly like the period total above does).
         comp_base = _component_base(period_base_price, period_fv.margin_type, period_fv.margin_value)
+        period_lines, period_fallback_reason = get_effective_lines(db, period_fv, cost_model)
+        if period_fallback_reason:
+            data_gaps.append(DataGap(component_label="(formula)", period=label, reason=period_fallback_reason))
         comp_costs = {}
-        for comp in period_fv.components:
-            weight = float(comp.weight)
-            if comp.commodity_id:
+        for line in period_lines:
+            weight = float(line.weight)
+            if line.commodity_id:
                 ref_val = get_single_index_value(
-                    db, cost_model.team_id, comp.commodity_id, region, period_ref_year, period_ref_quarter
+                    db, cost_model.team_id, line.commodity_id, region, period_ref_year, period_ref_quarter
                 )
                 cur_val = get_single_index_value(
-                    db, cost_model.team_id, comp.commodity_id, region, year, quarter
+                    db, cost_model.team_id, line.commodity_id, region, year, quarter
                 )
                 if not ref_val or not cur_val:
                     data_gaps.append(DataGap(
-                        component_label=comp.label,
+                        component_label=line.label,
                         period=label,
                         reason="no index value found",
                     ))
@@ -526,7 +547,7 @@ def calculate_evolution(
                 ratio = 1.0
             comp_cost = comp_base * weight * ratio
             comp_cost = _apply_unit(_apply_fx(db, comp_cost, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
-            comp_costs[comp.label] = round(comp_cost, 4)
+            comp_costs[line.label] = round(comp_cost, 4)
 
         theoretical, _ = _apply_margin(indexed_cost, period_fv.margin_type, period_fv.margin_value, period_base_price)
 
@@ -808,30 +829,32 @@ def calculate_brief(
     comp_base = _component_base(base_price, fv.margin_type, fv.margin_value)
     drivers = []
     data_gaps: list[DataGap] = []
-    for comp in fv.components:
-        weight = float(comp.weight)
+    brief_lines, brief_fallback_reason = get_effective_lines(db, fv, cost_model)
+    if brief_fallback_reason:
+        data_gaps.append(DataGap(component_label="(formula)", period=last_label, reason=brief_fallback_reason))
+    for line in brief_lines:
+        weight = float(line.weight)
         idx_name = None
         idx_change_pct = 0.0
         ratio = 1.0
 
-        if comp.commodity_id:
+        if line.commodity_id:
             ref_val = get_single_index_value(
-                db, cost_model.team_id, comp.commodity_id, region, ref_year, ref_quarter
+                db, cost_model.team_id, line.commodity_id, region, ref_year, ref_quarter
             )
             cur_val = get_single_index_value(
-                db, cost_model.team_id, comp.commodity_id, region, last_y, last_q
+                db, cost_model.team_id, line.commodity_id, region, last_y, last_q
             )
             if not ref_val or not cur_val:
                 data_gaps.append(DataGap(
-                    component_label=comp.label,
+                    component_label=line.label,
                     period=last_label,
                     reason="no index value found",
                 ))
             if ref_val is not None and cur_val is not None and ref_val != 0:
                 ratio = cur_val / ref_val
                 idx_change_pct = (ratio - 1) * 100
-            if comp.commodity:
-                idx_name = comp.commodity.name
+            idx_name = line.commodity_name
 
         contribution = _apply_unit(
             _apply_fx(db, comp_base * weight * (idx_change_pct / 100), model_ccy, out_ccy, last_y, last_q, team_id=cost_model.team_id),
@@ -844,7 +867,7 @@ def calculate_brief(
         direction = "up" if idx_change_pct > 1 else "down" if idx_change_pct < -1 else "flat"
 
         drivers.append(BriefDriver(
-            component_label=comp.label,
+            component_label=line.label,
             index_name=idx_name,
             index_change_pct=round(idx_change_pct, 2),
             contribution_to_gap=round(contribution, 4),
@@ -927,8 +950,9 @@ def calculate_price_change(
     components = []
     total_fair_change = 0.0
 
-    for comp in fv.components:
-        weight = float(comp.weight)
+    price_change_lines, _fallback_reason = get_effective_lines(db, fv, cost_model)
+    for line in price_change_lines:
+        weight = float(line.weight)
         # Weight relative to full price (not just component pool)
         full_weight = weight * (1 - margin_weight)
 
@@ -936,13 +960,13 @@ def calculate_price_change(
         idx_end = None
         idx_change_pct = 0.0
 
-        if comp.commodity_id:
+        if line.commodity_id:
             ref_val = get_single_index_value(
-                db, cost_model.team_id, comp.commodity_id, region,
+                db, cost_model.team_id, line.commodity_id, region,
                 request.from_year, request.from_quarter,
             )
             cur_val = get_single_index_value(
-                db, cost_model.team_id, comp.commodity_id, region,
+                db, cost_model.team_id, line.commodity_id, region,
                 request.to_year, request.to_quarter,
             )
             if ref_val:
@@ -956,8 +980,8 @@ def calculate_price_change(
         total_fair_change += contribution
 
         components.append(PriceChangeComponent(
-            label=comp.label,
-            index_name=comp.commodity.name if comp.commodity else None,
+            label=line.label,
+            index_name=line.commodity_name,
             weight=round(full_weight * 100, 2),
             index_start=round(idx_start, 4) if idx_start else None,
             index_end=round(idx_end, 4) if idx_end else None,
@@ -1016,14 +1040,15 @@ def _compute_indexed_cost(
 
     comp_base = _component_base(base_price, fv.margin_type, fv.margin_value)
     indexed_cost = 0.0
-    for comp in fv.components:
-        weight = float(comp.weight)
-        if comp.commodity_id:
+    lines, _fallback_reason = get_effective_lines(db, fv, cost_model)
+    for line in lines:
+        weight = float(line.weight)
+        if line.commodity_id:
             ref_val = get_single_index_value(
-                db, cost_model.team_id, comp.commodity_id, region, ref_year, ref_quarter
+                db, cost_model.team_id, line.commodity_id, region, ref_year, ref_quarter
             )
             cur_val = get_single_index_value(
-                db, cost_model.team_id, comp.commodity_id, region, target_year, target_quarter
+                db, cost_model.team_id, line.commodity_id, region, target_year, target_quarter
             )
             ratio = (cur_val / ref_val) if (ref_val and cur_val) else 1.0
         else:
@@ -1062,33 +1087,47 @@ def _compute_indexed_cost_detailed(
     ref_label = _period_label(ref_year, ref_quarter)
     cur_label = _period_label(target_year, target_quarter)
 
-    for comp in fv.components:
-        weight = float(comp.weight)
+    lines, fallback_reason = get_effective_lines(db, fv, cost_model)
+    if fallback_reason:
+        data_gaps.append(DataGap(component_label="(formula)", period=cur_label, reason=fallback_reason))
+
+    for line in lines:
+        weight = float(line.weight)
         ref_val = cur_val = None
         source = None
         has_data = True
-        if comp.commodity_id:
+        if line.commodity_id:
             ref_val, _ = get_single_index_value_detailed(
-                db, cost_model.team_id, comp.commodity_id, region, ref_year, ref_quarter
+                db, cost_model.team_id, line.commodity_id, region, ref_year, ref_quarter
             )
             cur_val, source = get_single_index_value_detailed(
-                db, cost_model.team_id, comp.commodity_id, region, target_year, target_quarter
+                db, cost_model.team_id, line.commodity_id, region, target_year, target_quarter
             )
             ratio = (cur_val / ref_val) if (ref_val and cur_val) else 1.0
             if not ref_val or not cur_val:
                 has_data = False
                 data_gaps.append(DataGap(
-                    component_label=comp.label, period=cur_label,
+                    component_label=line.label, period=cur_label,
                     reason="no index value found",
                 ))
+        elif line.component_type == "index":
+            # Marked index-linked at save time, but no commodity_id ever bound
+            # (e.g. the name match failed) — this must never look like a
+            # deliberately fixed line (Scrum 28b).
+            has_data = False
+            ratio = 1.0
+            data_gaps.append(DataGap(
+                component_label=line.label, period=cur_label,
+                reason="index-linked component has no bound commodity",
+            ))
         else:
             ratio = 1.0
         contribution = comp_base * weight * ratio
         indexed_cost += contribution
         components.append(ComponentBreakdown(
-            label=comp.label,
-            commodity_id=comp.commodity_id,
-            commodity_name=comp.commodity.name if comp.commodity_id and comp.commodity else None,
+            label=line.label,
+            commodity_id=line.commodity_id,
+            commodity_name=line.commodity_name,
             weight_pct=round(weight * 100, 4),
             base_value=round(ref_val, 4) if ref_val is not None else None,
             current_value=round(cur_val, 4) if cur_val is not None else None,
@@ -1098,6 +1137,12 @@ def _compute_indexed_cost_detailed(
             base_period=ref_label,
             current_period=cur_label,
             has_data=has_data,
+            component_type=line.component_type,
+            depth=line.depth,
+            via_template_id=line.via_template_id,
+            via_template_name=line.via_template_name,
+            line_region=line.line_region,
+            is_proxy=line.is_proxy,
         ))
     return indexed_cost, components, data_gaps
 
@@ -1237,3 +1282,200 @@ def _compute_advanced_cost(
     except Exception:
         # Fall back to base_price so callers always get a numeric result.
         return float(fv.base_price)
+
+
+# ── Forward should-cost (Scrum 70 Part 2) ──────────────────────────────────
+# A lock/hold verdict needs a should-cost N quarters from now, built from the
+# projection service's stored forecasts rather than scraped IndexValue rows.
+# These are deliberately SIBLINGS of _compute_indexed_cost(_detailed)/
+# _compute_advanced_cost, not a parameter threaded into them: those three are
+# called from calculate_should_cost/calculate_evolution/calculate_squeeze/
+# calculate_should_cost_breakdown today, and the forward path needs to hard-
+# fail to "insufficient" the instant one component has no forecast — logic
+# that doesn't belong in those already-tested call sites.
+
+def _advance_quarter(year: int, quarter: int, steps: int) -> tuple[int, int]:
+    q = year * 4 + (quarter - 1) + steps
+    return q // 4, (q % 4) + 1
+
+
+def _compute_indexed_cost_forward(
+    db: Session,
+    fv,
+    cost_model: CostModel,
+    region: str,
+    ref_year: int,
+    ref_quarter: int,
+    target_year: int,
+    target_quarter: int,
+    base_price: float,
+) -> tuple[float | None, list, dict[int, dict]]:
+    """Mirrors _compute_indexed_cost_detailed's loop exactly, but the CURRENT-
+    period value comes from get_forward_index_value instead of
+    get_single_index_value_detailed; the reference period stays historical.
+    Returns (None, gaps, {}) — never a fabricated ratio=1.0 — the moment any
+    commodity-linked component has no usable forecast. Fixed-weight components
+    (no commodity_id) always ratio=1.0 — nothing to forecast, not a gap."""
+    comp_base = _component_base(base_price, fv.margin_type, fv.margin_value)
+    indexed_cost = 0.0
+    cur_label = _period_label(target_year, target_quarter)
+    meta_by_commodity: dict[int, dict] = {}
+
+    forward_lines, fallback_reason = get_effective_lines(db, fv, cost_model)
+    if fallback_reason:
+        return None, [DataGap(component_label="(formula)", period=cur_label, reason=fallback_reason)], {}
+
+    for line in forward_lines:
+        weight = float(line.weight)
+        if line.commodity_id:
+            ref_val, _ = get_single_index_value_detailed(
+                db, cost_model.team_id, line.commodity_id, region, ref_year, ref_quarter
+            )
+            cur_val, meta = get_forward_index_value(
+                db, cost_model.team_id, line.commodity_id, region, target_year, target_quarter
+            )
+            if not ref_val or cur_val is None:
+                reason = "no forecast available" if ref_val else "no reference index value found"
+                return None, [DataGap(component_label=line.label, period=cur_label, reason=reason)], {}
+            ratio = cur_val / ref_val
+            if meta:
+                meta_by_commodity[line.commodity_id] = meta
+        else:
+            ratio = 1.0
+        indexed_cost += comp_base * weight * ratio
+    return indexed_cost, [], meta_by_commodity
+
+
+def _compute_advanced_cost_forward(
+    db: Session,
+    fv,
+    cost_model: CostModel,
+    region: str,
+    target_year: int,
+    target_quarter: int,
+) -> tuple[float | None, list, dict[int, dict]]:
+    """Advanced-formula counterpart to _compute_indexed_cost_forward — same
+    expression, but index variables resolve via get_forward_index_value."""
+    cur_label = _period_label(target_year, target_quarter)
+    if not fv.expression:
+        return None, [DataGap(component_label="expression", period=cur_label, reason="no expression")], {}
+
+    context: dict[str, float] = {}
+    meta_by_commodity: dict[int, dict] = {}
+    for var_name, var_def in (fv.variables or {}).items():
+        if var_def.get('type') == 'index' and var_def.get('commodity_id'):
+            val, meta = get_forward_index_value(
+                db, cost_model.team_id, var_def['commodity_id'], region, target_year, target_quarter,
+            )
+            if val is None:
+                return None, [DataGap(component_label=var_name, period=cur_label, reason="no forecast available")], {}
+            context[var_name] = val
+            if meta:
+                meta_by_commodity[var_def['commodity_id']] = meta
+        else:
+            context[var_name] = float(var_def.get('value', 0))
+
+    try:
+        return safe_eval_expr(fv.expression, context), [], meta_by_commodity
+    except Exception:
+        return None, [DataGap(component_label="expression", period=cur_label, reason="expression evaluation failed")], {}
+
+
+def calculate_forward_should_cost(
+    db: Session,
+    cost_model: CostModel,
+    horizon_quarters: int,
+) -> ForwardShouldCostResult:
+    """Evaluate the CURRENT FormulaVersion horizon_quarters ahead of today,
+    using Scrum 70 Part 1's projected index values for the target quarter.
+    Works for any cost model — hand-built or catalog-linked — because it walks
+    the same fv.components/fv.variables shape calculate_should_cost already
+    walks; no FormulaRegionCoverage dependency."""
+    now_y, now_q = _current_quarter()
+    h_year, h_quarter = _advance_quarter(now_y, now_q, horizon_quarters)
+
+    fv = cost_model.current_formula
+    if not fv:
+        return ForwardShouldCostResult(
+            insufficient=True, horizon_year=h_year, horizon_quarter=h_quarter,
+            data_gaps=[DataGap(component_label="formula", period=_period_label(h_year, h_quarter),
+                                reason="no active formula")],
+        )
+
+    base_price = _effective_base_price(db, cost_model.id, fv)
+    region = cost_model.region
+    ref_year, ref_quarter = fv.base_year, fv.base_quarter
+    formula_type = getattr(fv, 'formula_type', 'simple') or 'simple'
+
+    has_commodity_component = (
+        any(line.commodity_id for line in get_effective_lines(db, fv, cost_model)[0]) if formula_type != 'advanced'
+        else any(v.get('type') == 'index' and v.get('commodity_id') for v in (fv.variables or {}).values())
+    )
+    if not has_commodity_component:
+        # Nothing to forecast is not the same as missing data — an all-fixed
+        # formula's should-cost is deterministically unchanged at any horizon.
+        current = calculate_should_cost(db, cost_model)
+        return ForwardShouldCostResult(
+            insufficient=False, forecast_should_cost=current.should_cost,
+            forecast_vintage=None, forecast_method="fixed_formula_no_forecast_needed",
+            horizon_year=h_year, horizon_quarter=h_quarter, data_gaps=[],
+        )
+
+    if formula_type == 'advanced':
+        indexed_cost, data_gaps, meta = _compute_advanced_cost_forward(
+            db, fv, cost_model, region, h_year, h_quarter,
+        )
+        margin_amount = 0.0
+        should_cost = indexed_cost
+    else:
+        indexed_cost, data_gaps, meta = _compute_indexed_cost_forward(
+            db, fv, cost_model, region, ref_year, ref_quarter, h_year, h_quarter, base_price,
+        )
+        should_cost = None
+        if indexed_cost is not None:
+            should_cost, margin_amount = _apply_margin(
+                indexed_cost, fv.margin_type, fv.margin_value, base_price
+            )
+
+    if should_cost is None:
+        return ForwardShouldCostResult(
+            insufficient=True, horizon_year=h_year, horizon_quarter=h_quarter, data_gaps=data_gaps,
+        )
+
+    vintages = [m["vintage"] for m in meta.values() if m.get("vintage") is not None]
+    methods = {m["method"] for m in meta.values() if m.get("method")}
+    forecast_vintage = min(vintages) if vintages else None
+    forecast_method = next(iter(methods)) if len(methods) == 1 else ("mixed" if len(methods) > 1 else None)
+
+    return ForwardShouldCostResult(
+        insufficient=False,
+        forecast_should_cost=round(should_cost, 4),
+        forecast_vintage=forecast_vintage,
+        forecast_method=forecast_method,
+        horizon_year=h_year, horizon_quarter=h_quarter,
+        data_gaps=data_gaps,
+    )
+
+
+# ── Should-cost for one period, given a model (Scrum 23) ──────────────────
+# Extracted here (was private to routers/suppliers.py) so Scrum 32's supplier
+# trust scorer can reuse the exact same should-cost math benchmarking already
+# uses, rather than a second, driftable copy.
+
+def should_cost_for_period(db: Session, model: CostModel, year: int, quarter: int) -> float | None:
+    """Should-cost for one cost model at one quarter, using the formula active that
+    period (same pipeline as the Excel export / costing engine). Returns None if the
+    model has no formula."""
+    period_fv = model.formula_for_period(year, quarter)
+    if not period_fv:
+        return None
+    pbp = float(period_fv.base_price)
+    indexed_cost = _compute_indexed_cost(
+        db, period_fv, model, model.region,
+        period_fv.base_year, period_fv.base_quarter,
+        year, quarter, pbp,
+    )
+    theoretical, _margin = _apply_margin(
+        indexed_cost, period_fv.margin_type, period_fv.margin_value, pbp,
+    )
+    return theoretical

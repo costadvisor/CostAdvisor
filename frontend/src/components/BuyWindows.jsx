@@ -25,6 +25,30 @@ export function BuySignalBadge({ signal, deviationPct }) {
   );
 }
 
+/* Scrum 70 (Part 2) — forward lock/hold verdict, from
+ * GET /api/portfolio/buy-windows/{id}/verdict. A should-cost forecast
+ * horizon_quarters ahead vs today's should-cost, built from the projection
+ * service's stored index forecasts — separate signal from BUY_SIGNAL above,
+ * which only looks backward at the trailing 4-quarter average. */
+export const LOCK_HOLD_SIGNAL = {
+  lock:         { label: 'Lock now',    color: 'var(--accent2)', bg: 'var(--danger-bg)' },
+  hold:         { label: 'Hold / wait', color: 'var(--accent)',  bg: 'var(--success-bg)' },
+  neutral:      { label: 'Neutral',     color: 'var(--muted)',   bg: 'var(--neutral-bg)' },
+  insufficient: { label: 'No forecast yet', color: 'var(--muted)', bg: 'var(--neutral-bg)' },
+};
+
+/** Small inline badge for the forward verdict — reused in the product view. */
+export function LockHoldBadge({ verdict, deviationPct, horizonQuarters }) {
+  const s = LOCK_HOLD_SIGNAL[verdict] || LOCK_HOLD_SIGNAL.neutral;
+  const title = horizonQuarters != null ? `Should-cost forecast ${horizonQuarters}Q ahead vs today` : undefined;
+  return (
+    <span className="ca-badge" style={{ background: s.bg, color: s.color }} title={title}>
+      {s.label}
+      {deviationPct != null && verdict !== 'insufficient' ? ` (${deviationPct > 0 ? '+' : ''}${deviationPct.toFixed(1)}%)` : ''}
+    </span>
+  );
+}
+
 export default function BuyWindows({ data, loading, error }) {
   const navigate = useNavigate();
 

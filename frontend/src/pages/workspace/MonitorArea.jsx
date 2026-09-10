@@ -4,6 +4,7 @@ import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import exportCsv from '../../utils/exportCsv';
 import { DriftBar } from './wsCharts';
+import RadarView from '../../components/RadarView';
 
 /* Monitor — the standing question of the job: across everything I buy, where am
  * I overpaying right now, before I walk into a negotiation. Rebuilt to the new IA
@@ -59,6 +60,10 @@ export default function MonitorArea() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [familyFilter, setFamilyFilter] = useState('all');
   const [closed, setClosed] = useState(() => new Set());   // groups open unless closed
+  // 'drift' = the shipped should-cost-vs-actual table; 'radar' = the SCRUM-79
+  // trigger radar. Two different questions — where am I overpaying now, and
+  // what has a deadline on it — so they are views, not merged columns.
+  const [view, setView] = useState('drift');
 
   useEffect(() => {
     if (!activeTeamId) return;
@@ -188,21 +193,36 @@ export default function MonitorArea() {
           <div className="ca-h1">Monitor</div>
           <p className="ca-subtitle">Should-cost is always live — driven by your linked indices, not invoices. Every product ranked by the money at stake where actuals drift away from it.</p>
         </div>
-        {filtered.length > 0 && (
-          <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => exportCsv(
-            'monitor.csv',
-            ['Family', 'Ref', 'Product', 'Supplier', 'Region', 'Currency', 'Should-cost', 'Actual', 'Gap', 'Gap %', 'Exposure', 'Status', 'Invoice'],
-            filtered.map(r => [
-              r.familyLabel, r.ref || '', r.name, r.supplier || '', r.region || '', r.currency,
-              r.shouldCost != null ? r.shouldCost : '', r.actual != null ? r.actual : '',
-              r.gap != null ? r.gap : '', r.gapPct != null ? r.gapPct : '', r.exposure || '',
-              STATUS[r.status].label, r.kind === 'cm' ? (r.actual != null ? 'Received' : 'Awaited') : '',
-            ])
-          )}>Export CSV</button>
-        )}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {[['drift', 'Drift'], ['radar', 'Radar']].map(([k, l]) => (
+              <button key={k} onClick={() => setView(k)}
+                className={`ca-btn ca-btn-sm ${view === k ? 'ca-btn-primary' : 'ca-btn-ghost'}`}
+                title={k === 'drift'
+                  ? 'Every product ranked by the money at stake right now'
+                  : 'Time-bounded negotiation windows: what has a deadline on it, and what the radar cannot see'}>
+                {l}
+              </button>
+            ))}
+          </div>
+          {view === 'drift' && filtered.length > 0 && (
+            <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => exportCsv(
+              'monitor.csv',
+              ['Family', 'Ref', 'Product', 'Supplier', 'Region', 'Currency', 'Should-cost', 'Actual', 'Gap', 'Gap %', 'Exposure', 'Status', 'Invoice'],
+              filtered.map(r => [
+                r.familyLabel, r.ref || '', r.name, r.supplier || '', r.region || '', r.currency,
+                r.shouldCost != null ? r.shouldCost : '', r.actual != null ? r.actual : '',
+                r.gap != null ? r.gap : '', r.gapPct != null ? r.gapPct : '', r.exposure || '',
+                STATUS[r.status].label, r.kind === 'cm' ? (r.actual != null ? 'Received' : 'Awaited') : '',
+              ])
+            )}>Export CSV</button>
+          )}
+        </div>
       </div>
 
-      {loading ? (
+      {view === 'radar' && <RadarView />}
+
+      {view === 'drift' && (loading ? (
         <div style={{ padding: 20, color: 'var(--muted)' }}>Loading&hellip;</div>
       ) : error ? (
         <div className="ca-card" style={{ color: 'var(--accent2)' }}>Error: {error}</div>
@@ -344,7 +364,7 @@ export default function MonitorArea() {
             </div>
           </div>
         </>
-      )}
+      ))}
     </div>
   );
 }

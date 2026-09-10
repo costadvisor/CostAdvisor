@@ -13,6 +13,25 @@ const TRIGGERS = {
   gap: { label: 'New gap vs should-cost', scope: 'product' },
   index_move: { label: 'Index move', scope: 'index' },
   buy_window: { label: 'Buy-window flip', scope: 'product' },
+  // SCRUM-79. The only trigger that can scope a supplier or a contract, which
+  // is why those two columns exist on a subscription at all.
+  negotiation_window: { label: 'Negotiation window opens', scope: 'window' },
+};
+
+// Which scopes each trigger accepts. The API rejects the wrong pairing with a
+// 422 rather than silently ignoring it, so the picker offers only what will be
+// accepted.
+const WINDOW_SCOPES = [
+  ['', 'Any window'],
+  ['product', 'One product'],
+  ['supplier', 'One supplier'],
+  ['contract', 'One contract'],
+  ['index', 'One index'],
+];
+
+const SCOPE_ALL_LABEL = {
+  product: 'All products', index: 'All indexes',
+  supplier: 'All suppliers', contract: 'All contracts', '': 'Any scope',
 };
 
 const fmtTime = (iso) => new Date(iso).toLocaleString(undefined,
@@ -35,8 +54,19 @@ export default function Alerts() {
   // New-subscription form
   const [trigger, setTrigger] = useState('gap');
   const [scopeId, setScopeId] = useState('');       // '' = all; else cost_model_id or commodity_id
-  const [threshold, setThreshold] = useState(5);
+  const [threshold, setThreshold] = useState('');   // '' = inherit the team default
   const [channel, setChannel] = useState('email');
+  const [windowScope, setWindowScope] = useState('');
+
+  // The team default fire boundary. It lives here rather than only on a
+  // subscription because a threshold set per-subscription and a threshold set
+  // per-team were two live values with no rule for which won — one accessor
+  // now reconciles them, and this is the half a person can see and change.
+  const [teamThreshold, setTeamThreshold] = useState(null);
+  const [thresholdDraft, setThresholdDraft] = useState('');
+  const [savingThreshold, setSavingThreshold] = useState(false);
+  const [suppliers, setSuppliers] = useState([]);
+  const [contracts, setContracts] = useState([]);
 
   const load = useCallback(() => {
     if (!activeTeamId) return;
@@ -48,10 +78,15 @@ export default function Alerts() {
       api.get('/api/cost-models', { params: p }),
       api.get('/api/indexes'),
       api.get('/api/alerts/slack-webhook', { params: p }),
+      api.get('/api/alerts/threshold', { params: p }),
+      api.get('/api/suppliers', { params: p }).catch(() => ({ data: [] })),
+      api.get('/api/contracts', { params: p }).catch(() => ({ data: [] })),
     ])
-      .then(([s, h, cm, idx, sw]) => {
+      .then(([s, h, cm, idx, sw, th, sup, con]) => {
         setSubs(s.data); setHistory(h.data); setCostModels(cm.data);
         setCommodities(idx.data); setSlack(sw.data); setSlackUrl(sw.data.slack_webhook_url || '');
+        setTeamThreshold(th.data); setThresholdDraft(String(th.data.default_threshold_pct));
+        setSuppliers(sup.data || []); setContracts(con.data || []);
       })
       .catch(err => addToast(formatApiError(err), 'error'))
       .finally(() => setLoading(false));
@@ -63,13 +98,21 @@ export default function Alerts() {
   const scope = TRIGGERS[trigger].scope;
 
   const addSub = () => {
-    const body = { trigger_type: trigger, threshold_pct: Number(threshold), channel };
+    // An empty threshold box means "inherit the team default" — sending 0 would
+    // instead mean "fire on any movement at all", which is a different alert.
+    const body = {
+      trigger_type: trigger, channel,
+      threshold_pct: threshold === '' ? null : Number(threshold),
+    };
     if (scopeId) {
-      if (scope === 'product') body.cost_model_id = scopeId;
+      const kind = scope === 'window' ? windowScope : scope;
+      if (kind === 'product') body.cost_model_id = scopeId;
+      else if (kind === 'supplier') body.supplier_id = Number(scopeId);
+      else if (kind === 'contract') body.contract_id = scopeId;
       else body.commodity_id = Number(scopeId);
     }
     api.post('/api/alerts/subscriptions', body, { params: { team_id: activeTeamId } })
-      .then(() => { setScopeId(''); load(); addToast('Alert subscription added', 'success'); })
+      .then(() => { setScopeId(''); setThreshold(''); load(); addToast('Alert subscription added', 'success'); })
       .catch(err => addToast(formatApiError(err), 'error'));
   };
 
@@ -88,6 +131,16 @@ export default function Alerts() {
       .catch(err => addToast(formatApiError(err), 'error'));
   };
 
+  const saveThreshold = () => {
+    setSavingThreshold(true);
+    api.put('/api/alerts/threshold',
+      { default_threshold_pct: Number(thresholdDraft), default_threshold_unit: teamThreshold.default_threshold_unit },
+      { params: { team_id: activeTeamId } })
+      .then(({ data }) => { setTeamThreshold(data); load(); addToast('Team default threshold saved', 'success'); })
+      .catch(err => addToast(formatApiError(err), 'error'))
+      .finally(() => setSavingThreshold(false));
+  };
+
   const runNow = () => {
     setRunning(true);
     api.post('/api/alerts/evaluate', null, { params: { team_id: activeTeamId } })
@@ -103,10 +156,40 @@ export default function Alerts() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <div>
           <div className="ca-h1">Alerts</div>
-          <p className="ca-subtitle" style={{ marginBottom: 0 }}>Get notified on index moves, new gaps, and buy-window flips — by email or Slack.</p>
+          <p className="ca-subtitle" style={{ marginBottom: 0 }}>Get notified on index moves, new gaps, buy-window flips, and negotiation windows opening — by email or Slack.</p>
         </div>
         <button className="ca-btn ca-btn-ghost" onClick={runNow} disabled={running}>{running ? 'Evaluating…' : '⟳ Run now'}</button>
       </div>
+
+      {/* Team default threshold. One accessor reconciles this with the
+          per-subscription override, so the two can never both be "the"
+          threshold with no rule for which applies. */}
+      {teamThreshold && (
+        <div className="ca-card" style={{ marginTop: 14 }}>
+          <div className="ca-card-title">Team default threshold</div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div>
+              <label className="ca-label">Fires at</label>
+              <input className="ca-input" type="number" min="0" max="100" step="0.5" style={{ width: 90 }}
+                value={thresholdDraft} onChange={e => setThresholdDraft(e.target.value)} />
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', paddingBottom: 8 }}>
+              {teamThreshold.default_threshold_unit === 'pct' ? '%' : teamThreshold.default_threshold_unit}
+            </div>
+            <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={saveThreshold}
+              disabled={savingThreshold || thresholdDraft === String(teamThreshold.default_threshold_pct)}>
+              {savingThreshold ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.55 }}>
+            Applies to every subscription that has not set its own. Changing it moves the
+            boundary for all of them at once. Owner/admin only — saving 403s otherwise.
+            {/* The unit travels with the value: a currency threshold only means
+                something where both sides are money, and a platform index level
+                is base 100, where nothing is. */}
+          </div>
+        </div>
+      )}
 
       {/* New subscription */}
       <div className="ca-card" style={{ marginTop: 14 }}>
@@ -118,19 +201,38 @@ export default function Alerts() {
               {Object.entries(TRIGGERS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
           </div>
-          <div>
-            <label className="ca-label">Scope</label>
-            <select className="ca-input" value={scopeId} onChange={e => setScopeId(e.target.value)}>
-              <option value="">{scope === 'product' ? 'All products' : 'All indexes'}</option>
-              {scope === 'product'
-                ? costModels.map(cm => <option key={cm.id} value={cm.id}>{cm.product_name}{cm.supplier_name ? ` · ${cm.supplier_name}` : ''}</option>)
-                : commodities.map(ci => <option key={ci.id} value={ci.id}>{ci.name}</option>)}
-            </select>
-          </div>
+          {scope === 'window' && (
+            <div>
+              <label className="ca-label">Scope by</label>
+              <select className="ca-input" value={windowScope}
+                onChange={e => { setWindowScope(e.target.value); setScopeId(''); }}>
+                {WINDOW_SCOPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+            </div>
+          )}
+          {!(scope === 'window' && !windowScope) && (
+            <div>
+              <label className="ca-label">Scope</label>
+              <select className="ca-input" value={scopeId} onChange={e => setScopeId(e.target.value)}>
+                <option value="">{SCOPE_ALL_LABEL[scope === 'window' ? windowScope : scope]}</option>
+                {(scope === 'window' ? windowScope : scope) === 'product'
+                  && costModels.map(cm => <option key={cm.id} value={cm.id}>{cm.product_name}{cm.supplier_name ? ` · ${cm.supplier_name}` : ''}</option>)}
+                {(scope === 'window' ? windowScope : scope) === 'index'
+                  && commodities.map(ci => <option key={ci.id} value={ci.id}>{ci.name}</option>)}
+                {windowScope === 'supplier'
+                  && suppliers.map(sp => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
+                {windowScope === 'contract'
+                  && contracts.map(c => <option key={c.id} value={c.id}>{c.reference || c.id.slice(0, 8)}</option>)}
+              </select>
+            </div>
+          )}
           {trigger !== 'buy_window' && (
             <div>
               <label className="ca-label">Threshold %</label>
-              <input className="ca-input" type="number" min="0" max="100" style={{ width: 90 }} value={threshold} onChange={e => setThreshold(e.target.value)} />
+              <input className="ca-input" type="number" min="0" max="100" style={{ width: 130 }}
+                placeholder={teamThreshold ? `${teamThreshold.default_threshold_pct} (team)` : 'team default'}
+                title="Leave blank to inherit the team default. Typing 0 is not the same thing — it means fire on any movement at all."
+                value={threshold} onChange={e => setThreshold(e.target.value)} />
             </div>
           )}
           <div>
@@ -160,7 +262,22 @@ export default function Alerts() {
                 <tr key={s.id}>
                   <td>{TRIGGERS[s.trigger_type]?.label || s.trigger_type}</td>
                   <td style={{ color: 'var(--muted)' }}>{s.scope_label}</td>
-                  <td className="center">{s.trigger_type === 'buy_window' ? '—' : `${s.threshold_pct}%`}</td>
+                  {/* The raw override and what actually applies are different
+                      facts; showing only one of them is how a person ends up
+                      surprised by when an alert fired. */}
+                  <td className="center">
+                    {s.trigger_type === 'buy_window' ? '—' : (
+                      <span title={s.threshold_source === 'team_default'
+                        ? 'Inheriting the team default — change it above to move this one too'
+                        : 'This subscription overrides the team default'}>
+                        {s.effective_threshold_pct ?? s.threshold_pct}
+                        {s.effective_threshold_unit === 'currency' ? '' : '%'}
+                        {s.threshold_source === 'team_default' && (
+                          <span style={{ color: 'var(--muted)', fontSize: 10 }}> (team)</span>
+                        )}
+                      </span>
+                    )}
+                  </td>
                   <td className="center"><span className="ca-badge">{s.channel}</span></td>
                   <td className="center">
                     <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => toggle(s)} style={{ color: s.active ? 'var(--accent)' : 'var(--muted)' }}>

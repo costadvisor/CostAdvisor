@@ -140,7 +140,7 @@ async def login(request: Request):
         f"{state}:{verifier}",
         httponly=True,
         secure=is_prod,
-        samesite="none" if is_prod else "lax",
+        samesite=settings.cookie_samesite if is_prod else "lax",
         max_age=600,
     )
     return response
@@ -288,7 +288,7 @@ async def callback(request: Request, db: Session = Depends(get_db)):
         value=token_str,
         httponly=True,
         secure=is_prod,
-        samesite="none" if is_prod else "lax",
+        samesite=settings.cookie_samesite if is_prod else "lax",
         max_age=settings.access_token_minutes * 60,
     )
     response.set_cookie(
@@ -296,11 +296,11 @@ async def callback(request: Request, db: Session = Depends(get_db)):
         value=refresh_raw,
         httponly=True,
         secure=is_prod,
-        samesite="none" if is_prod else "lax",
+        samesite=settings.cookie_samesite if is_prod else "lax",
         max_age=settings.refresh_token_days * 86400,
         path="/auth/refresh",
     )
-    response.delete_cookie("oauth_state", secure=is_prod, samesite="none" if is_prod else "lax")
+    response.delete_cookie("oauth_state", secure=is_prod, samesite=settings.cookie_samesite if is_prod else "lax")
     return response
 
 
@@ -385,11 +385,11 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
     token_str = create_jwt(user_id, expiry_hours=settings.access_token_minutes / 60)
     response.set_cookie(
         key="ca_token", value=token_str, httponly=True, secure=is_prod,
-        samesite="none" if is_prod else "lax", max_age=settings.access_token_minutes * 60,
+        samesite=settings.cookie_samesite if is_prod else "lax", max_age=settings.access_token_minutes * 60,
     )
     response.set_cookie(
         key="ca_refresh", value=new_raw, httponly=True, secure=is_prod,
-        samesite="none" if is_prod else "lax", max_age=settings.refresh_token_days * 86400,
+        samesite=settings.cookie_samesite if is_prod else "lax", max_age=settings.refresh_token_days * 86400,
         path="/auth/refresh",
     )
     return {"status": "refreshed"}
@@ -430,7 +430,7 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
         bypass_rls_var.set(False)
 
     is_prod = settings.environment != "development"
-    same_site = "none" if is_prod else "lax"
+    same_site = settings.cookie_samesite if is_prod else "lax"
     # Matching attributes to how the cookies were set — a mismatched Secure/SameSite
     # on delete_cookie can leave the browser holding onto the original cookie.
     response.delete_cookie("ca_token", httponly=True, secure=is_prod, samesite=same_site)
@@ -472,7 +472,7 @@ async def google_calendar_start(
         f"{state}:{str(current_user.id)}",
         httponly=True,
         secure=is_prod,
-        samesite="none" if is_prod else "lax",
+        samesite=settings.cookie_samesite if is_prod else "lax",
         max_age=600,
     )
     return response
@@ -543,5 +543,5 @@ async def google_calendar_callback(
 
     response = RedirectResponse(url=f"{settings.app_url}/admin?tab=settings", status_code=302)
     is_prod = settings.environment != "development"
-    response.delete_cookie("gc_state", secure=is_prod, samesite="none" if is_prod else "lax")
+    response.delete_cookie("gc_state", secure=is_prod, samesite=settings.cookie_samesite if is_prod else "lax")
     return response

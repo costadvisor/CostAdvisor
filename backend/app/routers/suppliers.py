@@ -11,34 +11,26 @@ from app.models.supplier import Supplier
 from app.models.cost_model import CostModel
 from app.models.price_data import ActualPrice
 from app.models.actual_volume import ActualVolume
+from app.models.supplier_trust import SupplierTrustScore
 from app.routers.auth import get_current_user
 from app.routers.teams import require_team_role
-from app.schemas.supplier import SupplierCreate, SupplierOut
+from app.schemas.supplier import (
+    SupplierCreate, SupplierOut, SupplierTrustScoreOut,
+    SupplierTrustSummaryOut, SupplierTrustScoresResponse,
+)
 from app.services.audit import log_event
 from app.services.permissions import require_permission
+from app.services.supplier_trust import compute_supplier_trust_scores, _grade_for
 
 router = APIRouter()
 
 
 def _should_cost_for_period(db, model, year, quarter):
-    """Should-cost for one cost model at one quarter, using the formula active that
-    period (same pipeline as the Excel export / costing engine). Returns None if the
-    model has no formula. Kept here so benchmarking uses the identical gap math."""
-    from app.services.costing_engine import _compute_indexed_cost, _apply_margin
-
-    period_fv = model.formula_for_period(year, quarter)
-    if not period_fv:
-        return None
-    pbp = float(period_fv.base_price)
-    indexed_cost = _compute_indexed_cost(
-        db, period_fv, model, model.region,
-        period_fv.base_year, period_fv.base_quarter,
-        year, quarter, pbp,
-    )
-    theoretical, _margin = _apply_margin(
-        indexed_cost, period_fv.margin_type, period_fv.margin_value, pbp,
-    )
-    return theoretical
+    """Thin alias — the real implementation moved to costing_engine.py
+    (Scrum 32) so the supplier trust scorer can reuse the identical gap math
+    without a second, driftable copy."""
+    from app.services.costing_engine import should_cost_for_period
+    return should_cost_for_period(db, model, year, quarter)
 
 
 @router.get("/", response_model=list[SupplierOut])
@@ -178,6 +170,101 @@ def benchmark_suppliers(
     # Rank: biggest average margin over should-cost first (priced suppliers before empty ones)
     results.sort(key=lambda r: (r["avg_gap_pct"] is None, -(r["avg_gap_pct"] or 0)))
     return {"suppliers": results}
+
+
+# ── Trust & margin grading (Scrum 32) ───────────────────────────────────────
+# Scoring/persistence layer on top of the benchmark above — owner/admin only,
+# same gate. Scored by raw Supplier.id/name (no canonical producer entity
+# exists in this repo — see services/supplier_trust.py's module docstring);
+# every response states that explicitly via `resolution`.
+
+def _summarize(supplier: Supplier, rows: list[SupplierTrustScore]) -> SupplierTrustSummaryOut:
+    scored = [r for r in rows if not r.insufficient_data and r.score is not None]
+    overall_score = round(sum(r.score for r in scored) / len(scored), 1) if scored else None
+    overall_grade = _grade_for(overall_score) if overall_score is not None else None
+    return SupplierTrustSummaryOut(
+        supplier_id=supplier.id, supplier_name=supplier.name,
+        overall_score=overall_score, overall_grade=overall_grade,
+        insufficient_data=not scored,
+        scores=[SupplierTrustScoreOut.model_validate(r) for r in rows],
+    )
+
+
+@router.post("/{supplier_id}/trust-score/compute", response_model=list[SupplierTrustScoreOut])
+def compute_trust_score(
+    supplier_id: int,
+    team_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    supplier = db.query(Supplier).filter(Supplier.id == supplier_id, Supplier.team_id == team_id).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    require_team_role(db, current_user, team_id, ["owner", "admin"])
+
+    rows = compute_supplier_trust_scores(db, team_id, supplier_id)
+    out = [SupplierTrustScoreOut.model_validate(r) for r in rows]
+    log_event(db, team_id, current_user.id, "compute", "supplier_trust_score", str(supplier_id),
+              new_value={"row_count": len(rows)})
+    db.commit()
+    return out
+
+
+@router.post("/trust-scores/compute-all", response_model=SupplierTrustScoresResponse)
+def compute_all_trust_scores(
+    team_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_team_role(db, current_user, team_id, ["owner", "admin"])
+    suppliers = db.query(Supplier).filter(Supplier.team_id == team_id).order_by(Supplier.name).all()
+    summaries = []
+    for s in suppliers:
+        rows = compute_supplier_trust_scores(db, team_id, s.id)
+        summaries.append(_summarize(s, rows))
+    log_event(db, team_id, current_user.id, "compute_all", "supplier_trust_score", str(team_id),
+              new_value={"supplier_count": len(suppliers)})
+    db.commit()
+    return SupplierTrustScoresResponse(suppliers=summaries)
+
+
+@router.get("/{supplier_id}/trust-score", response_model=list[SupplierTrustScoreOut])
+def get_trust_score(
+    supplier_id: int,
+    team_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    supplier = db.query(Supplier).filter(Supplier.id == supplier_id, Supplier.team_id == team_id).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    require_team_role(db, current_user, team_id, ["owner", "admin"])
+    return (
+        db.query(SupplierTrustScore)
+        .filter(SupplierTrustScore.supplier_id == supplier_id)
+        .order_by(SupplierTrustScore.grain, SupplierTrustScore.grain_key)
+        .all()
+    )
+
+
+@router.get("/trust-scores", response_model=SupplierTrustScoresResponse)
+def list_trust_scores(
+    team_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_team_role(db, current_user, team_id, ["owner", "admin"])
+    suppliers = db.query(Supplier).filter(Supplier.team_id == team_id).order_by(Supplier.name).all()
+    summaries = []
+    for s in suppliers:
+        rows = (
+            db.query(SupplierTrustScore)
+            .filter(SupplierTrustScore.supplier_id == s.id)
+            .order_by(SupplierTrustScore.grain, SupplierTrustScore.grain_key)
+            .all()
+        )
+        summaries.append(_summarize(s, rows))
+    return SupplierTrustScoresResponse(suppliers=summaries)
 
 
 @router.get("/{supplier_id}/purchase-history")

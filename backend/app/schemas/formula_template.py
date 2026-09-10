@@ -43,6 +43,13 @@ class FormulaTemplateOut(BaseModel):
     family_name: str | None = None
     subfamily_name: str | None = None
     catalog_meta: dict | None = None
+    # SCRUM-78 rollup across this template's coverage rows. The grade is stored
+    # per (template, region) because trust is a property of a *combo*, not of a
+    # recipe — but the catalog list renders one row per template, so the worst
+    # grade and the review count are rolled up here rather than making the page
+    # fetch every combo. `catalog_meta.data_confidence` is NOT a substitute: the
+    # July sheet dropped that column, so it is null on everything loaded since.
+    trust_summary: dict | None = None
     description: str | None
     expression: str | None
     variables: dict | None
@@ -141,15 +148,76 @@ class FormulaCoverageOut(BaseModel):
     margin_pct: float | None
     base_year: int | None
     base_quarter: int | None
+    # Legacy. The July sheet dropped the column it came from, so this is None on
+    # everything loaded since — and it no longer drives `needs_review`.
     data_confidence: str | None = None
+    # Two coverage columns, two questions, and the grade below is neither of
+    # them: coverage is an *input* to the grade.
     coverage_tier: str | None = None
+    proxy_density_tier: str | None = None
     needs_review: bool = False
+    # The reviewer's display identity, resolved from the FK — so it still
+    # resolves after they change their email. `reviewed_by` is the legacy
+    # free-text value, kept for sign-offs that predate the FK.
     reviewed_by: str | None = None
+    reviewed_by_id: uuid.UUID | None = None
+    reviewed_by_name: str | None = None
     reviewed_at: datetime | None = None
     review_metadata: dict | None = None
+    # ── The derived trust state (SCRUM-78) ──────────────────────────────────
+    trust_grade: str | None = None
+    # Names the type-codes and lines that pulled the grade down — an ungraded
+    # "low" tells a reviewer nothing about what to go and look at.
+    trust_inputs: dict | None = None
+    trust_computed_at: datetime | None = None
+    # The customer-facing caveat for this grade, so the text has one source.
+    trust_caveat: str | None = None
+    # Present once signed off; a mismatch against the live recipe is what
+    # returns the combo to the queue.
+    review_fingerprint: str | None = None
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class TrustQueueRow(BaseModel):
+    template_id: uuid.UUID
+    template_code: str | None = None
+    template_name: str | None = None
+    region: str
+    variant: str = ""
+    scope: str
+    trust_grade: str | None = None
+    needs_review: bool = False
+    trust_inputs: dict | None = None
+    coverage_tier: str | None = None
+    proxy_density_tier: str | None = None
+    reviewed_at: datetime | None = None
+    reviewed_by_id: uuid.UUID | None = None
+    # Resolved from the FK on read, never stored — a copied email decays the
+    # moment the reviewer changes their address.
+    reviewed_by_name: str | None = None
+    # The line set the sign-off was pinned to. Change a weight and the combo
+    # returns to the queue; a reorder does not, because sort_order is
+    # presentation and re-queueing on it would train reviewers to ignore the flag.
+    review_fingerprint: str | None = None
+
+
+class TrustQueueOut(BaseModel):
+    total: int
+    # Worst first by default: a queue ordered by region or name would have a
+    # reviewer reading alphabetically through something whose whole point is
+    # triage.
+    order_by: str
+    rows: list[TrustQueueRow] = []
+
+
+class TrustRecomputeOut(BaseModel):
+    considered: int
+    graded: int
+    # Sign-offs cleared because the reviewed inputs moved.
+    invalidated: int
+    by_grade: dict[str, int] = {}
 
 
 # ── Resolver output (Scrum 58) ───────────────────────────────────────────────

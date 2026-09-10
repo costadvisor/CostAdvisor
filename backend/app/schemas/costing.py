@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from pydantic import BaseModel
 
 
@@ -22,6 +23,10 @@ class ShouldCostResult(BaseModel):
     unit: str
     incoterm: str | None = None
     normalized_to_incoterm: str | None = None
+    # Scrum 28b — a component that should be index-linked but isn't (broken
+    # name match, or a tracking-mode link that fell back to its last-known
+    # snapshot) surfaces here instead of silently riding flat at ratio 1.0.
+    data_gaps: list["DataGap"] = []
 
 
 # ── Should-cost breakdown (Scrum 17 — inspectable numbers) ─────────────────────
@@ -39,6 +44,15 @@ class ComponentBreakdown(BaseModel):
     base_period: str           # e.g. "Q1 2024"
     current_period: str
     has_data: bool             # False if either base_value or current_value is missing
+    # Scrum 28b — provenance, mirrors GET /formulas/{id}/resolve's per-line
+    # shape exactly (populated from the live catalog recipe in tracking mode,
+    # from the frozen snapshot in pinned mode). None for hand-built lines.
+    component_type: str | None = None       # "index" | "fixed" | None
+    depth: int | None = None
+    via_template_id: uuid.UUID | None = None
+    via_template_name: str | None = None
+    line_region: str | None = None
+    is_proxy: bool | None = None
 
 
 class ShouldCostBreakdown(BaseModel):
@@ -55,6 +69,21 @@ class ShouldCostBreakdown(BaseModel):
     unit: str
     incoterm: str | None = None
     normalized_to_incoterm: str | None = None
+
+
+# ── Forward should-cost (Scrum 70 Part 2) ──────────────────────────────────
+
+class ForwardShouldCostResult(BaseModel):
+    """A should-cost evaluated `horizon_quarters` ahead of today, using Scrum 70
+    Part 1's projected index values instead of scraped ones. `insufficient=True`
+    means no forecast should-cost was produced — never a fabricated number."""
+    insufficient: bool
+    forecast_should_cost: float | None = None
+    forecast_vintage: datetime | None = None
+    forecast_method: str | None = None
+    horizon_year: int
+    horizon_quarter: int
+    data_gaps: list["DataGap"] = []
 
 
 class EvolutionRequest(BaseModel):
