@@ -22,6 +22,10 @@ export default function Suppliers() {
   const [benchmark, setBenchmark] = useState(null);
   const [benchLoading, setBenchLoading] = useState(false);
   const [benchErr, setBenchErr] = useState(null);
+  // Scrum 32 — trust grading, keyed by supplier_id for the benchmark table's grade column.
+  const [trustScores, setTrustScores] = useState(null);
+  const [trustResolution, setTrustResolution] = useState(null);
+  const [computingTrust, setComputingTrust] = useState(false);
 
   const fetchData = () => {
     if (!activeTeamId) return;
@@ -55,6 +59,32 @@ export default function Suppliers() {
     if (view === 'benchmark' && benchmark === null && !benchLoading) fetchBenchmark();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, activeTeamId]);
+
+  // Trust grades — read-only fetch of whatever's already persisted; a
+  // supplier with nothing computed yet just shows no grade until the
+  // "Compute trust scores" button runs (owner/admin only, server-gated).
+  const fetchTrustScores = () => {
+    if (!activeTeamId) return;
+    api.get('/api/suppliers/trust-scores', { params: { team_id: activeTeamId } })
+      .then(res => {
+        setTrustResolution(res.data.resolution);
+        setTrustScores(Object.fromEntries((res.data.suppliers || []).map(s => [s.supplier_id, s])));
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    if (view === 'benchmark' && trustScores === null) fetchTrustScores();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, activeTeamId]);
+
+  const handleComputeTrustScores = () => {
+    setComputingTrust(true);
+    api.post('/api/suppliers/trust-scores/compute-all', null, { params: { team_id: activeTeamId } })
+      .then(() => fetchTrustScores())
+      .catch(console.error)
+      .finally(() => setComputingTrust(false));
+  };
 
   const handleCreate = () => {
     if (!name.trim()) return;
@@ -108,7 +138,11 @@ export default function Suppliers() {
       </p>
 
       {view === 'benchmark' ? (
-        <BenchmarkView data={benchmark} loading={benchLoading} error={benchErr} />
+        <BenchmarkView
+          data={benchmark} loading={benchLoading} error={benchErr}
+          trustScores={trustScores} trustResolution={trustResolution}
+          computingTrust={computingTrust} onComputeTrustScores={handleComputeTrustScores}
+        />
       ) : (
       <>
       {showForm && (
@@ -252,7 +286,37 @@ export default function Suppliers() {
 /* Benchmarking ranking table — how closely each supplier tracks should-cost.
  * Data from GET /api/suppliers/benchmark (owner/admin only). A positive avg gap%
  * means the supplier prices above should-cost (pads margin); negative means below. */
-function BenchmarkView({ data, loading, error }) {
+const TRUST_GRADE_COLOR = {
+  A: 'var(--accent)', B: 'var(--accent)', C: 'var(--accent3)', D: 'var(--accent2)', F: 'var(--accent2)',
+};
+
+function TrustGradeBadge({ summary }) {
+  if (!summary) {
+    return <span style={{ fontSize: 11, color: 'var(--muted)' }}>Not computed</span>;
+  }
+  if (summary.insufficient_data || summary.overall_grade == null) {
+    return <span style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>Insufficient data</span>;
+  }
+  const breakdown = summary.scores
+    .filter(s => !s.insufficient_data)
+    .map(s => `${s.grain}${s.product_id ? '' : ` #${s.subfamily_id}`}: ${s.grade} (${s.score}) — avg gap ${s.inputs.avg_gap_pct}%, drift ${s.inputs.slope_pct_per_quarter}pt/qtr`)
+    .join('\n');
+  return (
+    <span
+      title={breakdown || 'No sufficient-data grain yet'}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 26, height: 22, borderRadius: 5, cursor: 'help',
+        fontWeight: 700, fontSize: 12,
+        color: '#fff', background: TRUST_GRADE_COLOR[summary.overall_grade] || 'var(--muted)',
+      }}
+    >
+      {summary.overall_grade}
+    </span>
+  );
+}
+
+function BenchmarkView({ data, loading, error, trustScores, trustResolution, computingTrust, onComputeTrustScores }) {
   if (loading) return <div style={{ padding: 20, color: 'var(--muted)' }}>Loading benchmarking…</div>;
   if (error) return (
     <div className="ca-card" style={{ textAlign: 'center', padding: 40 }}>
@@ -294,8 +358,20 @@ function BenchmarkView({ data, loading, error }) {
 
   return (
     <div className="ca-card">
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-        <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={handleExport}>Export CSV</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+          {trustResolution === 'raw_supplier_name' && (
+            <span title="No producer/alias canonicalisation entity exists yet — a supplier appearing under two spellings is scored as two separate suppliers.">
+              Trust grades resolve by raw supplier name, not a canonical producer ⓘ
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={onComputeTrustScores} disabled={computingTrust}>
+            {computingTrust ? 'Computing…' : 'Compute trust scores'}
+          </button>
+          <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={handleExport}>Export CSV</button>
+        </div>
       </div>
       <div className="ca-scroll-x">
         <table className="ca-table" style={{ width: '100%' }}>
@@ -310,6 +386,7 @@ function BenchmarkView({ data, loading, error }) {
               <th className="center">Latest</th>
               <th className="center">Trend</th>
               <th className="center">Exposure</th>
+              <th className="center">Trust Grade</th>
             </tr>
           </thead>
           <tbody>
@@ -334,6 +411,9 @@ function BenchmarkView({ data, loading, error }) {
                 <td className="center" style={{ fontSize: 16 }}>{trendArrow(s.trend)}</td>
                 <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: s.exposure > 0 ? 'var(--accent2)' : 'var(--muted)' }}>
                   {s.exposure ? `$${Math.round(s.exposure).toLocaleString()}` : '—'}
+                </td>
+                <td className="center">
+                  <TrustGradeBadge summary={trustScores ? trustScores[s.supplier_id] : null} />
                 </td>
               </tr>
             ))}

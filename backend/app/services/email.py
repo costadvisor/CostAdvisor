@@ -258,6 +258,30 @@ def send_mention_email(to_email: str, mentioner_name: str, product_name: str,
     return _send(to_email, f"{who} mentioned you on {product_name}", html)
 
 
+def send_support_message_email(to_email: str, from_name: str, subject: str, body: str) -> bool:
+    """Notify support staff of a new/updated thread from a user."""
+    html = build_welcome_html(
+        display_name=to_email.split("@")[0],
+        app_url=get_settings().app_url,
+        heading=f"New support message from {from_name}",
+        body_lines=[f"Subject: {subject}", body],
+        cta_label="Open Support →",
+    )
+    return _send(to_email, f"[Support] {subject}", html)
+
+
+def send_support_reply_email(to_email: str, subject: str, body: str) -> bool:
+    """Notify a user that support replied to their thread."""
+    html = build_welcome_html(
+        display_name=to_email.split("@")[0],
+        app_url=get_settings().app_url,
+        heading="Support replied to your message",
+        body_lines=[f"Subject: {subject}", body],
+        cta_label="Open Support →",
+    )
+    return _send(to_email, f"[Support] Re: {subject}", html)
+
+
 def send_alert_email(to_email: str, message: str, link: str) -> bool:
     """Scrum 24 — deliver a triggered alert (index move / gap / buy window) by email."""
     html = build_welcome_html(

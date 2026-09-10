@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Integer, SmallInteger, String, Numeric, Text,
+    Integer, SmallInteger, String, Numeric, Text, Boolean,
     DateTime, ForeignKey, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -104,6 +104,16 @@ class FormulaVersion(Base):
     named_place: Mapped[str | None] = mapped_column(String(128), nullable=True)
     landed_cost_adjustments: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Scrum 28b — which catalog combo this version was priced from (NULL = a
+    # hand-built formula, unrelated to the catalog, exactly today's behavior).
+    source_coverage_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("formula_region_coverage.id", ondelete="SET NULL"), nullable=True
+    )
+    # "pinned" (frozen at save — a negotiated contract must not drift) or
+    # "tracking" (recomputed live from the catalog recipe on every
+    # evaluation) — NULL alongside a NULL source_coverage_id for anything
+    # not catalog-linked. See services/formula_resolver.get_effective_lines.
+    link_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -119,6 +129,7 @@ class FormulaVersion(Base):
         "FormulaComponent", back_populates="formula_version",
         cascade="all, delete-orphan", lazy="selectin",
     )
+    source_coverage = relationship("FormulaRegionCoverage")
 
 
 class FormulaComponent(Base):
@@ -133,11 +144,29 @@ class FormulaComponent(Base):
         Integer, ForeignKey("commodity_indexes.id"), nullable=True
     )
     weight: Mapped[float] = mapped_column(Numeric(6, 4), nullable=False)
+    # Scrum 28b — "index" | "fixed" | NULL (legacy row, behaves exactly as
+    # before this column existed). Disambiguates commodity_id IS NULL: a
+    # "fixed" line is deliberately flat; an "index" line with no commodity_id
+    # is a broken link that should surface as a gap, never ride flat silently.
+    component_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Provenance only — never read by the costing engine's calculation path,
+    # just carried through for inspection/display (matches GET /formulas/{id}/resolve).
+    depth: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    via_template_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("formula_templates.id", ondelete="SET NULL"), nullable=True
+    )
+    line_region: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    is_proxy: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # Relationships
     formula_version = relationship("FormulaVersion", back_populates="components")
     commodity = relationship("CommodityIndex")
+    via_template = relationship("FormulaTemplate")
 
     @property
     def commodity_name(self) -> str | None:
         return self.commodity.name if self.commodity else None
+
+    @property
+    def via_template_name(self) -> str | None:
+        return self.via_template.name if self.via_template else None

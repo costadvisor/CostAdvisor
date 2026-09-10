@@ -19,6 +19,12 @@ import Products from './pages/Products';
 import Admin from './pages/Admin';
 import Formulas from './pages/Formulas';
 import Alerts from './pages/Alerts';
+import QuoteExtraction from './pages/QuoteExtraction';
+import Contracts from './pages/Contracts';
+import Curation from './pages/Curation';
+import Support from './pages/Support';
+import Scenarios from './pages/Scenarios';
+import Dimensions from './pages/Dimensions';
 import Team from './pages/Team';
 import Privacy from './pages/Privacy';
 import Profile from './pages/Profile';
@@ -32,7 +38,7 @@ import ForecastArea from './pages/workspace/ForecastArea';
 import NegotiateArea from './pages/workspace/NegotiateArea';
 import NegotiateDetailArea from './pages/workspace/NegotiateDetailArea';
 import IntelligenceArea from './pages/workspace/IntelligenceArea';
-import IntelligenceDetailArea from './pages/workspace/IntelligenceDetailArea';
+import IntelligenceComboArea from './pages/workspace/IntelligenceComboArea';
 import { useAuth } from './AuthContext';
 
 export default function App() {
@@ -65,6 +71,12 @@ export default function App() {
             <Route path="/admin" element={<Admin />} />
             <Route path="/formulas" element={<Formulas />} />
             <Route path="/alerts" element={<Alerts />} />
+            <Route path="/quotes" element={<QuoteExtraction />} />
+            <Route path="/contracts" element={<Contracts />} />
+            <Route path="/curation" element={<Curation />} />
+            <Route path="/support" element={<Support />} />
+            <Route path="/scenarios" element={<Scenarios />} />
+            <Route path="/dimensions" element={<Dimensions />} />
             <Route path="/fx-rates" element={<Navigate to="/index-library" replace />} />
             <Route path="/index-library" element={<IndexLibraryArea />} />
             <Route path="/portfolio" element={<PortfolioArea />} />
@@ -74,7 +86,10 @@ export default function App() {
             <Route path="/negotiate" element={<NegotiateArea />} />
             <Route path="/negotiate/:costModelId" element={<NegotiateDetailArea />} />
             <Route path="/intelligence" element={<IntelligenceArea />} />
-            <Route path="/intelligence/:costModelId" element={<IntelligenceDetailArea />} />
+            {/* Combo grain is the library's own; the cost-model route resolves a
+                product to the same combo and reports how it got there. */}
+            <Route path="/intelligence/combo/:templateId/:region" element={<IntelligenceComboArea />} />
+            <Route path="/intelligence/:costModelId" element={<IntelligenceComboArea />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

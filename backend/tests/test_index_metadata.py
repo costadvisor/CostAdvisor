@@ -25,8 +25,19 @@ import seed_index_metadata as seed
 # ── Vocabularies ──────────────────────────────────────────────────────────────
 
 def test_vocabularies():
-    assert set(ACCESS_TIERS) == {"Free", "Partial", "Subscription"}
-    assert set(FREQUENCIES) == {"Daily", "Weekly", "Monthly", "Quarterly", "Annual", "Irregular"}
+    # "Proxy" and the compound/unknown cadences were added in Scrum 74 (DB-5):
+    # the 2026-07 drop states them, and the narrower tuples rejected otherwise
+    # valid rows outright. Asserted as a superset of the original Scrum-57
+    # vocabulary so a future broadening does not need this test rewritten,
+    # while a REMOVAL — which would start rejecting live data again — still
+    # fails here.
+    assert {"Free", "Partial", "Subscription"} <= set(ACCESS_TIERS)
+    assert "Proxy" in ACCESS_TIERS
+
+    assert {"Daily", "Weekly", "Monthly", "Quarterly", "Annual", "Irregular"} <= set(FREQUENCIES)
+    for cadence in ("Semi-annual", "Unknown", "Daily/Monthly"):
+        assert cadence in FREQUENCIES
+
     assert set(ROLES) == {"feedstock", "energy", "fixed"}
     assert set(RETRIEVAL_STATUSES) == {"free", "good_proxy", "weak_proxy", "blocked"}
     assert "passthrough" in PROXY_OPERATIONS

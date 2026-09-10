@@ -5,26 +5,53 @@ import api from '../api';
 import exportCsv from '../utils/exportCsv';
 import FormulaDetailModal from '../components/FormulaDetailModal';
 import FileUpload from '../components/FileUpload';
+import SheetRoundTripPanel from '../components/SheetRoundTripPanel';
 import { stripReservedFns } from '../utils/formulaFns';
 import NumberInput from '../components/NumberInput';
 import { normalizeVarMap } from '../components/VariableMapEditor';
 import IndexCombo from '../components/IndexCombo';
 
-// data_confidence → badge treatment. CONF-LOW is a placeholder pending expert
-// review — it must read as a caution, not as fact.
-const CONF_BADGE = {
-  'CONF-HIGH': {
+// SCRUM-78 trust grade → badge treatment. This replaced `catalog_meta.
+// data_confidence`, which the July catalog drop stopped shipping — it is null
+// on everything loaded since, so the old badge and its filter chips matched
+// nothing. The grade is derived from the resolution layer instead (does every
+// cost line resolve to a real series, is it reached through a proxy, do the
+// weights close), and it is graded rather than boolean on purpose: "any proxy
+// means review" would queue most of the library in one pass.
+const GRADE_BADGE = {
+  high: {
     bg: 'var(--success-bg)', color: 'var(--accent)', label: 'HIGH',
-    title: 'Verified against real process chemistry',
+    title: 'Every cost line resolves to a real price series, none through a stand-in, and the weights close',
   },
-  'CONF-MED': {
+  medium: {
     bg: 'var(--info-bg)', color: 'var(--accent4)', label: 'MED',
-    title: 'Missing lines added; dominant feedstock proportionally scaled',
+    title: 'Priced, but at least one line goes through a stand-in index — directional, not the exact traded price',
   },
-  'CONF-LOW': {
+  low: {
     bg: 'var(--warn-bg)', color: 'var(--accent3)', label: 'LOW · REVIEW',
-    title: 'Placeholder — proportional scaling only, pending expert review',
+    title: 'Heavy stand-in density, or the weight set does not close — queued for expert review',
   },
+  blocked: {
+    bg: 'var(--danger-bg)', color: 'var(--accent2)', label: 'BLOCKED',
+    title: 'A cost line has no price series behind it at all — this combo cannot be priced from data alone',
+  },
+  unrated: {
+    bg: 'var(--neutral-bg)', color: 'var(--muted)', label: 'UNRATED',
+    title: 'No priced cost lines yet, so there is nothing to grade',
+  },
+};
+
+const GRADE_ORDER = ['high', 'medium', 'low', 'blocked', 'unrated'];
+
+// Reason code → what a reviewer would actually go and do about it.
+const REASON_LABEL = {
+  type_code_resolves_to_no_series: 'No price series behind',
+  type_code_is_ambiguous: 'Ambiguous type code',
+  line_has_no_type_code_link: 'Cost lines with no type-code link',
+  priced_through_a_proxy: 'Priced through a stand-in',
+  line_and_type_code_disagree_on_proxy_status: 'Line and registry disagree on stand-in status',
+  weight_set_does_not_close: 'Weights do not sum to 100',
+  combo_has_no_cost_lines: 'No cost lines',
 };
 
 const TIER_LABEL = {
@@ -255,13 +282,42 @@ export default function Formulas() {
   );
 }
 
-function ConfidenceBadge({ confidence }) {
-  const style = CONF_BADGE[confidence];
+function TrustBadge({ summary }) {
+  const style = GRADE_BADGE[summary?.worst_grade];
   if (!style) return <span style={{ color: 'var(--muted)', fontSize: 10 }}>—</span>;
+
+  // The hover names the type-codes behind the grade. An ungraded "low" tells a
+  // reviewer nothing about what to go and look at, which is the whole reason
+  // the derivation stores its reasons rather than just its verdict.
+  const lines = [style.title];
+  if (summary.combo_count > 1) {
+    const spread = GRADE_ORDER
+      .filter(g => summary.grades?.[g])
+      .map(g => `${summary.grades[g]} ${g}`)
+      .join(', ');
+    lines.push(`Worst of ${summary.combo_count} regions (${spread})`);
+  }
+  for (const r of summary.reasons || []) {
+    const label = REASON_LABEL[r.reason] || r.reason;
+    const named = (r.subjects || []).join(', ');
+    const more = r.subject_count > (r.subjects || []).length
+      ? ` +${r.subject_count - r.subjects.length} more` : '';
+    lines.push(named ? `${label}: ${named}${more}` : label);
+  }
+
   return (
-    <span className="ca-badge" title={style.title}
-      style={{ background: style.bg, color: style.color, fontWeight: 600 }}>
-      {style.label}
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+      <span className="ca-badge" title={lines.join('\n')}
+        style={{ background: style.bg, color: style.color, fontWeight: 600 }}>
+        {style.label}
+      </span>
+      {summary.needs_review_count > 0 && (
+        <span
+          title={`${summary.needs_review_count} of ${summary.combo_count} regions queued for expert review`}
+          style={{ fontSize: 10, color: 'var(--accent3)', fontFamily: "'JetBrains Mono', monospace" }}>
+          {summary.needs_review_count}●
+        </span>
+      )}
     </span>
   );
 }
@@ -291,9 +347,10 @@ function NameButton({ template, onOpen }) {
 
 function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = false, forkedOriginIds, onFork }) {
   const [query, setQuery] = useState('');
-  const [confFilter, setConfFilter] = useState('all');
+  const [gradeFilter, setGradeFilter] = useState('all');
   const [expanded, setExpanded] = useState(() => new Set());
   const [showPriceImport, setShowPriceImport] = useState(false);
+  const [showRoundTrip, setShowRoundTrip] = useState(false);
 
   const catalogRows = rows.filter(t => t.code);
   const otherRows = rows.filter(t => !t.code);
@@ -303,7 +360,7 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
     const q = query.trim().toLowerCase();
     const map = new Map();
     for (const t of catalogRows) {
-      if (confFilter !== 'all' && t.catalog_meta?.data_confidence !== confFilter) continue;
+      if (gradeFilter !== 'all' && (t.trust_summary?.worst_grade || 'unrated') !== gradeFilter) continue;
       if (q) {
         const hay = `${t.name} ${t.code} ${t.family_name || ''} ${t.subfamily_name || ''}`.toLowerCase();
         if (!hay.includes(q)) continue;
@@ -317,7 +374,7 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
       if (!fam.subs.has(sub)) fam.subs.set(sub, []);
       fam.subs.get(sub).push(t);
       fam.count += 1;
-      if (t.catalog_meta?.data_confidence === 'CONF-LOW') fam.review += 1;
+      fam.review += t.trust_summary?.needs_review_count || 0;
     }
     const list = [...map.values()].sort((a, b) => a.code.localeCompare(b.code));
     for (const fam of list) {
@@ -325,11 +382,11 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
       for (const rowsInSub of fam.subs.values()) rowsInSub.sort((a, b) => a.name.localeCompare(b.name));
     }
     return list;
-  }, [catalogRows, query, confFilter]);
+  }, [catalogRows, query, gradeFilter]);
 
-  const filtering = query.trim() !== '' || confFilter !== 'all';
+  const filtering = query.trim() !== '' || gradeFilter !== 'all';
   const shown = families.reduce((n, f) => n + f.count, 0);
-  const reviewTotal = catalogRows.filter(t => t.catalog_meta?.data_confidence === 'CONF-LOW').length;
+  const reviewTotal = catalogRows.reduce((n, t) => n + (t.trust_summary?.needs_review_count || 0), 0);
   const isOpen = (fam) => filtering || expanded.has(fam.code);
   const allOpen = families.length > 0 && families.every(isOpen);
 
@@ -342,11 +399,12 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
   const handleExport = () => {
     exportCsv(
       'formulas_default_catalog.csv',
-      ['Family', 'Subfamily', 'Formula', 'Code', 'Confidence', 'Coverage', 'Regions'],
+      ['Family', 'Subfamily', 'Formula', 'Code', 'Trust grade', 'Combos needing review', 'Coverage', 'Regions'],
       families.flatMap(fam => [...fam.subs.entries()].flatMap(([sub, list]) =>
         list.map(t => [
           `${fam.code} ${fam.name}`, sub, t.name, t.code,
-          t.catalog_meta?.data_confidence || '', t.catalog_meta?.coverage_tier || '',
+          t.trust_summary?.worst_grade || '', t.trust_summary?.needs_review_count ?? 0,
+          t.catalog_meta?.coverage_tier || '',
           t.catalog_meta?.region_count ?? '',
         ])
       ))
@@ -367,7 +425,7 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
             <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>
               {families.length} families · {shown} formulas
               {reviewTotal > 0 && (
-                <span style={{ color: 'var(--accent3)' }}> · {reviewTotal} pending expert review</span>
+                <span style={{ color: 'var(--accent3)' }}> · {reviewTotal} combo{reviewTotal === 1 ? '' : 's'} pending expert review</span>
               )}
             </div>
           )}
@@ -378,6 +436,12 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
               <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ fontSize: 11 }}
                 onClick={() => setShowPriceImport(v => !v)}>
                 Import Prices
+              </button>
+            )}
+            {canEdit && (
+              <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ fontSize: 11 }}
+                onClick={() => setShowRoundTrip(v => !v)}>
+                Review &amp; Apply Price Changes
               </button>
             )}
             <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ fontSize: 11 }} onClick={handleExport}>
@@ -414,6 +478,8 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
         </div>
       )}
 
+      {showRoundTrip && canEdit && <SheetRoundTripPanel catalogRows={catalogRows} />}
+
       {catalogRows.length > 0 && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <input
@@ -424,20 +490,20 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
             onChange={e => setQuery(e.target.value)}
             aria-label="Search default formulas"
           />
-          {['all', 'CONF-HIGH', 'CONF-MED', 'CONF-LOW'].map(c => (
+          {['all', ...GRADE_ORDER].map(c => (
             <button
               key={c}
-              onClick={() => setConfFilter(c)}
+              onClick={() => setGradeFilter(c)}
               style={{
                 padding: '5px 12px', borderRadius: 20, fontSize: 10, cursor: 'pointer',
                 fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5,
-                border: `1px solid ${confFilter === c ? 'var(--border-light)' : 'var(--border)'}`,
-                background: confFilter === c ? 'var(--surface3)' : 'transparent',
-                color: confFilter === c ? 'var(--text)' : 'var(--text-secondary)',
-                fontWeight: confFilter === c ? 600 : 400,
+                border: `1px solid ${gradeFilter === c ? 'var(--border-light)' : 'var(--border)'}`,
+                background: gradeFilter === c ? 'var(--surface3)' : 'transparent',
+                color: gradeFilter === c ? 'var(--text)' : 'var(--text-secondary)',
+                fontWeight: gradeFilter === c ? 600 : 400,
               }}
             >
-              {c === 'all' ? 'ALL' : c.replace('CONF-', '')}
+              {c === 'all' ? 'ALL' : (GRADE_BADGE[c]?.label || c).split(' · ')[0]}
             </button>
           ))}
           {!filtering && (
@@ -561,7 +627,7 @@ function SubfamilyRows({ sub, list, canEdit, onEdit, onDelete, onOpen, canFork =
             </span>
           </td>
           <td style={{ width: 110 }}>
-            <ConfidenceBadge confidence={t.catalog_meta?.data_confidence} />
+            <TrustBadge summary={t.trust_summary} />
           </td>
           <td style={{ width: 150, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, whiteSpace: 'nowrap' }}>
             <span

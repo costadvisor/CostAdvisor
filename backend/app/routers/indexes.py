@@ -12,7 +12,7 @@ from app.rate_limit import limiter
 from app.database import get_db, current_user_id_var, bypass_rls_var
 from app.models.user import User
 from app.models.index_data import (
-    CommodityIndex, IndexValue, IndexOverride, TeamIndexSource,
+    CommodityIndex, IndexValue, IndexOverride, TeamIndexSource, TeamProviderCredential,
 )
 from app.models.cost_model import CostModel, FormulaVersion, FormulaComponent
 from app.models.product import Product
@@ -25,11 +25,17 @@ from app.schemas.index_data import (
     CellOverrideRequest, BulkOverrideRequest,
     FilterOptionsOut, IndexImpactItem, IndexImpactResponse,
     IndexValuePublicOut, PublicQuarterPoint, ProxyLogicUpdate, CompositeUpdate,
+    IndexProjectionOut,
 )
 from app.services.data_resolver import resolve_index_values
 from app.services.file_parser import parse_index_upload
 from app.services.scraper import GenericWebScraper, smart_scrape, smart_scrape_all, detect_source_type, ScrapedDataPoint
 from app.services.audit import log_event
+from app.services.index_projection import (
+    run_projection, latest_projection, project_all_series, DEFAULT_HORIZON_QUARTERS,
+)
+from app.services.provider_credentials import get_credential, decrypt_credential
+from app.services.providers import get_adapter, ProviderCredentialError
 
 router = APIRouter()
 
@@ -781,14 +787,15 @@ def list_team_sources(
             CommodityIndex.id == s.commodity_id
         ).first()
 
-        # Derive last scrape status from most recent IndexOverride with scrape: source_file
+        # Derive last fetch status from the most recent IndexOverride tagged
+        # by either a URL scrape or a provider-adapter fetch.
         last_scrape = (
             db.query(IndexOverride)
             .filter(
                 IndexOverride.team_id == s.team_id,
                 IndexOverride.commodity_id == s.commodity_id,
                 IndexOverride.region == s.region,
-                IndexOverride.source_file.like("scrape:%"),
+                (IndexOverride.source_file.like("scrape:%") | IndexOverride.source_file.like("provider:%")),
             )
             .order_by(IndexOverride.uploaded_at.desc())
             .first()
@@ -842,6 +849,13 @@ async def create_or_update_team_source(
         raise HTTPException(
             status_code=422, detail="fixed_value required when source_type is fixed"
         )
+    if body.source_type == "provider_credential":
+        cfg = body.scrape_config or {}
+        if not cfg.get("provider") or not cfg.get("series_id"):
+            raise HTTPException(
+                status_code=422,
+                detail="scrape_config.provider and scrape_config.series_id required when source_type is provider_credential",
+            )
 
     # Verify commodity exists
     commodity = db.query(CommodityIndex).filter(
@@ -901,7 +915,7 @@ async def create_or_update_team_source(
     # Auto-scrape after commit. RLS context is now set via current_user_id_var
     # (re-set at the top of this handler), so the after_begin listener will see
     # the correct user ID for every subsequent transaction.
-    if body.source_type == "scrape_url" and source.scrape_url:
+    if body.source_type in ("scrape_url", "provider_credential"):
         try:
             fresh_source = db.query(TeamIndexSource).filter(
                 TeamIndexSource.team_id == body.team_id,
@@ -909,7 +923,10 @@ async def create_or_update_team_source(
                 TeamIndexSource.region == body.region,
             ).first()
             if fresh_source:
-                await _scrape_and_replace_overrides(db, fresh_source, current_user)
+                if body.source_type == "scrape_url" and fresh_source.scrape_url:
+                    await _scrape_and_replace_overrides(db, fresh_source, current_user)
+                elif body.source_type == "provider_credential":
+                    await _fetch_and_replace_provider_overrides(db, fresh_source, current_user)
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -963,8 +980,16 @@ async def scrape_now(
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
     require_team_access(db, current_user, source.team_id, "indexes.edit")
-    if source.source_type != "scrape_url":
-        raise HTTPException(status_code=400, detail="Source is not a scrape_url type")
+    if source.source_type not in ("scrape_url", "provider_credential"):
+        raise HTTPException(status_code=400, detail="Source is not a scrape_url or provider_credential type")
+
+    if source.source_type == "provider_credential":
+        try:
+            latest_value = await _fetch_and_replace_provider_overrides(db, source, current_user)
+        except Exception as exc:
+            return ScrapeNowResult(source_id=source_id, status="error", error=str(exc))
+        return ScrapeNowResult(source_id=source_id, status="ok", value=latest_value)
+
     if not source.scrape_url:
         raise HTTPException(status_code=400, detail="No scrape URL configured")
 
@@ -990,8 +1015,26 @@ async def _scrape_and_replace_overrides(
     points, detected = await smart_scrape_all(source.scrape_url, source.scrape_config)
     if not points:
         raise ValueError("No data returned from source")
+    latest_value = _replace_overrides_from_points(
+        db, source, current_user, points, f"scrape:{source.scrape_url}"
+    )
+    return latest_value, detected
 
-    # Sort by time and interpolate gaps between scraped data points
+
+def _replace_overrides_from_points(
+    db: Session,
+    source: TeamIndexSource,
+    current_user: User,
+    points: list,
+    source_tag: str,
+) -> float:
+    """Clear old overrides for this team/commodity/region and insert new ones
+    with linear interpolation for gaps, tagging every row with `source_tag`
+    (e.g. "scrape:<url>" or "provider:<name>:<series_id>") — generic over
+    where the points came from; a scrape and a provider-adapter fetch write
+    into the override table exactly the same way. Returns the latest value.
+    """
+    # Sort by time and interpolate gaps between points
     points.sort(key=lambda p: (p.year, p.quarter))
     filled = []
     for i, point in enumerate(points):
@@ -1049,7 +1092,7 @@ async def _scrape_and_replace_overrides(
             quarter=point.quarter,
             value=point.value,
             uploaded_by=current_user.id,
-            source_file=f"scrape:{source.scrape_url}",
+            source_file=source_tag,
         ))
         latest_value = point.value
 
@@ -1064,19 +1107,60 @@ async def _scrape_and_replace_overrides(
                 quarter=quarter,
                 value=None,
                 uploaded_by=current_user.id,
-                source_file=f"scrape:{source.scrape_url}",
+                source_file=source_tag,
             ))
 
     log_event(db, source.team_id, current_user.id, "scrape", "team_index_source", str(source.id),
               new_value={
-                  "scrape_url": source.scrape_url,
+                  "source_tag": source_tag,
                   "commodity_id": source.commodity_id,
                   "region": source.region,
                   "points_written": len(filled),
                   "latest_value": latest_value,
               })
     db.commit()
-    return latest_value, detected
+    return latest_value
+
+
+async def _fetch_and_replace_provider_overrides(
+    db: Session,
+    source: TeamIndexSource,
+    current_user: User,
+) -> float:
+    """Provider-credential counterpart to _scrape_and_replace_overrides
+    (Scrum 26). The fetch happens BEFORE any override mutation — same
+    ordering the scrape path already uses — so a failed/rejected/expired
+    credential raises before touching IndexOverride at all, and whatever
+    manual/last-good value is there is left exactly as-is (acceptance
+    criterion 3: degrade, never emit nulls).
+    """
+    cfg = source.scrape_config or {}
+    provider = (cfg.get("provider") or "").strip().lower()
+    series_id = cfg.get("series_id")
+
+    cred_row = get_credential(db, source.team_id, provider)
+    if not cred_row:
+        raise ProviderCredentialError("missing", f"No {provider} credential configured for this team")
+
+    try:
+        adapter = get_adapter(provider)
+        points = await adapter.fetch_series(
+            decrypt_credential(cred_row.credential_encrypted), series_id, source.region
+        )
+        cred_row.status, cred_row.last_error = "ok", None
+        cred_row.last_verified_at = datetime.now(timezone.utc)
+    except ProviderCredentialError as exc:
+        cred_row.status, cred_row.last_error = exc.reason, exc.detail
+        db.commit()
+        raise
+
+    if not points:
+        db.commit()
+        raise ValueError("No data returned from provider")
+
+    return _replace_overrides_from_points(
+        db, source, current_user, points, f"provider:{provider}:{series_id}"
+    )
 
 
 # --- Helper: resolve commodity IDs from product/supplier ---
@@ -1282,3 +1366,50 @@ async def scrape_all_indexes(
     db.commit()
     return {"scrapers_run": len(scraped), "values_updated": updated,
             "commodities_without_scraper": no_scraper}
+
+
+@router.post("/project-all")
+def project_all_indexes(
+    horizon: int = Query(DEFAULT_HORIZON_QUARTERS, ge=1, le=12),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """On-demand (re)projection of every (commodity, region) series that has
+    history — the same work the weekly Celery job does, callable immediately.
+    Super-admin only, same tier as /scrape-all. Mirrors that endpoint's
+    synchronous, return-counts shape rather than enqueuing a background job."""
+    require_super_admin(current_user)
+    return project_all_series(db, horizon_quarters=horizon)
+
+
+@router.post("/{commodity_id}/project", response_model=IndexProjectionOut)
+def project_index(
+    commodity_id: int,
+    region: str = Query(...),
+    horizon: int = Query(DEFAULT_HORIZON_QUARTERS, ge=1, le=12),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """On-demand (re)projection for one (commodity, region) series (Scrum 70
+    Part 1). Super-admin only — same trust tier as /scrape-all, this is a
+    platform-data write. Always creates a NEW vintage; never overwrites a
+    prior run."""
+    require_super_admin(current_user)
+    commodity = db.query(CommodityIndex).filter(CommodityIndex.id == commodity_id).first()
+    if not commodity:
+        raise HTTPException(status_code=404, detail="Commodity not found")
+    run = run_projection(db, commodity_id, region, horizon_quarters=horizon)
+    return run
+
+
+@router.get("/{commodity_id}/projections/latest", response_model=IndexProjectionOut | None)
+def latest_projection_endpoint(
+    commodity_id: int,
+    region: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Latest projection vintage for a series, or null if it has never been
+    projected — any authenticated user (platform metadata, view-only), same
+    gating tier as the commodity list itself."""
+    return latest_projection(db, commodity_id, region)

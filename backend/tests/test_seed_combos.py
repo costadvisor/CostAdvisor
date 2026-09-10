@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from sqlalchemy import text
 
 import seed_combos as sc
@@ -161,6 +162,25 @@ def test_validate_chain_cycle():
 
 # ── End-to-end against the real drop + dev DB ─────────────────────────────────
 
+# ── Superseded by the catalog retarget (Scrum 74/3b) ─────────────────────────
+#
+# `seed_combos` loads the older 257-formula/676-combo drop into
+# formula_region_coverage and formula_template_components. The 2026-07 drop now
+# owns those tables (app/services/drop/catalog_loader.py), and two loaders
+# cannot both be authoritative for the same rows — run either one and it
+# overwrites the other's recipes for the 340 overlapping templates.
+#
+# This is the Phase-0 "retarget or retire" decision, resolved as retire: the
+# seeder and its parser logic stay (the parser tests below still exercise real
+# markup handling, and the module documents how the previous drop was shaped),
+# but the tests that WRITE to the shared catalog tables are skipped so the two
+# loaders stop fighting over the same rows on every suite run.
+_SUPERSEDED = pytest.mark.skip(
+    reason="seed_combos superseded by the 2026-07 catalog retarget "
+           "(app/services/drop/catalog_loader.py) — both own the same tables"
+)
+
+@_SUPERSEDED
 def test_load_completeness_and_idempotency(db):
     report = sc.run(db, dry_run=False, verbose=False)
     db.commit()
@@ -184,6 +204,7 @@ def test_load_completeness_and_idempotency(db):
     assert all(rows.get(fid, 0) == meta["n_combos"] for fid, meta in tier.items())
 
 
+@_SUPERSEDED
 def test_conf_low_flagged_and_correction_log_attached(db):
     sc.run(db, dry_run=False, verbose=False)
     db.commit()
@@ -216,6 +237,7 @@ def test_conf_low_flagged_and_correction_log_attached(db):
         assert "source_combo_id" in meta
 
 
+@_SUPERSEDED
 def test_sample_should_costs_within_tolerance(db):
     """The resolver must reproduce the source recipe: effective weights sum to
     the source total (~100) and the margin matches the combo."""
@@ -248,6 +270,7 @@ def test_sample_should_costs_within_tolerance(db):
     assert {l["line_region"] for l in lines3} == {"Europe"}
 
 
+@_SUPERSEDED
 def test_api_replace_leaves_seeded_region_lines_alone(db, tenant_a, client_as):
     """The API manages only the region-NULL set; a seeded per-region recipe
     must survive an API replace."""
@@ -271,6 +294,7 @@ def test_api_replace_leaves_seeded_region_lines_alone(db, tenant_a, client_as):
     assert ("api line", None) in rows and ("seeded", "Europe") in rows
 
 
+@_SUPERSEDED
 def test_reseed_preserves_expert_review(db):
     """A human sign-off (reviewed_at set) must survive a seed re-run — the
     source carries no review state, so it must never clobber one."""

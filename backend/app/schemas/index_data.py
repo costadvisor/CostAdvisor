@@ -63,13 +63,45 @@ class IndexValueOut(BaseModel):
     year: int
     quarter: int
     value: float | None = None
-    source: str  # 'scraped', 'team_override', 'team_blank'
+    source: str  # 'scraped', 'team_override', 'team_blank', 'fixed', 'composite', 'provider'
     scraped_value: float | None = None
     override_id: int | None = None
     override_by: str | None = None
     override_at: str | None = None
     global_scraper: str | None = None  # e.g. "INSEE" if commodity has a built-in scraper
     global_scrape_at: str | None = None  # ISO timestamp of last global scrape
+
+    model_config = {"from_attributes": True}
+
+
+class IndexProjectionPointOut(BaseModel):
+    year: int
+    quarter: int
+    value: float
+    ci_lo: float | None = None
+    ci_hi: float | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class IndexProjectionOut(BaseModel):
+    """One vintaged projection run (Scrum 70 Part 1). `status`/`method` are how a
+    hold or no-history result is distinguished from a real fit downstream —
+    never render them identically to a fitted trend."""
+    id: int
+    commodity_id: int
+    region: str
+    vintage_at: datetime
+    status: str  # "fitted" | "hold" | "no_history"
+    method: str
+    history_from_year: int | None = None
+    history_from_quarter: int | None = None
+    history_to_year: int | None = None
+    history_to_quarter: int | None = None
+    history_points_used: int
+    horizon_quarters: int
+    residual_std: float | None = None
+    points: list[IndexProjectionPointOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -130,7 +162,7 @@ class TeamIndexSourceCreate(BaseModel):
     team_id: uuid.UUID
     commodity_id: int
     region: str
-    source_type: Literal["manual", "scrape_url", "upload", "fixed"]
+    source_type: Literal["manual", "scrape_url", "upload", "fixed", "provider_credential"]
     scrape_url: str | None = None
     scrape_config: dict | None = None
     fixed_value: float | None = None

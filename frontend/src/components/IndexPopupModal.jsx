@@ -4,6 +4,7 @@ import { useToast } from './Toast';
 import SeriesChart from './SeriesChart';
 import { computeStats } from '../utils/seriesStats';
 import IndexDetailPanel from './IndexDetailPanel';
+import IndexIntelPanel from './IndexIntelPanel';
 import FxPairModal from './FxPairModal';
 import exportCsv from '../utils/exportCsv';
 
@@ -413,60 +414,10 @@ export default function IndexPopupModal({
           )}
         </div>
 
-        {/* Historical data — Period | Default | Custom (custom column only if any override) */}
-        {histRows.length > 0 && (
-          <div className="ca-card" style={{ marginBottom: 16 }}>
-            <div className="ca-card-title" style={{ marginBottom: 8 }}>
-              Historical Data
-              {onEditPeriod && <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 11 }}> · select a period to override it</span>}
-            </div>
-            {/* No inner scroll. A 260px `overflow-y: auto` box here captured the
-                wheel, so scrolling with the pointer over this table left the AI
-                Analysis, Portfolio Impact and Source sections unreachable. The
-                modal is the single scroll plane. */}
-            <div>
-              <table className="ca-table" style={{ fontSize: 11 }}>
-                <thead>
-                  <tr>
-                    <th scope="col">{isFx ? 'Quarter' : 'Period'}</th>
-                    {/* "Default" is internal shorthand for the platform-scraped value. */}
-                    <th scope="col" className="right">Platform value</th>
-                    {anyCustom && <th scope="col" className="right">Your override</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {histRows.map(r => {
-                    // This list is also the KEYBOARD path to per-period editing: the
-                    // grid's 28 clickable cells per row are pointer-only by design
-                    // (one tab stop per cell would mean thousands on the page).
-                    const editable = !!onEditPeriod;
-                    return (
-                      <tr
-                        key={r.label}
-                        {...(editable ? {
-                          role: 'button',
-                          tabIndex: 0,
-                          'aria-label': `Override ${commodityName} for ${r.label}`,
-                          onClick: () => onEditPeriod(r.period),
-                          onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onEditPeriod(r.period); } },
-                          style: { cursor: 'cell' },
-                        } : {})}
-                      >
-                        <td>{r.label}</td>
-                        <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{r.def == null ? '—' : fmtStat(r.def)}</td>
-                        {anyCustom && (
-                          <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.cust != null ? 'var(--accent4)' : 'var(--muted)' }}>
-                            {r.cust == null ? '—' : fmtStat(r.cust)}
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+        {/* Volatility / seasonality / dossier (Wave 3). Each panel is silent
+            or states its own reason when the series has nothing stored — no
+            fabricated flat curve, no bare percentile. */}
+        <IndexIntelPanel commodityId={commodityId} region={region} />
 
         {/* AI Analysis */}
         <div className="ca-card" style={{ marginBottom: 16, padding: 16 }}>
@@ -574,6 +525,64 @@ export default function IndexPopupModal({
               <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={scrapeLive} disabled={pairBusy}>Scrape live now</button>
               <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={scrapePlatform} disabled={pairBusy}>Scrape platform rates</button>
               <button className="ca-btn ca-btn-sm ca-btn-danger" onClick={deletePair} disabled={pairBusy}>Delete pair</button>
+            </div>
+          </div>
+        )}
+
+        {/* Historical data — Period | Default | Custom (custom column only if any override).
+            Moved to the bottom: the chart/stats/analysis panels are what most
+            visits are for; the full per-period table is a reference/edit tool,
+            not the headline content. */}
+        {histRows.length > 0 && (
+          <div className="ca-card" style={{ marginBottom: 0, marginTop: 16 }}>
+            <div className="ca-card-title" style={{ marginBottom: 8 }}>
+              Historical Data
+              {onEditPeriod && <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 11 }}> · select a period to override it</span>}
+            </div>
+            {/* No inner scroll. A 260px `overflow-y: auto` box here captured the
+                wheel, so scrolling with the pointer over this table left the AI
+                Analysis, Portfolio Impact and Source sections unreachable. The
+                modal is the single scroll plane. */}
+            <div>
+              <table className="ca-table" style={{ fontSize: 11 }}>
+                <thead>
+                  <tr>
+                    <th scope="col">{isFx ? 'Quarter' : 'Period'}</th>
+                    {/* "Default" is internal shorthand for the platform-scraped value. */}
+                    <th scope="col" className="right">Platform value</th>
+                    {anyCustom && <th scope="col" className="right">Your override</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {histRows.map(r => {
+                    // This list is also the KEYBOARD path to per-period editing: the
+                    // grid's 28 clickable cells per row are pointer-only by design
+                    // (one tab stop per cell would mean thousands on the page).
+                    const editable = !!onEditPeriod;
+                    return (
+                      <tr
+                        key={r.label}
+                        {...(editable ? {
+                          role: 'button',
+                          tabIndex: 0,
+                          'aria-label': `Override ${commodityName} for ${r.label}`,
+                          onClick: () => onEditPeriod(r.period),
+                          onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onEditPeriod(r.period); } },
+                          style: { cursor: 'cell' },
+                        } : {})}
+                      >
+                        <td>{r.label}</td>
+                        <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{r.def == null ? '—' : fmtStat(r.def)}</td>
+                        {anyCustom && (
+                          <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.cust != null ? 'var(--accent4)' : 'var(--muted)' }}>
+                            {r.cust == null ? '—' : fmtStat(r.cust)}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         )}

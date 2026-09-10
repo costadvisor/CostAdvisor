@@ -73,7 +73,20 @@ def _new_base_and_region(code: str) -> tuple[str, str]:
 
     Region is the trailing token when it's a known region marker; the remaining
     prefix is the region-agnostic commodity key (region lives on index_values,
-    not the index, exactly as in the Scrum-57 reconciliation)."""
+    not the index, exactly as in the Scrum-57 reconciliation).
+
+    SUPERSEDED by the three-layer model (Scrum 74 / DB-5). Splitting a code on
+    its trailing token mis-files feeds, because that token is often a data
+    source rather than a region — `-ppi`, `-wb` and `-mb` are Producer Price
+    Index, World Bank and Metal Bulletin. In the new model the region lives on
+    IndexCard (where the source states it) and the series key stays opaque;
+    see app/models/index_layer.py.
+
+    Kept because the pre-drop seed path still runs through it. Whether
+    seed_index_metadata / seed_catalog / seed_combos are retargeted at the
+    drop or retired is the Phase-0 call that Loader v2 has to close first —
+    deleting this before then would break a loader that currently works.
+    """
     parts = str(code).strip().split("-")
     if len(parts) > 1 and parts[-1].upper() in NEW_REGION_TOKENS:
         region = parts[-1].upper()
@@ -148,7 +161,16 @@ def _read_feeds_old(hdr: list, data: list) -> list[dict]:
 # The 2026-07 sheet dropped a free source/retrieval column and instead flags each
 # feed direct-vs-proxy with a swap-priority rank. Map that onto our retrieval
 # vocabulary: direct feed = the real number is free; an A-ranked proxy is a solid
-# approximation, B/C ranks are rougher. The two ore feedstocks stay hard-blocked.
+# approximation, B/C ranks are rougher.
+#
+# SUPERSEDED, and this literal is why. That workbook has no column expressing
+# blocked-ness, so the two ore feedstocks were named in code — and "exactly two
+# feeds have no source" then got repeated as a fact about the data when it was
+# only ever a fact about this set. The drop states resolution per type code, so
+# `services.proxy_derivation.blocked_series()` derives the real answer from the
+# data and moves when the data moves. Kept unchanged only because this seeder
+# still runs against the pre-drop workbook, where there is nothing to derive
+# from; do not extend it.
 _NEW_BLOCKED_CODES = {"ILM-MB", "RUT-MB"}
 
 

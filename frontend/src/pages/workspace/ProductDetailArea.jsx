@@ -5,7 +5,7 @@ import { useAlert } from '../../components/ConfirmDialog';
 import { QUARTER_OPTS, qLabel } from '../../utils/quarters';
 import { PIE_COLORS } from '../../utils/constants';
 import { StackedBar } from './wsCharts';
-import { BuySignalBadge } from '../../components/BuyWindows';
+import { BuySignalBadge, LockHoldBadge } from '../../components/BuyWindows';
 import NotesPanel from '../../components/NotesPanel';
 
 // Scrum 25 — negotiation flag states
@@ -39,7 +39,8 @@ export default function ProductDetailArea() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sc, setSc] = useState({ status: 'loading' });   // live should-cost
-  const [buySignal, setBuySignal] = useState(null);       // buy-window signal
+  const [buySignal, setBuySignal] = useState(null);       // buy-window signal (backward)
+  const [lockHold, setLockHold] = useState(null);         // lock/hold verdict (forward, Scrum 70)
   const [flagSaving, setFlagSaving] = useState(false);    // negotiation flag save
   const [showBreakdown, setShowBreakdown] = useState(false);  // Scrum 17 — inspectable numbers
   const [breakdown, setBreakdown] = useState(null);
@@ -74,7 +75,15 @@ export default function ProductDetailArea() {
       .catch(() => setBuySignal(null));
   };
 
-  useEffect(() => { loadCm(); loadSc(); loadBuy(); /* eslint-disable-next-line */ }, [costModelId]);
+  // Forward lock/hold verdict (Scrum 70 Part 2) — best-effort; "insufficient"
+  // until the series has been projected, same graceful-absence pattern as loadBuy.
+  const loadLockHold = () => {
+    api.get(`/api/portfolio/buy-windows/${costModelId}/verdict`)
+      .then(({ data }) => setLockHold(data))
+      .catch(() => setLockHold(null));
+  };
+
+  useEffect(() => { loadCm(); loadSc(); loadBuy(); loadLockHold(); /* eslint-disable-next-line */ }, [costModelId]);
 
   // Scrum 17 — should-cost breakdown, fetched lazily on first expand.
   const toggleBreakdown = () => {
@@ -227,11 +236,18 @@ export default function ProductDetailArea() {
                   {deltaPct > 0 ? '+' : ''}{deltaPct.toFixed(1)}% since starting point
                 </div>
               )}
-              {buySignal && buySignal.signal !== 'insufficient' && (
-                <div style={{ marginTop: 8 }} title="Current should-cost vs the trailing 4-quarter average">
-                  <BuySignalBadge signal={buySignal.signal} deviationPct={buySignal.deviation_pct} />
+              {(buySignal?.signal && buySignal.signal !== 'insufficient') || (lockHold?.verdict && lockHold.verdict !== 'insufficient') ? (
+                <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {buySignal && buySignal.signal !== 'insufficient' && (
+                    <span title="Current should-cost vs the trailing 4-quarter average">
+                      <BuySignalBadge signal={buySignal.signal} deviationPct={buySignal.deviation_pct} />
+                    </span>
+                  )}
+                  {lockHold && lockHold.verdict !== 'insufficient' && (
+                    <LockHoldBadge verdict={lockHold.verdict} deviationPct={lockHold.deviation_pct} horizonQuarters={lockHold.horizon_quarters} />
+                  )}
                 </div>
-              )}
+              ) : null}
               <hr className="ca-sep" />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
                 <Metric label="Indexed cost" value={`${sym}${fmtMoney(sc.cost_before_margin)}`} color="var(--accent3)" />

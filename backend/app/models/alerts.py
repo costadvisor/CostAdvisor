@@ -26,7 +26,16 @@ class AlertSubscription(Base):
         UUID(as_uuid=True), ForeignKey("cost_models.id", ondelete="CASCADE"), nullable=True)
     commodity_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("commodity_indexes.id", ondelete="CASCADE"), nullable=True)
-    threshold_pct: Mapped[float] = mapped_column(Numeric(6, 2), default=5.0)
+    # SCRUM-79 — a negotiation window can be scoped to a supplier or a contract,
+    # and neither had anywhere to point before.
+    supplier_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("suppliers.id", ondelete="CASCADE"), nullable=True)
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="CASCADE"), nullable=True)
+    # Nullable since SCRUM-79: null = inherit the team default. Existing rows
+    # keep their explicit value, so no subscription silently changed behaviour.
+    threshold_pct: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+    threshold_unit: Mapped[str | None] = mapped_column(String(12), nullable=True)
     channel: Mapped[str] = mapped_column(String(10), default="email")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(

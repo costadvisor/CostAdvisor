@@ -17,6 +17,7 @@ from app.models.custom_fx_rate import CustomFxRate
 from app.models.formula_template import FormulaTemplate
 from app.models.invite import TeamInvite
 from app.models.rbac import Role, TeamMemberRole
+from app.models.index_data import TeamProviderCredential
 
 
 def _as_user(user_id):
@@ -159,6 +160,34 @@ def test_team_member_role_rls_isolation(tenant_a, tenant_b, db):
         assert tenant_a["team_id"] in team_ids and tenant_b["team_id"] not in team_ids
     finally:
         s.close()
+
+
+# ── Scrum 26: team_provider_credentials RLS ────────────────────────────────
+
+def test_team_provider_credential_rls_isolation(tenant_a, tenant_b, db):
+    db.add(TeamProviderCredential(
+        team_id=tenant_a["team_id"], provider="fastmarkets",
+        credential_encrypted="ciphertext-a", created_by=tenant_a["user_id"],
+    ))
+    db.add(TeamProviderCredential(
+        team_id=tenant_b["team_id"], provider="fastmarkets",
+        credential_encrypted="ciphertext-b", created_by=tenant_b["user_id"],
+    ))
+    db.commit()
+    s = _as_user(tenant_a["user_id"])
+    try:
+        rows = s.query(TeamProviderCredential).filter(TeamProviderCredential.provider == "fastmarkets").all()
+        team_ids = {r.team_id for r in rows}
+        assert tenant_a["team_id"] in team_ids and tenant_b["team_id"] not in team_ids
+        # Never leaks the ciphertext of another team's row either.
+        assert not any(r.credential_encrypted == "ciphertext-b" for r in rows)
+    finally:
+        s.close()
+        bypass_rls_var.set(True)
+        db.query(TeamProviderCredential).filter(
+            TeamProviderCredential.team_id.in_([tenant_a["team_id"], tenant_b["team_id"]])
+        ).delete(synchronize_session=False)
+        db.commit()
 
 
 def test_role_team_isolation_and_platform_visible(tenant_a, tenant_b, db):

@@ -57,6 +57,13 @@ export default function CostModelBuilder() {
   const [landedCostAdjustments, setLandedCostAdjustments] = useState(null);
   const [components, setComponents] = useState([]);
 
+  // Catalog link (Scrum 28b) — which combo this version was priced from, and
+  // whether it's frozen ("pinned") or recomputed live from the catalog recipe
+  // on every evaluation ("tracking"). Both null = not catalog-linked.
+  const [sourceCoverageId, setSourceCoverageId] = useState(null);
+  const [linkMode, setLinkMode] = useState(null);
+  const [linkedTemplateName, setLinkedTemplateName] = useState(null);
+
   // Advanced formula mode
   const [formulaMode, setFormulaMode] = useState('simple'); // 'simple' | 'advanced'
   const [advancedExpression, setAdvancedExpression] = useState('');
@@ -177,12 +184,22 @@ export default function CostModelBuilder() {
             commodity_name: c.commodity_name || '',
             commodity_id: c.commodity_id,
             parts: Math.round(c.weight * 100),
+            component_type: c.component_type,
+            depth: c.depth,
+            via_template_id: c.via_template_id,
+            line_region: c.line_region,
+            is_proxy: c.is_proxy,
           })));
           const ftype = currentFv.formula_type || 'simple';
           setFormulaMode(ftype);
           setAdvancedExpression(currentFv.expression || '');
           setAdvancedVars(currentFv.variables || {});
           setShowLandedCost(ftype === 'simple');
+          setSourceCoverageId(currentFv.source_coverage_id || null);
+          setLinkMode(currentFv.link_mode || null);
+          // The name isn't carried on FormulaVersionOut — a generic
+          // "Catalog-linked" label is shown until the recipe is reloaded.
+          setLinkedTemplateName(null);
         }
         setLoaded(true);
       })
@@ -227,6 +244,7 @@ export default function CostModelBuilder() {
       versionIncoterm, versionNamedPlace, landedCostAdjustments,
       formulaMode, advancedExpression, advancedVars: { ...advancedVars }, showLandedCost,
       components: components.map(c => ({ ...c })),
+      sourceCoverageId, linkMode, linkedTemplateName,
     });
     setEditing(true);
   };
@@ -257,6 +275,9 @@ export default function CostModelBuilder() {
       setAdvancedVars(snapshot.advancedVars);
       setShowLandedCost(snapshot.showLandedCost);
       setComponents(snapshot.components);
+      setSourceCoverageId(snapshot.sourceCoverageId ?? null);
+      setLinkMode(snapshot.linkMode ?? null);
+      setLinkedTemplateName(snapshot.linkedTemplateName ?? null);
     }
     setEditing(false);
     setSnapshot(null);
@@ -302,6 +323,11 @@ export default function CostModelBuilder() {
         incoterm: versionIncoterm || null,
         named_place: versionNamedPlace || null,
         landed_cost_adjustments: landedCostAdjustments,
+        // Scrum 28b — advanced (expression) formulas are never catalog-linked;
+        // sourceCoverageId/linkMode are only ever set by loadTemplateIntoModel
+        // on a weighted-recipe template, so this is naturally null for them.
+        source_coverage_id: sourceCoverageId || null,
+        link_mode: sourceCoverageId ? (linkMode || 'pinned') : null,
         ...(formulaMode === 'advanced' ? {
           expression: advancedExpression,
           variables: normalizeVarMap(advancedVars),
@@ -311,7 +337,15 @@ export default function CostModelBuilder() {
           components: components.map(c => ({
             label: c.label,
             commodity_name: c.commodity_name || null,
+            // An explicit id (already resolved via /resolve or a prior load)
+            // wins over a fragile exact-name re-match on the backend.
+            commodity_id: c.commodity_id ?? null,
             weight: totalParts > 0 ? c.parts / totalParts : 0,
+            component_type: c.component_type ?? null,
+            depth: c.depth ?? null,
+            via_template_id: c.via_template_id ?? null,
+            line_region: c.line_region ?? null,
+            is_proxy: c.is_proxy ?? null,
           })),
         }),
       };
@@ -407,12 +441,24 @@ export default function CostModelBuilder() {
           label: l.name,
           commodity_name: l.commodity_name || '',
           commodity_id: l.commodity_id,
-          parts: Math.round(l.effective_weight_pct * 10) / 10,
+          // Full precision — a prior 1-decimal rounding here fought the
+          // parts/totalParts renormalization at save for no reason.
+          parts: l.effective_weight_pct,
+          component_type: l.component_type,
+          depth: l.depth,
+          via_template_id: l.via_template_id,
+          line_region: l.line_region,
+          is_proxy: l.is_proxy,
         })));
         // Catalog recipes carry margin as a fixed line inside the weights —
         // a separate margin on top would double-count it.
         setMarginType('pct');
         setMarginValue(0);
+        // Default to pinned — a should-cost estimate can opt into tracking,
+        // but a saved formula must not drift out from under you by default.
+        setSourceCoverageId(cov?.id ?? null);
+        setLinkMode(cov?.id ? 'pinned' : null);
+        setLinkedTemplateName(t.name);
         if (cov) {
           if (cov.base_price != null) setBasePrice(cov.base_price);
           if (cov.base_year) { setBaseYear(cov.base_year); setBaseQuarter(cov.base_quarter); }
@@ -431,6 +477,10 @@ export default function CostModelBuilder() {
         setFormulaMode('advanced');
         setAdvancedExpression(t.expression || '');
         setAdvancedVars(t.variables || {});
+        // Pinned/tracking only applies to weighted-recipe templates.
+        setSourceCoverageId(null);
+        setLinkMode(null);
+        setLinkedTemplateName(null);
       }
     } catch (e) {
       addToast(formatApiError(e), 'error');
@@ -590,8 +640,15 @@ export default function CostModelBuilder() {
                 </div>
               )}
               {!editing && (
-                <span style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>
-                  {formulaMode}
+                <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {sourceCoverageId && (
+                    <span style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 600 }}>
+                      {linkedTemplateName ? `Linked to ${linkedTemplateName}` : 'Catalog-linked'} · {linkMode === 'tracking' ? 'Tracking' : 'Pinned'}
+                    </span>
+                  )}
+                  <span style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                    {formulaMode}
+                  </span>
                 </span>
               )}
             </div>
@@ -660,63 +717,82 @@ export default function CostModelBuilder() {
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                       <label className="ca-label" style={{ marginBottom: 0 }}>Components</label>
-                      <div style={{ position: 'relative' }} ref={templateDropdownRef}>
-                        <button
-                          className="ca-btn ca-btn-ghost ca-btn-sm"
-                          style={{ fontSize: 10 }}
-                          onClick={() => setShowTemplateDropdown(v => !v)}
-                        >
-                          Load Catalog Formula ▾
-                        </button>
-                        {showTemplateDropdown && (
-                          <div style={{
-                            position: 'absolute', right: 0, top: 'calc(100% + 4px)',
-                            background: 'var(--surface)', border: '1px solid var(--border)',
-                            borderRadius: 8, boxShadow: 'var(--shadow-popover)',
-                            zIndex: 50, minWidth: 280, maxHeight: 300, overflowY: 'auto', padding: 6,
-                          }}>
-                            {formulaTemplates.length === 0 ? (
-                              <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--muted)' }}>
-                                No templates available
-                              </div>
-                            ) : (
-                              [
-                                { label: 'Default', items: formulaTemplates.filter(t => !t.team_id) },
-                                { label: 'Team', items: formulaTemplates.filter(t => t.team_id) },
-                              ].map(group => group.items.length > 0 && (
-                                <div key={group.label}>
-                                  <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '6px 8px 2px' }}>
-                                    {group.label}
-                                  </div>
-                                  {group.items.map(t => (
-                                    <button
-                                      key={t.id}
-                                      style={{
-                                        display: 'block', width: '100%', textAlign: 'left',
-                                        padding: '6px 10px', borderRadius: 4, fontSize: 12,
-                                        border: 'none', cursor: 'pointer', background: 'transparent',
-                                        color: 'var(--text)',
-                                      }}
-                                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface2)'; }}
-                                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                                      onClick={() => loadTemplateIntoModel(t)}
-                                    >
-                                      <span style={{ fontWeight: 600 }}>{t.name}</span>
-                                      {t.code && (
-                                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--muted)', marginLeft: 6 }}>
-                                          {t.code}
-                                        </span>
-                                      )}
-                                      {t.description && (
-                                        <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>{t.description}</span>
-                                      )}
-                                    </button>
-                                  ))}
-                                </div>
-                              ))
-                            )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {sourceCoverageId && (
+                          <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}
+                            title={`Linked to ${linkedTemplateName || 'a catalog formula'}`}>
+                            {['pinned', 'tracking'].map(mode => (
+                              <button
+                                key={mode}
+                                onClick={() => setLinkMode(mode)}
+                                style={{
+                                  padding: '4px 10px', fontSize: 10, fontWeight: 600, border: 'none', cursor: 'pointer',
+                                  background: (linkMode || 'pinned') === mode ? 'var(--accent)' : 'transparent',
+                                  color: (linkMode || 'pinned') === mode ? '#fff' : 'var(--muted)',
+                                  textTransform: 'capitalize',
+                                }}
+                              >{mode}</button>
+                            ))}
                           </div>
                         )}
+                        <div style={{ position: 'relative' }} ref={templateDropdownRef}>
+                          <button
+                            className="ca-btn ca-btn-ghost ca-btn-sm"
+                            style={{ fontSize: 10 }}
+                            onClick={() => setShowTemplateDropdown(v => !v)}
+                          >
+                            Load Catalog Formula ▾
+                          </button>
+                          {showTemplateDropdown && (
+                            <div style={{
+                              position: 'absolute', right: 0, top: 'calc(100% + 4px)',
+                              background: 'var(--surface)', border: '1px solid var(--border)',
+                              borderRadius: 8, boxShadow: 'var(--shadow-popover)',
+                              zIndex: 50, minWidth: 280, maxHeight: 300, overflowY: 'auto', padding: 6,
+                            }}>
+                              {formulaTemplates.length === 0 ? (
+                                <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--muted)' }}>
+                                  No templates available
+                                </div>
+                              ) : (
+                                [
+                                  { label: 'Default', items: formulaTemplates.filter(t => !t.team_id) },
+                                  { label: 'Team', items: formulaTemplates.filter(t => t.team_id) },
+                                ].map(group => group.items.length > 0 && (
+                                  <div key={group.label}>
+                                    <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '6px 8px 2px' }}>
+                                      {group.label}
+                                    </div>
+                                    {group.items.map(t => (
+                                      <button
+                                        key={t.id}
+                                        style={{
+                                          display: 'block', width: '100%', textAlign: 'left',
+                                          padding: '6px 10px', borderRadius: 4, fontSize: 12,
+                                          border: 'none', cursor: 'pointer', background: 'transparent',
+                                          color: 'var(--text)',
+                                        }}
+                                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface2)'; }}
+                                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                                        onClick={() => loadTemplateIntoModel(t)}
+                                      >
+                                        <span style={{ fontWeight: 600 }}>{t.name}</span>
+                                        {t.code && (
+                                          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--muted)', marginLeft: 6 }}>
+                                            {t.code}
+                                          </span>
+                                        )}
+                                        {t.description && (
+                                          <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>{t.description}</span>
+                                        )}
+                                      </button>
+                                    ))}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 60px 80px 90px 30px', gap: 8, marginBottom: 6 }}>
@@ -732,7 +808,24 @@ export default function CostModelBuilder() {
                         <input className="ca-input" value={c.label} placeholder="Component label"
                           onChange={e => updateComp(i, 'label', e.target.value)} style={{ padding: '7px 8px' }} />
                         <select className="ca-select" value={c.commodity_name || ''} style={{ fontSize: 11, padding: '7px 8px' }}
-                          onChange={e => updateComp(i, 'commodity_name', e.target.value)}>
+                          onChange={e => {
+                            const name = e.target.value;
+                            // Keep commodity_id (which save() now sends and the
+                            // backend trusts ahead of a name re-match) in sync —
+                            // otherwise switching the dropdown here would
+                            // silently keep pointing at whatever was loaded
+                            // before. component_type follows the same edit so
+                            // a manual "None" reads as deliberately fixed, not
+                            // a broken link.
+                            const match = commodities.find(ci => ci.name === name);
+                            const next = [...components];
+                            next[i] = {
+                              ...next[i], commodity_name: name,
+                              commodity_id: match ? match.id : null,
+                              component_type: name ? 'index' : 'fixed',
+                            };
+                            setComponents(next);
+                          }}>
                           <option value="">None</option>
                           {commodities.map(ci => <option key={ci.id} value={ci.name}>{ci.name}</option>)}
                         </select>
@@ -1161,12 +1254,20 @@ export default function CostModelBuilder() {
                 commodity_name: c.commodity_name || '',
                 commodity_id: c.commodity_id,
                 parts: Math.round(c.weight * 100),
+                component_type: c.component_type,
+                depth: c.depth,
+                via_template_id: c.via_template_id,
+                line_region: c.line_region,
+                is_proxy: c.is_proxy,
               })));
               const vtype = v.formula_type || 'simple';
               setFormulaMode(vtype);
               setAdvancedExpression(v.expression || '');
               setAdvancedVars(v.variables || {});
               setShowLandedCost(vtype === 'simple');
+              setSourceCoverageId(v.source_coverage_id || null);
+              setLinkMode(v.link_mode || null);
+              setLinkedTemplateName(null);
             }} />
           )}
         </div>

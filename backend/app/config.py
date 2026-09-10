@@ -6,6 +6,15 @@ class Settings(BaseSettings):
     # Environment: "development" or "production". Controls cookie security flags.
     environment: str = "development"
 
+    # SameSite for all auth cookies when is_prod (staging + production both —
+    # app.*/api.* live on different subdomains of the same registrable domain,
+    # which the SameSite spec treats as same-site, so "strict" should work for
+    # the app's own XHR/fetch calls to the API. Kept as its own env-overridable
+    # setting rather than hardcoded: if a cross-subdomain login flow ever breaks
+    # in practice, this can be flipped back to "lax" or "none" via a Railway env
+    # var + redeploy — no git revert or resync needed.
+    cookie_samesite: str = "strict"
+
     # Database
     database_url: str = "postgresql://costadvisor:costadvisor@localhost:5432/costadvisor"
 
@@ -16,6 +25,11 @@ class Settings(BaseSettings):
     # Google Calendar — Fernet key for encrypting per-host refresh tokens.
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     google_calendar_encryption_key: str = ""
+
+    # Team-supplied provider credentials (Fastmarkets/Argus/ICIS, Scrum 26) — a
+    # SEPARATE Fernet key from google_calendar_encryption_key above; different
+    # secret domain, must not be shared. Generate the same way.
+    provider_credential_encryption_key: str = ""
 
     # JWT
     jwt_secret: str = "change-me"

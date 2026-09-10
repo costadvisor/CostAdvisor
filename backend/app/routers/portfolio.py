@@ -1,6 +1,7 @@
 import statistics
 import uuid
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -10,8 +11,8 @@ from app.models.cost_model import CostModel
 from app.models.price_data import ActualPrice
 from app.models.actual_volume import ActualVolume
 from app.routers.auth import get_current_user
-from app.schemas.costing import EvolutionRequest
-from app.services.costing_engine import calculate_should_cost, calculate_evolution
+from app.schemas.costing import EvolutionRequest, DataGap
+from app.services.costing_engine import calculate_should_cost, calculate_evolution, calculate_forward_should_cost
 from app.services.fx_converter import convert_price
 from app.services.permissions import require_permission
 
@@ -361,3 +362,81 @@ def buy_window_for_model(
     if signal is None:
         raise HTTPException(status_code=400, detail="Cost model has no formula")
     return signal
+
+
+# ── Scrum 70 (Part 2): lock/hold verdict off the forward should-cost ─────────
+# Additive sibling of the backward /buy-windows endpoints above — their
+# response shape is untouched, which is also what keeps the Scrum 70 Part 1
+# regression test meaningful (forecast storage must not change their output).
+
+_LOCK_THRESHOLD_PCT = _BUY_THRESHOLD_PCT  # same ±3% convention as the backward signal
+
+
+class LockHoldVerdict(BaseModel):
+    cost_model_id: uuid.UUID
+    product_name: str
+    supplier_name: str | None
+    region: str
+    currency: str
+    horizon_quarters: int
+    horizon_year: int
+    horizon_quarter: int
+    current_should_cost: float
+    forecast_should_cost: float | None
+    deviation_pct: float | None
+    forecast_vintage: datetime | None
+    forecast_method: str | None
+    verdict: str            # lock | hold | neutral | insufficient
+    data_gaps: list[DataGap]
+
+
+def _lock_hold_verdict(db: Session, cm: CostModel, horizon_quarters: int) -> LockHoldVerdict:
+    base = dict(
+        cost_model_id=cm.id, product_name=cm.product.name,
+        supplier_name=cm.supplier.name if cm.supplier else None,
+        region=cm.region, currency=cm.currency, horizon_quarters=horizon_quarters,
+    )
+    forward = calculate_forward_should_cost(db, cm, horizon_quarters)
+    if forward.insufficient or forward.forecast_should_cost is None:
+        current = calculate_should_cost(db, cm).should_cost if cm.current_formula else 0.0
+        return LockHoldVerdict(
+            **base, horizon_year=forward.horizon_year, horizon_quarter=forward.horizon_quarter,
+            current_should_cost=round(current, 4), forecast_should_cost=None, deviation_pct=None,
+            forecast_vintage=None, forecast_method=None, verdict="insufficient",
+            data_gaps=forward.data_gaps,
+        )
+
+    current = calculate_should_cost(db, cm).should_cost
+    dev = (forward.forecast_should_cost - current) / current * 100 if current else 0.0
+    # Percent only, per the ticket — the underlying values are index levels,
+    # not currency, so no fabricated money-saving figure is quoted here.
+    if dev >= _LOCK_THRESHOLD_PCT:
+        verdict = "lock"      # price is projected to rise — lock a contract now
+    elif dev <= -_LOCK_THRESHOLD_PCT:
+        verdict = "hold"      # price is projected to fall — wait
+    else:
+        verdict = "neutral"
+
+    return LockHoldVerdict(
+        **base, horizon_year=forward.horizon_year, horizon_quarter=forward.horizon_quarter,
+        current_should_cost=round(current, 4), forecast_should_cost=forward.forecast_should_cost,
+        deviation_pct=round(dev, 2), forecast_vintage=forward.forecast_vintage,
+        forecast_method=forward.forecast_method, verdict=verdict, data_gaps=forward.data_gaps,
+    )
+
+
+@router.get("/buy-windows/{cost_model_id}/verdict", response_model=LockHoldVerdict)
+def buy_window_verdict(
+    cost_model_id: uuid.UUID,
+    horizon_quarters: int = Query(4, ge=1, le=12),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Forward lock/hold verdict — should-cost forecast horizon_quarters ahead
+    vs today's should-cost, using Scrum 70 Part 1's projected index values.
+    Same team-scoping gate as the existing single-model buy-window endpoint."""
+    cm = db.query(CostModel).filter(CostModel.id == cost_model_id).first()
+    if not cm:
+        raise HTTPException(status_code=404, detail="Cost model not found")
+    require_permission(db, current_user, cm.team_id, "costing.view")
+    return _lock_hold_verdict(db, cm, horizon_quarters)

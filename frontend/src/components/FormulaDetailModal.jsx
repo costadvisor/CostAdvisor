@@ -203,6 +203,12 @@ export default function FormulaDetailModal({ template, activeTeamId, canEdit, on
   };
 
   const correction = cov?.review_metadata?.correction_plan;
+  // The real, per-combo reasons the trust engine actually flagged (services/
+  // trust.py::assess -> trust_inputs.reasons) — each names the type codes
+  // behind it and how much recipe weight they carry. Falls back to the old
+  // generic CONF-LOW copy only for a combo that predates this (no trust_inputs
+  // stored yet, e.g. never recomputed).
+  const trustReasons = cov?.trust_inputs?.reasons || [];
 
   return (
     <div
@@ -314,6 +320,21 @@ export default function FormulaDetailModal({ template, activeTeamId, canEdit, on
                     {TIER_LABEL[cov.coverage_tier] || '—'}
                   </span>
                 </Stat>
+                {/* coverage_tier (free/good_proxy/weak_proxy/blocked) only ever gets
+                    set by the old per-index retrieval_status path, which the new
+                    catalog-drop combos never populate — so it reads "—" for every
+                    formula loaded from the drop, not just this one. proxy_density_tier
+                    (P1/P2/P3, from the drop's own coverage_tier column) IS populated
+                    for those and was simply never surfaced. Shown raw rather than
+                    labeled "good"/"bad": the scale's exact direction isn't documented
+                    anywhere in the drop or this codebase. */}
+                {cov.proxy_density_tier && (
+                  <Stat label="Proxy density">
+                    <span title="Tier from the source data drop (P1–P3) — a separate metric from Coverage above; not yet documented which direction is better">
+                      {cov.proxy_density_tier}
+                    </span>
+                  </Stat>
+                )}
                 {canEdit && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
                     <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ fontSize: 10 }} onClick={startEditPricing}>
@@ -379,10 +400,23 @@ export default function FormulaDetailModal({ template, activeTeamId, canEdit, on
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent3)', marginBottom: 4 }}>
                   Placeholder recipe — pending expert review
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: correction ? 8 : 0 }}>
-                  Weights were closed by proportional scaling, not verified process chemistry.
-                  Don't quote this number in a negotiation until it's signed off.
-                </div>
+                {trustReasons.length > 0 ? (
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: correction ? 8 : 0 }}>
+                    {trustReasons.map((r, i) => (
+                      <div key={i} style={{ marginTop: i ? 4 : 0 }}>
+                        {r.detail}
+                        {r.subjects?.length > 0 && <> — <strong>{r.subjects.join(', ')}</strong></>}
+                        {r.weight_pct > 0 && ` (${r.weight_pct}% of this recipe's weight)`}
+                      </div>
+                    ))}
+                    <div style={{ marginTop: 6 }}>Don't quote this number in a negotiation until it's signed off.</div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: correction ? 8 : 0 }}>
+                    Weights were closed by proportional scaling, not verified process chemistry.
+                    Don't quote this number in a negotiation until it's signed off.
+                  </div>
+                )}
                 {correction && (
                   <div style={{ ...mono, fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>
                     <span style={{ color: 'var(--muted)' }}>correction · </span>

@@ -1,19 +1,41 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
+import api from '../api';
 import TeamSelector from './TeamSelector';
 import ThemeSelector from './ThemeSelector';
+import Logo from './Logo';
 
+// Mirrors the host-aware branching landing/index.html's own script uses for
+// API_URL/APP_URL — the logo now points *out* to the marketing site (the app
+// itself has a real Dashboard tab for internal navigation instead).
+const LANDING_URL = window.location.hostname.includes('dev.')
+  ? 'https://dev.costadvisor.org'
+  : (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:3333'
+    : 'https://costadvisor.org';
 
 export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout, pendingInviteCount } = useAuth();
+  const { user, logout, pendingInviteCount, activeTeamId } = useAuth();
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const menuRef = useRef(null);
   const triggerRef = useRef(null);
   const itemRefs = useRef([]);
+
+  // There is no effective-permissions read in this app; the convention is a
+  // per-feature probe, and this is the one for contracts.
+  const [canSeeContracts, setCanSeeContracts] = useState(false);
+  useEffect(() => {
+    if (!activeTeamId) { setCanSeeContracts(false); return; }
+    let cancelled = false;
+    api.get('/api/contracts/can-access', { params: { team_id: activeTeamId } })
+      .then(({ data }) => { if (!cancelled) setCanSeeContracts(!!data.can_view); })
+      .catch(() => { if (!cancelled) setCanSeeContracts(false); });
+    return () => { cancelled = true; };
+  }, [activeTeamId]);
 
   const closeMenu = (restoreFocus = false) => {
     setOpen(false);
@@ -45,13 +67,14 @@ export default function Navbar() {
     return () => cancelAnimationFrame(id);
   }, [open]);
 
-  // The 8-tab journey shell (Scrum 61/UI-1): raw index feeds → portfolio →
-  // monitor → forecast → negotiate, plus the two cross-cutting/back-office
-  // tabs (Intelligence, Team) and Admin (super-admin only). This is the
-  // primary nav now — Dashboard/Formulas/Products/Suppliers no longer get a
-  // persistent tab (Monitor/Portfolio are their new-IA homes; the other two
-  // stay reachable, not gone, via the account menu below).
+  // The journey shell (Scrum 61/UI-1): Dashboard first, then raw index feeds
+  // → portfolio → monitor → forecast → negotiate, plus the two cross-cutting/
+  // back-office tabs (Intelligence, Team) and Admin (super-admin only).
+  // Formulas/Products/Suppliers still have no persistent tab (Monitor/
+  // Portfolio are their new-IA homes; the other two stay reachable, not
+  // gone, via the account menu below).
   const tabs = [
+    { path: '/dashboard', label: 'Dashboard' },
     { path: '/index-library', label: 'Indexes' },
     { path: '/portfolio', label: 'Portfolio' },
     { path: '/monitor', label: 'Monitor' },
@@ -63,15 +86,25 @@ export default function Navbar() {
   ];
 
   // Old flat-nav pages with no slot in the 8-tab journey shell. This is not a
-  // leftovers list — /formulas and /alerts have no other inbound link anywhere
-  // in the app, and /suppliers' only one is a back-button from its own child,
-  // so for three of these five this menu is the sole entry point.
+  // leftovers list — /formulas, /alerts and /quotes have no other inbound
+  // link anywhere in the app, and /suppliers' only one is a back-button from
+  // its own child, so for most of these this menu is the sole entry point.
+  // Dashboard lives as a top-level tab now, not here.
   const goToLinks = [
-    { path: '/dashboard', label: 'Dashboard' },
     { path: '/products', label: 'Products' },
     { path: '/suppliers', label: 'Suppliers' },
     { path: '/formulas', label: 'Formulas' },
     { path: '/alerts', label: 'Alerts' },
+    { path: '/quotes', label: 'Quotes' },
+    // Contracts is conditional, not just conditionally useful: contract prices
+    // and notice dates sit behind their own `contracts.*` permission category,
+    // separate from costing, and a role without it must not even see the entry.
+    // That separation is the reason the category exists.
+    ...(canSeeContracts ? [{ path: '/contracts', label: 'Contracts' }] : []),
+    { path: '/curation', label: 'Curation' },
+    { path: '/dimensions', label: 'Dimensions' },
+    { path: '/scenarios', label: 'Scenarios' },
+    { path: '/support', label: 'Support' },
   ];
 
   const handleLogout = async () => { setOpen(false); await logout(); };
@@ -127,7 +160,13 @@ export default function Navbar() {
 
   return (
     <nav className="ca-nav">
-      <div className="ca-logo" onClick={() => navigate('/dashboard')}>
+      <div
+        className="ca-logo"
+        onClick={() => { window.location.href = LANDING_URL; }}
+        title="Visit the CostAdvisor website"
+        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+      >
+        <Logo size={34} style={{ borderRadius: 9, boxShadow: '0 3px 10px rgba(15,34,40,.18)' }} />
         Cost<span>Advisor</span>
       </div>
       {tabs.map(t => (

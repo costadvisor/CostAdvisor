@@ -15,6 +15,7 @@ from app.schemas.cost_model import (
 )
 from app.services.audit import log_event
 from app.services.permissions import require_permission
+from app.services.formula_resolver import get_visible_coverage
 
 router = APIRouter()
 
@@ -24,6 +25,45 @@ def resolve_commodity_id(db: Session, name: str) -> int | None:
         return None
     commodity = db.query(CommodityIndex).filter(CommodityIndex.name == name).first()
     return commodity.id if commodity else None
+
+
+def _resolve_component_fields(db: Session, comp) -> dict:
+    """Turn a FormulaComponentItem into FormulaComponent kwargs (Scrum 28b).
+
+    An explicit commodity_id (already resolved by the caller, e.g. via GET
+    /formulas/{id}/resolve) wins over a fragile exact-name lookup; a supplied
+    id that doesn't exist is rejected rather than silently stored — that
+    silent-store is the exact bug that let a broken link masquerade as a
+    healthy fixed line. component_type is inferred from whichever intent
+    signal is present when the caller doesn't send one explicitly, so
+    existing callers that never send it keep behaving exactly as before.
+    """
+    commodity_id = comp.commodity_id
+    if commodity_id is not None:
+        if not db.query(CommodityIndex).filter(CommodityIndex.id == commodity_id).first():
+            raise HTTPException(status_code=400, detail=f"Unknown commodity_id: {commodity_id}")
+    else:
+        commodity_id = resolve_commodity_id(db, comp.commodity_name)
+
+    component_type = comp.component_type or ("index" if (commodity_id or comp.commodity_name) else "fixed")
+
+    return dict(
+        label=comp.label,
+        commodity_id=commodity_id,
+        weight=comp.weight,
+        component_type=component_type,
+        depth=comp.depth,
+        via_template_id=comp.via_template_id,
+        line_region=comp.line_region,
+        is_proxy=comp.is_proxy,
+    )
+
+
+def _validate_source_coverage(db: Session, team_id: uuid.UUID, source_coverage_id: uuid.UUID | None) -> None:
+    if source_coverage_id is None:
+        return
+    if get_visible_coverage(db, source_coverage_id, team_id) is None:
+        raise HTTPException(status_code=400, detail="Unknown or inaccessible source_coverage_id")
 
 
 def _build_cost_model_out(cm: CostModel) -> CostModelOut:
@@ -63,6 +103,8 @@ def create_cost_model(
     if product.team_id != team_id:
         raise HTTPException(status_code=403, detail="Product does not belong to this team")
 
+    _validate_source_coverage(db, team_id, data.formula.source_coverage_id)
+
     cm = CostModel(
         team_id=team_id,
         product_id=data.product_id,
@@ -93,18 +135,20 @@ def create_cost_model(
         formula_type=data.formula.formula_type,
         expression=data.formula.expression,
         variables=data.formula.variables,
+        source_coverage_id=data.formula.source_coverage_id,
+        link_mode=data.formula.link_mode,
     )
     db.add(fv)
     db.flush()
 
     for comp in data.formula.components:
-        fc = FormulaComponent(
-            formula_version_id=fv.id,
-            label=comp.label,
-            commodity_id=resolve_commodity_id(db, comp.commodity_name),
-            weight=comp.weight,
-        )
+        fc = FormulaComponent(formula_version_id=fv.id, **_resolve_component_fields(db, comp))
         db.add(fc)
+    # Autoflush is off session-wide — without this, the lazy-loaded
+    # formula_versions[0].components below re-queries before these pending
+    # inserts exist, so the create response echoes an empty component list
+    # even though they persist correctly at commit.
+    db.flush()
 
     log_event(db, team_id, current_user.id, "create", "cost_model", str(cm.id),
               new_value={"product_id": str(data.product_id), "region": data.region, "currency": data.currency})
@@ -184,6 +228,7 @@ def renegotiate(
     if not cm:
         raise HTTPException(status_code=404, detail="Cost model not found")
     require_permission(db, current_user, cm.team_id, "cost_models.edit")
+    _validate_source_coverage(db, cm.team_id, data.source_coverage_id)
 
     # Check if a version exists for this quarter
     existing = db.query(FormulaVersion).filter(
@@ -204,6 +249,8 @@ def renegotiate(
         existing.formula_type = data.formula_type
         existing.expression = data.expression
         existing.variables = data.variables
+        existing.source_coverage_id = data.source_coverage_id
+        existing.link_mode = data.link_mode
         existing.updated_at = datetime.now(timezone.utc)
 
         # Delete old components, create new ones
@@ -212,12 +259,7 @@ def renegotiate(
         ).delete()
 
         for comp in data.components:
-            fc = FormulaComponent(
-                formula_version_id=existing.id,
-                label=comp.label,
-                commodity_id=resolve_commodity_id(db, comp.commodity_name),
-                weight=comp.weight,
-            )
+            fc = FormulaComponent(formula_version_id=existing.id, **_resolve_component_fields(db, comp))
             db.add(fc)
 
         db.flush()
@@ -250,17 +292,14 @@ def renegotiate(
             formula_type=data.formula_type,
             expression=data.expression,
             variables=data.variables,
+            source_coverage_id=data.source_coverage_id,
+            link_mode=data.link_mode,
         )
         db.add(fv)
         db.flush()
 
         for comp in data.components:
-            fc = FormulaComponent(
-                formula_version_id=fv.id,
-                label=comp.label,
-                commodity_id=resolve_commodity_id(db, comp.commodity_name),
-                weight=comp.weight,
-            )
+            fc = FormulaComponent(formula_version_id=fv.id, **_resolve_component_fields(db, comp))
             db.add(fc)
 
         db.flush()
@@ -368,6 +407,11 @@ def clone_cost_model(
             formula_type=current_fv.formula_type,
             expression=current_fv.expression,
             variables=current_fv.variables,
+            # Scrum 28b — cloning is meant to produce an equivalent formula;
+            # silently dropping the catalog link on clone would be exactly
+            # the kind of quiet behavior this scrum is about closing.
+            source_coverage_id=current_fv.source_coverage_id,
+            link_mode=current_fv.link_mode,
         )
         db.add(fv)
         db.flush()
@@ -378,8 +422,14 @@ def clone_cost_model(
                 label=comp.label,
                 commodity_id=comp.commodity_id,
                 weight=comp.weight,
+                component_type=comp.component_type,
+                depth=comp.depth,
+                via_template_id=comp.via_template_id,
+                line_region=comp.line_region,
+                is_proxy=comp.is_proxy,
             )
             db.add(fc)
+        db.flush()  # see the matching comment in create_cost_model
 
     log_event(db, clone.team_id, current_user.id, "clone", "cost_model", str(clone.id),
               new_value={"source_cost_model_id": str(original.id)})
