@@ -18,6 +18,10 @@ from app.database import SessionLocal, bypass_rls_var
 from app.models.index_layer import TypeCode
 from app.services.drop.catalog_loader import load_catalog
 from app.services.drop.reader import DropNotAvailable
+# Side-effect import: region auto-register listener. Without this, a region
+# REGION_MAP resolves to (e.g. APAC/MEA) that has never been created on this
+# database yet raises a raw FK violation instead of being auto-registered.
+from app.services import regions as _region_events  # noqa: F401
 
 
 def run(dry_run: bool = False) -> int:

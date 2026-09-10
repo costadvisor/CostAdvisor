@@ -19,6 +19,7 @@ from app.models.region import Region
 from app.models.index_data import IndexValue, IndexOverride, TeamIndexSource
 from app.models.cost_model import CostModel
 from app.models.freight_lane import FreightLane
+from app.models.formula_template import FormulaRegionCoverage, FormulaTemplateComponent
 
 # model class -> the region-bearing column attributes on it
 _REGION_ATTRS: dict[type, tuple[str, ...]] = {
@@ -27,6 +28,13 @@ _REGION_ATTRS: dict[type, tuple[str, ...]] = {
     TeamIndexSource: ("region",),
     CostModel: ("region", "destination_region"),
     FreightLane: ("origin_region", "destination_region"),
+    # Scrum 58/60: formula_region_coverage.region and
+    # formula_template_components.region are also FKs to regions.code, added
+    # after this safety net was first written — missed here until a catalog
+    # retarget against a lightly-seeded database (no APAC/MEA rows yet) hit a
+    # raw FK violation instead of being auto-registered like every other path.
+    FormulaRegionCoverage: ("region",),
+    FormulaTemplateComponent: ("region",),
 }
 
 # Known stray spellings -> the canonical code. These once minted duplicate

@@ -140,7 +140,15 @@ async def login(request: Request):
         f"{state}:{verifier}",
         httponly=True,
         secure=is_prod,
-        samesite=settings.cookie_samesite if is_prod else "lax",
+        # Always "lax", never settings.cookie_samesite: this cookie is read back
+        # when Google redirects the browser to /auth/callback, which is a
+        # cross-site top-level navigation (the prior page was accounts.google.com).
+        # "Strict" cookies are never sent on cross-site navigation, even a
+        # top-level GET, so "strict" here breaks every login with "Missing state".
+        # "Lax" is the standard, correct choice for an OAuth/SSO callback cookie —
+        # it explicitly allows cross-site top-level GET navigation while still
+        # blocking cross-site POST, so real CSRF protection is unaffected.
+        samesite="lax",
         max_age=600,
     )
     return response
@@ -300,7 +308,9 @@ async def callback(request: Request, db: Session = Depends(get_db)):
         max_age=settings.refresh_token_days * 86400,
         path="/auth/refresh",
     )
-    response.delete_cookie("oauth_state", secure=is_prod, samesite=settings.cookie_samesite if is_prod else "lax")
+    # Must match the samesite it was set with ("lax", always) or the browser
+    # won't recognize this as the same cookie and will silently ignore the delete.
+    response.delete_cookie("oauth_state", secure=is_prod, samesite="lax")
     return response
 
 
@@ -472,7 +482,9 @@ async def google_calendar_start(
         f"{state}:{str(current_user.id)}",
         httponly=True,
         secure=is_prod,
-        samesite=settings.cookie_samesite if is_prod else "lax",
+        # Always "lax" — same cross-site-redirect-from-Google reasoning as
+        # oauth_state above; "strict" breaks this callback identically.
+        samesite="lax",
         max_age=600,
     )
     return response
@@ -543,5 +555,6 @@ async def google_calendar_callback(
 
     response = RedirectResponse(url=f"{settings.app_url}/admin?tab=settings", status_code=302)
     is_prod = settings.environment != "development"
-    response.delete_cookie("gc_state", secure=is_prod, samesite=settings.cookie_samesite if is_prod else "lax")
+    # Must match how it was set ("lax", always) or the browser ignores the delete.
+    response.delete_cookie("gc_state", secure=is_prod, samesite="lax")
     return response
