@@ -56,3 +56,4 @@ echo -e "  ${YELLOW}Backend${NC}   http://localhost:8000"
 echo -e "  ${YELLOW}App${NC}       http://localhost:5173"
 echo -e "  ${YELLOW}Landing${NC}   http://localhost:3333\n"
 wait
+#triigered

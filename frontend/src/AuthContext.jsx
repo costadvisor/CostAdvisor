@@ -92,9 +92,9 @@ export function AuthProvider({ children }) {
     setUser(null);
     setTeams([]);
     setActiveTeamId(null);
-    // Relative path so logout lands on the login page in every environment
-    // (matches the /login and /dashboard redirects in api.js) — not a hardcoded host.
-    window.location.href = '/login';
+    // Landing page URL — set VITE_LANDING_URL per environment (e.g. localhost:3333 locally);
+    // defaults to the public landing site on deploy.
+    window.location.href = import.meta.env.VITE_LANDING_URL || 'https://www.costadvisor.org';
   };
 
   return (

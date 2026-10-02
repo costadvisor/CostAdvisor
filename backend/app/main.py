@@ -64,11 +64,11 @@ async def add_robots_header(request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        settings.app_url,
+        settings.app_url,  # the app (prod: costadvisor.org; dev: app.dev.costadvisor.org)
         "http://localhost:3333",
         "https://www.costadvisor.org",  # landing page submitting access requests
         "https://costadvisor.org",
-        "https://dev.costadvisor.org",  # staging landing page (calls public endpoints cross-origin)
+        "https://dev.costadvisor.org",   # dev landing — access requests / demos
     ],
     allow_credentials=True,
     allow_methods=["*"],
