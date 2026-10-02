@@ -482,7 +482,12 @@ export default function Contracts() {
           api.get('/api/contracts', { params: p }),
           api.get('/api/suppliers', { params: p }).catch(() => ({ data: [] })),
           api.get('/api/cost-models', { params: p }).catch(() => ({ data: [] })),
-          api.get('/api/radar/windows', { params: { ...p, driver: 'clause_deadline' } })
+          // `state` is optional on the route, and omitting it returns closed and
+          // dismissed windows alongside open ones — which then rendered
+          // identically, under copy reading "None open." A dismissed notice
+          // window looking active is the opposite of what this panel is for.
+          api.get('/api/radar/windows',
+            { params: { ...p, driver: 'clause_deadline', state: 'open' } })
             .catch(() => ({ data: [] })),
         ]).then(([c, s, cm, w]) => {
           setContracts(c.data); setSuppliers(s.data);

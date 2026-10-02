@@ -15,7 +15,7 @@ from app.models.cost_model import CostModel
 from app.models.index_data import CommodityIndex
 from app.models.alerts import AlertSubscription, AlertEvent
 from app.routers.auth import get_current_user
-from app.routers.teams import require_team_role
+from app.routers.teams import has_team_role, require_team_role
 from app.models.contract import Contract
 from app.models.supplier import Supplier
 from app.schemas.alerts import (
@@ -232,7 +232,11 @@ def get_slack_webhook(team_id: uuid.UUID, db: Session = Depends(get_db),
     team = db.query(Team).filter(Team.id == team_id).first()
     if not team:
         raise HTTPException(404, "Team not found")
-    is_admin = has_permission(db, current_user, team_id, "costing.edit")
+    # Whoever can SET the webhook may see it — the same rule the PUT below
+    # enforces. This used to ask for `costing.edit`, which is not a permission
+    # that exists, so on any team with a plan (or for any member holding a
+    # custom role) it silently answered False and hid the URL from the owner.
+    is_admin = has_team_role(db, current_user, team_id, ["owner", "admin"])
     return SlackWebhookOut(
         configured=bool(team.slack_webhook_url),
         slack_webhook_url=team.slack_webhook_url if is_admin else None,

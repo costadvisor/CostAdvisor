@@ -104,7 +104,10 @@ def test_no_series_still_names_its_target(db):
     code = _mk_code(db, f"NS-{uuid.uuid4().hex[:6]}", series, resolution="no_series")
     try:
         assert code.resolves_to_id == series.id
-        assert not code.is_priceable
+        # The model knows its resolution state; whether the target carries
+        # numbers is a question only the service layer can answer, so the
+        # priceability assertion lives with `priceable_codes` now.
+        assert code.resolution == "no_series"
     finally:
         _cleanup(db, [series.id], [code.id])
 

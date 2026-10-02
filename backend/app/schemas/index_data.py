@@ -231,3 +231,15 @@ class IndexImpactResponse(BaseModel):
     currency: str | None = None
     source_url: str | None = None
     impacts: list[IndexImpactItem]
+
+
+class IndexUsageItem(BaseModel):
+    """The real, FK-backed taxonomy placement for one commodity (Scrum 17
+    follow-up) — replaces the free-text category->family display mapping for
+    any commodity the mapping pass could place."""
+    commodity_id: int
+    family_id: int | None = None
+    family_code: str | None = None
+    family_name: str | None = None
+    subfamily_id: int | None = None
+    subfamily_name: str | None = None

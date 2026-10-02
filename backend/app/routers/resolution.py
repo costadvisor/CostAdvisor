@@ -123,6 +123,7 @@ def get_unpriceable(
 def get_combo_diagnosis(
     template_id: uuid.UUID,
     region: str,
+    variant: str = Query("", description="Which recipe — a (template, region) can carry several"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -133,12 +134,17 @@ def get_combo_diagnosis(
     not yet carry a type-code link reports that explicitly rather than reading
     as healthy: an empty blocker list would otherwise be indistinguishable
     from "nothing to analyse".
+
+    Scoped to one `variant` (default `""`, the unvaried recipe). Pooling the
+    variants of one region double-counts their lines — it reported 148% blocked
+    weight on a live combo whose weights close at 100.
     """
-    diagnosis = diagnose_combo(db, template_id, region)
+    diagnosis = diagnose_combo(db, template_id, region, variant=variant)
     return ComboDiagnosisOut(
         template_id=diagnosis.template_id,
         template_code=diagnosis.template_code,
         region=diagnosis.region,
+        variant=diagnosis.variant,
         coverage_exists=diagnosis.coverage_exists,
         priceable=diagnosis.priceable,
         reason=diagnosis.reason,

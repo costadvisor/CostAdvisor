@@ -101,24 +101,43 @@ class ModelCoverage:
         return {l.commodity_id for l in self.lines if l.resolved and l.commodity_id}
 
 
-def _type_code_for_line(db: Session, line) -> TypeCode | None:
-    """The type code behind a line, whichever way the line names one.
+def _type_code_for_line(db: Session, line):
+    """`(type_code, proxy_is_knowable)` for a line, whichever way it names one.
 
-    A tracking line carries `type_code_id` directly. A pinned/unlinked line has
-    only a commodity, so the type-code side is reached through the series —
-    which is also the direction that makes the grouping work, since many codes
-    resolve to one series.
+    A tracking line carries `type_code_id` directly, so both answers are certain.
+    A pinned/unlinked line has only a commodity and must be reached through the
+    series — and many codes resolve to one series, which is the whole premise of
+    the concentration reading.
+
+    Taking the alphabetically-first candidate meant a line's proxy badge could
+    reflect a code that had nothing to do with it. Where the candidates AGREE on
+    proxy status that choice is harmless; where they DISAGREE there is no way to
+    tell from a commodity id which code named this line, so the second element is
+    False and the caller reports `via_proxy` as unknown. A coin flip between
+    "priced through a stand-in" and "priced directly" is worse than saying we
+    cannot tell — the two carry opposite confidence.
+
+    The code itself is still returned in that case: the disagreement is about
+    `proxy_status`, not `resolution`, and the caller needs the code to decide
+    whether the line resolves at all.
     """
     if getattr(line, "type_code_id", None):
-        return db.query(TypeCode).filter(TypeCode.id == line.type_code_id).first()
-    if line.commodity_id:
         return (
+            db.query(TypeCode).filter(TypeCode.id == line.type_code_id).first(),
+            True,
+        )
+    if line.commodity_id:
+        candidates = (
             db.query(TypeCode)
             .filter(TypeCode.resolves_to_id == line.commodity_id)
             .order_by(TypeCode.code)
-            .first()
+            .all()
         )
-    return None
+        if not candidates:
+            return None, True
+        knowable = len({tc.proxy_status for tc in candidates}) == 1
+        return candidates[0], knowable
+    return None, True
 
 
 def model_coverage(db: Session, cm: CostModel) -> ModelCoverage:
@@ -147,7 +166,7 @@ def model_coverage(db: Session, cm: CostModel) -> ModelCoverage:
         }
 
     for line in lines:
-        tc = _type_code_for_line(db, line)
+        tc, proxy_knowable = _type_code_for_line(db, line)
         # A fixed line has nothing to resolve and is not a blind spot — it is
         # a deliberately non-indexed cost. Only an index-linked line that
         # cannot reach a series counts against coverage.
@@ -179,7 +198,8 @@ def model_coverage(db: Session, cm: CostModel) -> ModelCoverage:
             type_code=tc.code if tc else None,
             type_code_resolution=tc.resolution if tc else None,
             # Type-code side only — never `line.is_proxy`.
-            via_proxy=(tc.proxy_status == "proxy") if tc else None,
+            via_proxy=((tc.proxy_status == "proxy")
+                       if (tc and proxy_knowable) else None),
             resolved=resolved,
             reason=unresolved_reason,
         ))

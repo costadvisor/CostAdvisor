@@ -71,7 +71,7 @@ export default function NegotiateDetailArea() {
 
   const {
     product_name, supplier_name, destination_country, currency, unit,
-    current_should_cost, current_actual_price, gap, gap_pct,
+    current_should_cost, current_floor, current_actual_price, gap, gap_pct,
     total_impact, volumes_missing, period_label, evolution, narrative, drivers,
   } = data;
   const sym = curSym(currency);
@@ -139,6 +139,9 @@ export default function NegotiateDetailArea() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}`)}>View Model</button>
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/evolution`)}>Evolution</button>
+          <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/negotiate/${costModelId}/prep`)}>
+            Prepare for the call
+          </button>
           <button className="ca-btn ca-btn-primary" onClick={handleExportPDF}>Export PDF</button>
         </div>
       </div>
@@ -218,6 +221,47 @@ export default function NegotiateDetailArea() {
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Negotiation Position — the buyer's defensible range for this call.
+          Floor (cost_before_margin) and should-cost (cost_before_margin +
+          margin) come straight from the brief response; nothing here predicts
+          a supplier counter — that would need real supplier-cost data this
+          app doesn't have, and a prior fabricated version of exactly that was
+          removed for inventing numbers (see Scrum 30b's negotiation-position
+          engine, which proves the same point at the catalog level). */}
+      <div className="ca-card" style={{ marginBottom: 16 }}>
+        <div className="ca-card-title">Negotiation Position</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 16, marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Floor</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 700, color: 'var(--accent4)' }}>
+              {current_floor != null ? `${sym}${fmtMoney(current_floor, { decimals: dp })}` : '—'}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>cost before margin — a minimum, not a target</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Should-Cost</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 700, color: 'var(--accent)' }}>
+              {sym}{fmtMoney(current_should_cost, { decimals: dp })}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>fair price — open near here</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Current Ask</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 700, color: hasActual ? verdictColor : 'var(--muted)' }}>
+              {hasActual ? `${sym}${fmtMoney(current_actual_price, { decimals: dp })}` : 'Not recorded'}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>what the supplier is charging today</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+          {current_floor != null
+            ? <>Your defensible range for this product is <strong>{sym}{fmtMoney(current_floor, { decimals: dp })}</strong> to{' '}
+                <strong>{sym}{fmtMoney(current_should_cost, { decimals: dp })}</strong> — anchor the conversation near should-cost and hold
+                the floor as your walk-away point, not your opening offer.</>
+            : 'The floor (cost before margin) is not available for this formula.'}
         </div>
       </div>
 

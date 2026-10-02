@@ -7,10 +7,25 @@ doesn't have enough priced history on its own. Deterministic, no ML,
 consistent with this codebase's costing-engine philosophy of verifiable,
 reproducible output.
 
-Deliberately NOT resolved through a canonical producer entity — that layer
-(SCRUM-77: producer/producer_alias/producer_region) doesn't exist anywhere
-in this repo. Scored by raw Supplier.id/name instead; callers must surface
-the `resolution: "raw_supplier_name"` flag rather than hide the limitation.
+Resolved through the canonical `Producer` master (SCRUM-77 / unit 8) where it
+resolves, so two spellings of one company in a team's supplier list are scored
+on their combined history rather than as two unrelated suppliers.
+
+**Canonicalisation never crosses a team.** `Producer` is a platform table and
+`Supplier.team_id` is NOT NULL, which is the whole answer to "is a trust score a
+team fact or a platform fact": it is a team fact. The producer is used only to
+decide which of *this team's own* supplier rows are the same company. Pooling
+across teams would put one tenant's negotiating history into another's score,
+which is the worst bug this module could ship.
+
+Three cases where the raw supplier row stays the unit, each reported as
+`resolution: "raw_supplier_name"` rather than quietly scored as if resolved:
+
+* nothing in the producer master covers the name;
+* the name asserts several companies (`" / "`), so the quoting behaviour
+  genuinely cannot be attributed to one of them;
+* the team has only one supplier row for that company anyway, so there is
+  nothing to pool and claiming canonicalisation would overstate what happened.
 """
 from __future__ import annotations
 
@@ -28,8 +43,39 @@ from app.models.supplier import Supplier
 from app.models.supplier_trust import SupplierTrustScore
 from app.services.costing_engine import should_cost_for_period
 from app.services.index_projection import _fit_ols
+from app.services.producers import resolve_raw_name
 
 MIN_QUARTERS = 4  # matches Scrum 22's buy-window insufficient-data threshold
+
+
+def team_producer_map(db: Session, team_id: uuid.UUID) -> dict[int, uuid.UUID]:
+    """`supplier_id -> producer_id` for one team, for the rows that resolve.
+
+    **`create=False` is not an optimisation.** Resolution with `create=True`
+    mints producers and writes alias rows, so scoring would mutate the shared
+    company master as a side effect of a recompute — any team's supplier
+    spellings could then pollute the platform master. With it off, an unmapped
+    name resolves to nothing and simply stays at raw grain, which is also what
+    keeps the disclosure honest: the caveat is only dropped where resolution
+    actually succeeded.
+
+    A name resolving to several companies is deliberately absent from the map. A
+    supplier row that says "BASF / Clariant" cannot have its quoting behaviour
+    attributed to either, and picking the first would be a guess presented as a
+    fact.
+    """
+    out: dict[int, uuid.UUID] = {}
+    for supplier_id, name in (
+        db.query(Supplier.id, Supplier.name)
+        .filter(Supplier.team_id == team_id)
+        .all()
+    ):
+        if not name:
+            continue
+        resolved = resolve_raw_name(db, name, create=False)
+        if len(resolved) == 1:
+            out[supplier_id] = resolved[0].producer.id
+    return out
 
 
 def _grade_for(score: float) -> str:
@@ -118,13 +164,42 @@ def _insufficient_entry(n_quarters: int) -> dict:
     return {"score": None, "grade": None, "inputs": {"n_quarters": n_quarters}}
 
 
-def compute_supplier_trust_scores(db: Session, team_id: uuid.UUID, supplier_id: int) -> list[SupplierTrustScore]:
+def compute_supplier_trust_scores(
+    db: Session,
+    team_id: uuid.UUID,
+    supplier_id: int,
+    producer_map: dict[int, uuid.UUID] | None = None,
+) -> list[SupplierTrustScore]:
     """Computes and upserts every (product|subfamily)-grain score for one
     supplier. Never mutates row identity across recomputes — matched by
-    (supplier_id, grain, grain_key), so re-running updates in place."""
+    (supplier_id, grain, grain_key), so re-running updates in place.
+
+    Where the supplier resolves to a `Producer` that this team spells more than
+    one way, the scored population is every sibling row naming the same company,
+    so the score reflects the company's behaviour rather than one spelling of it.
+    Each sibling still gets its own row carrying that shared result — they are
+    separate supplier records to the team, and collapsing them would change the
+    API shape and hide rows the team can see elsewhere in the product.
+
+    `producer_map` is the team's `supplier_id -> producer_id` map. Pass it when
+    scoring several suppliers in a row (compute-all), or every call rebuilds it
+    and the loop turns quadratic.
+    """
+    if producer_map is None:
+        producer_map = team_producer_map(db, team_id)
+
+    producer_id = producer_map.get(supplier_id)
+    sibling_ids = sorted(
+        sid for sid, pid in producer_map.items() if pid == producer_id
+    ) if producer_id is not None else [supplier_id]
+    # One supplier row is not a canonicalisation — nothing was pooled, so say so
+    # rather than relabelling an unchanged score as producer-resolved.
+    resolved = len(sibling_ids) > 1
+    scored_ids = sibling_ids if resolved else [supplier_id]
+
     models = (
         db.query(CostModel)
-        .filter(CostModel.supplier_id == supplier_id, CostModel.team_id == team_id)
+        .filter(CostModel.supplier_id.in_(scored_ids), CostModel.team_id == team_id)
         .all()
     )
     by_product: dict[uuid.UUID, list[CostModel]] = defaultdict(list)
@@ -189,7 +264,15 @@ def compute_supplier_trust_scores(db: Session, team_id: uuid.UUID, supplier_id: 
         row.insufficient_data = not sufficient
         row.score = payload["score"]
         row.grade = payload["grade"]
-        row.inputs = payload["inputs"]
+        # How the score was reached, stored beside the numbers that produced it
+        # so a disputed score is explainable without re-deriving it. `inputs` is
+        # already free-form, so this needs no migration.
+        inputs = dict(payload["inputs"])
+        inputs["resolution"] = "producer" if resolved else "raw_supplier_name"
+        if resolved:
+            inputs["producer_id"] = str(producer_id)
+            inputs["pooled_supplier_ids"] = scored_ids
+        row.inputs = inputs
         row.computed_at = datetime.now(timezone.utc)
         rows.append(row)
 

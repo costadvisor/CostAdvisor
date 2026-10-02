@@ -37,7 +37,7 @@ from app.routers.auth import get_current_user
 from app.schemas.editorial import (
     BlockCreate, BlockEdit, BlockOut, CardOut, ProvenanceBadge, VersionOut,
 )
-from app.services.audit import log_event
+from app.services.audit import log_event, log_platform_event
 from app.services.editorial import (
     add_version, approve_block, create_block, fork_block, read_card,
     validate_vocab, visible_block,
@@ -69,6 +69,27 @@ def _out(block: EditorialBlock) -> BlockOut:
         internal_note=block.internal_note, source_note=block.source_note,
         created_at=block.created_at, updated_at=block.updated_at,
     )
+
+
+def _audit_block(db, block, user_id, event_type, **kw):
+    """Audit against the BLOCK's own tier, not the caller's team.
+
+    These four routes logged every write against the caller-supplied `team_id`,
+    including writes to a platform block that no team owns. That misattributes a
+    platform action to a tenant — and `audit_logs.team_id` CASCADEs on team
+    delete, so removing that team would erase the record of a change to the
+    shared library.
+
+    `block.team_id` is the right discriminator everywhere, including in
+    `edit_block`: when a platform edit forks, `block` has already been rebound to
+    the team copy by the time this is called, so the event lands on the team that
+    now owns it.
+    """
+    if block.team_id is None:
+        log_platform_event(db, user_id, event_type, "editorial_block", str(block.id), **kw)
+    else:
+        log_event(db, block.team_id, user_id, event_type, "editorial_block",
+                  str(block.id), **kw)
 
 
 def _require_write(db: Session, user: User, team_id: uuid.UUID, *, platform: bool,
@@ -145,7 +166,7 @@ def create(team_id: uuid.UUID, data: BlockCreate, db: Session = Depends(get_db),
         expires_at=data.expires_at, author=current_user,
     )
     out = _out(block)
-    log_event(db, team_id, current_user.id, "create", "editorial_block", str(block.id),
+    _audit_block(db, block, current_user.id, "create",
               new_value={"subject": f"{data.subject_type}:{data.subject_code}",
                          "block_type": data.block_type, "platform": data.platform})
     db.commit()
@@ -192,7 +213,7 @@ def edit_block(block_id: uuid.UUID, team_id: uuid.UUID, data: BlockEdit,
                 body_format=data.body_format, provenance=data.provenance,
                 change_note=data.change_note, author=current_user)
     out = _out(block)
-    log_event(db, team_id, current_user.id, "update", "editorial_block", str(block.id),
+    _audit_block(db, block, current_user.id, "update",
               new_value={"version": out.current_version_no, "forked": forked,
                          "provenance": data.provenance})
     db.commit()
@@ -218,7 +239,7 @@ def approve(block_id: uuid.UUID, team_id: uuid.UUID, db: Session = Depends(get_d
                    platform=block.team_id is None, key="content.approve")
     approve_block(db, block, current_user)
     out = _out(block)
-    log_event(db, team_id, current_user.id, "approve", "editorial_block", str(block.id),
+    _audit_block(db, block, current_user.id, "approve",
               new_value={"version": out.current_version_no})
     db.commit()
     return out
@@ -262,7 +283,7 @@ def delete_block(block_id: uuid.UUID, team_id: uuid.UUID, db: Session = Depends(
     block = visible_block(db, block_id, team_id)
     _require_write(db, current_user, team_id,
                    platform=block.team_id is None, key="content.delete")
-    log_event(db, team_id, current_user.id, "delete", "editorial_block", str(block.id))
+    _audit_block(db, block, current_user.id, "delete")
     db.delete(block)
     db.commit()
     return {"status": "deleted"}

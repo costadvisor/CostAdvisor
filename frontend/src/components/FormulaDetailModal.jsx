@@ -59,6 +59,17 @@ export default function FormulaDetailModal({ template, activeTeamId, canEdit, on
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // Negotiation position (Scrum 30b) — a new surface over an already-tested
+  // endpoint, no engine change here.
+  const [negForm, setNegForm] = useState({
+    supplier_price: '', supplier_currency: '', supplier_unit: '',
+    supplier_incoterm: '', combo_unit: '', combo_incoterm: '',
+  });
+  const [negAdvancedOpen, setNegAdvancedOpen] = useState(false);
+  const [negResult, setNegResult] = useState(null);
+  const [negLoading, setNegLoading] = useState(false);
+  const [negError, setNegError] = useState(null);
+
   const teamParam = { team_id: activeTeamId };
 
   const loadCoverage = useCallback(async (selectFirst) => {
@@ -200,6 +211,55 @@ export default function FormulaDetailModal({ template, activeTeamId, canEdit, on
     } finally {
       setBusy(false);
     }
+  };
+
+  // A stale negotiation result must never sit under a changed region/period.
+  useEffect(() => {
+    setNegResult(null);
+    setNegError(null);
+  }, [region, evalPeriod.year, evalPeriod.quarter, template.id]);
+
+  const computeNegotiation = async () => {
+    if (!negForm.supplier_price) {
+      setNegError('Enter a supplier price.');
+      return;
+    }
+    setNegLoading(true);
+    setNegError(null);
+    try {
+      const params = {
+        team_id: activeTeamId, region, year: evalPeriod.year, quarter: evalPeriod.quarter,
+        supplier_price: parseFloat(negForm.supplier_price),
+      };
+      if (negForm.supplier_currency) params.supplier_currency = negForm.supplier_currency.toUpperCase();
+      if (negForm.supplier_unit) params.supplier_unit = negForm.supplier_unit;
+      if (negForm.supplier_incoterm) params.supplier_incoterm = negForm.supplier_incoterm;
+      if (negForm.combo_unit) params.combo_unit = negForm.combo_unit;
+      if (negForm.combo_incoterm) params.combo_incoterm = negForm.combo_incoterm;
+      const res = await api.get(`/api/formulas/${template.id}/negotiation-position`, { params });
+      setNegResult(res.data);
+    } catch (e) {
+      setNegError(formatApiError(e));
+    } finally {
+      setNegLoading(false);
+    }
+  };
+
+  // Reuses the app-wide print pattern (Brief.jsx / NegotiateDetailArea.jsx):
+  // a document.title slug swap so "Save as PDF" defaults to a sane filename,
+  // then window.print(). This panel lives inside a modal with no dedicated
+  // print route, so `ca-print-isolate` (styles.css) hides everything else in
+  // the DOM for the duration of the print instead of relying on .ca-print-page.
+  const handleExportNegotiationPDF = () => {
+    const slug = (s) => (s || '').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
+    const prev = document.title;
+    document.title = `negotiation-${slug(template.name)}-${slug(region)}-Q${evalPeriod.quarter}-${evalPeriod.year}`;
+    document.body.classList.add('ca-print-isolate');
+    window.print();
+    setTimeout(() => {
+      document.title = prev;
+      document.body.classList.remove('ca-print-isolate');
+    }, 500);
   };
 
   const correction = cov?.review_metadata?.correction_plan;
@@ -645,6 +705,121 @@ export default function FormulaDetailModal({ template, activeTeamId, canEdit, on
                 </table>
               </div>
             )}
+
+            {/* Negotiation Position — Scrum 30b engine, new surface */}
+            <div style={{ marginTop: 18 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--muted)', marginBottom: 6 }}>
+                Negotiation Position
+              </div>
+              <div className="ca-print-isolate-target" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 14 }}>
+                <div className="ca-print-only" style={{ marginBottom: 10, fontSize: 12, fontWeight: 700 }}>
+                  {template.name} — {region} · Q{evalPeriod.quarter} {evalPeriod.year} · Negotiation Position
+                </div>
+                <div className="ca-no-print" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
+                  <div style={{ width: 130 }}>
+                    <label className="ca-label" style={{ fontSize: 9 }}>Supplier price</label>
+                    <input className="ca-input" type="number" style={{ padding: '6px 8px', fontSize: 11 }}
+                      value={negForm.supplier_price}
+                      onChange={e => setNegForm(f => ({ ...f, supplier_price: e.target.value }))} />
+                  </div>
+                  <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ fontSize: 10 }}
+                    onClick={() => setNegAdvancedOpen(o => !o)}>
+                    {negAdvancedOpen ? 'Hide advanced' : 'Advanced'}
+                  </button>
+                  <button className="ca-btn ca-btn-primary ca-btn-sm" style={{ fontSize: 10 }}
+                    onClick={computeNegotiation} disabled={negLoading}>
+                    {negLoading ? 'Computing…' : 'Compute'}
+                  </button>
+                  {negResult && (
+                    <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ fontSize: 10, marginLeft: 'auto' }}
+                      onClick={handleExportNegotiationPDF}>
+                      Export PDF
+                    </button>
+                  )}
+                </div>
+                {negAdvancedOpen && (
+                  <div className="ca-no-print" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                    {[
+                      { key: 'supplier_currency', label: 'Supplier currency', width: 90, placeholder: 'USD' },
+                      { key: 'supplier_unit', label: 'Supplier unit', width: 90, placeholder: '$/mt' },
+                      { key: 'supplier_incoterm', label: 'Supplier incoterm', width: 90, placeholder: 'FOB' },
+                      { key: 'combo_unit', label: 'Combo unit', width: 90 },
+                      { key: 'combo_incoterm', label: 'Combo incoterm', width: 90 },
+                    ].map(f => (
+                      <div key={f.key} style={{ width: f.width }}>
+                        <label className="ca-label" style={{ fontSize: 9 }}>{f.label}</label>
+                        <input className="ca-input" style={{ padding: '6px 8px', fontSize: 11 }}
+                          placeholder={f.placeholder} value={negForm[f.key]}
+                          onChange={e => setNegForm(fm => ({ ...fm, [f.key]: e.target.value }))} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {negError && <div style={{ fontSize: 11, color: 'var(--accent2)', marginBottom: 10 }}>{negError}</div>}
+                {negResult && (
+                  negResult.position.insufficient ? (
+                    <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
+                      {negResult.position.reason}
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                        <Stat label="Target">
+                          {negResult.target.should_cost != null
+                            ? negResult.target.should_cost.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                            : `${negResult.target.index_level_pct?.toFixed(1)}% (index only)`}
+                        </Stat>
+                        <Stat label="Ask">{negResult.position.ask?.toLocaleString(undefined, { maximumFractionDigits: 2 })}</Stat>
+                        <Stat label="Unexplained">
+                          <span style={{ color: 'var(--accent2)' }}>
+                            {negResult.position.unexplained_remainder?.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          </span>
+                        </Stat>
+                      </div>
+                      <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 10 }}>
+                        <table className="ca-table" style={{ margin: 0 }}>
+                          <thead>
+                            <tr>
+                              <th>Line</th><th>Source</th>
+                              <th style={{ textAlign: 'right' }}>Weight</th>
+                              <th style={{ textAlign: 'right' }}>Effective</th>
+                              <th style={{ textAlign: 'right' }}>Attributed</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {negResult.position.attributed_components.map(l => (
+                              <tr key={l.component_id}>
+                                <td style={{ paddingLeft: l.depth > 0 ? 28 : 10, fontSize: 12 }}>{l.name}</td>
+                                <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                                  {l.commodity_name || (l.component_type === 'fixed' ? 'fixed' : '—')}
+                                </td>
+                                <td style={{ fontSize: 11, textAlign: 'right' }}>{l.weight_pct.toFixed(1)}%</td>
+                                <td style={{ fontSize: 11, textAlign: 'right' }}>{l.effective_weight_pct.toFixed(2)}%</td>
+                                <td style={{ fontSize: 11, textAlign: 'right' }}>{l.attributed_amount.toFixed(2)}</td>
+                              </tr>
+                            ))}
+                            <tr>
+                              <td colSpan={4} style={{ fontSize: 11, fontWeight: 600, textAlign: 'right' }}>Unexplained remainder</td>
+                              <td style={{ fontSize: 12, fontWeight: 700, textAlign: 'right' }}>
+                                {negResult.position.unexplained_remainder?.toFixed(2)}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 8 }}>
+                        Per-line attribution isn't available yet — the full ask is shown as unexplained.
+                      </div>
+                      {negResult.normalization?.notes?.length > 0 && (
+                        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: 'var(--muted)' }}>
+                          {negResult.normalization.notes.map((n, i) => <li key={i}>{n}</li>)}
+                        </ul>
+                      )}
+                    </>
+                  )
+                )}
+              </div>
+            </div>
           </>
         )}
       </div>

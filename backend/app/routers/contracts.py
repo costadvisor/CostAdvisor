@@ -5,13 +5,13 @@ the separate keys: a team can now build a role that runs should-costs but cannot
 see contract prices or notice dates. Before this, everyone who could run a
 costing could see everything.
 
-⚠️ One residual, stated rather than papered over: `has_permission` falls back to
-`TeamMembership.role` for a user with **no** custom role assigned, and that
-fallback grants every `view` key — so on a team that never configured roles, a
-plain member still sees contracts. The migration grants `contracts.*` to the
-seeded Owner/Admin roles and deliberately not to Member, so a team that uses
-roles at all gets the separation; a team that uses none has no separation
-anywhere in the product by design.
+The residual this router used to carry is closed. `has_permission` falls back to
+`TeamMembership.role` for a user with no custom role assigned, and that fallback
+granted every `view` key regardless of category — so on a team that never
+configured roles, a plain member saw contracts anyway. It now checks the
+category too (`permissions.MEMBER_READABLE_CATEGORIES`), and `contracts` is
+deliberately not in that set, matching the migration's own decision to grant
+`contracts.*` to the seeded Owner/Admin roles and not to Member.
 """
 import uuid
 

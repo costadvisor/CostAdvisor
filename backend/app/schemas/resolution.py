@@ -141,6 +141,9 @@ class ComboDiagnosisOut(BaseModel):
     template_id: uuid.UUID
     template_code: str | None = None
     region: str
+    # Named on the way out so a caller can tell WHICH recipe was diagnosed —
+    # a (template, region) can carry several.
+    variant: str = ""
     coverage_exists: bool
     priceable: bool
     reason: str | None = None

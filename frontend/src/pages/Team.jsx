@@ -4,6 +4,7 @@ import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import RoleBadge from '../components/RoleBadge';
+import ProviderCredentialsSection from '../components/ProviderCredentialsSection';
 
 export default function Team() {
   const { pendingInviteCount } = useAuth();
@@ -1304,10 +1305,19 @@ function SettingsTab() {
             onClick={() => setSettingsSection('roles')}
           >Role Settings</button>
         )}
+        {canManageRoles && (
+          <button
+            className={`ca-btn ca-btn-sm ${settingsSection === 'credentials' ? 'ca-btn-primary' : 'ca-btn-ghost'}`}
+            onClick={() => setSettingsSection('credentials')}
+          >Provider Credentials</button>
+        )}
       </div>
 
       {settingsSection === 'roles' && canManageRoles && activeTeamId && (
         <RoleSettingsSection teamId={activeTeamId} userRole={activeTeam.role} />
+      )}
+      {settingsSection === 'credentials' && canManageRoles && activeTeamId && (
+        <ProviderCredentialsSection teamId={activeTeamId} userRole={activeTeam.role} />
       )}
     </>
   );

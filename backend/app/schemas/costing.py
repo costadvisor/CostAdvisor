@@ -53,6 +53,11 @@ class ComponentBreakdown(BaseModel):
     via_template_name: str | None = None
     line_region: str | None = None
     is_proxy: bool | None = None
+    # Scrum 27 — which nested cost model this line came through, if any. A
+    # brief that flattened a sub-model into an anonymous line would hide the
+    # very structure the feature exists to show.
+    via_cost_model_id: uuid.UUID | None = None
+    via_cost_model_name: str | None = None
 
 
 class ShouldCostBreakdown(BaseModel):
@@ -211,6 +216,10 @@ class BriefResult(BaseModel):
     currency: str
     unit: str
     current_should_cost: float
+    # Cost before margin, at the current period — a defensible negotiating
+    # floor distinct from should-cost (which already bakes in an assumed
+    # acceptable margin). Null only when there's no formula to compute from.
+    current_floor: float | None = None
     current_actual_price: float | None
     gap: float | None
     gap_pct: float | None

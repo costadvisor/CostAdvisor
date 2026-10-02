@@ -52,15 +52,23 @@ def test_second_run_changes_nothing(db):
 
 
 def test_the_flat_cohort_is_skipped_with_a_reason(db):
-    """17 combos carry their region inside the formula_id and have no platform
-    template. Reported by name, never invented."""
+    """Combos carrying their region inside the formula_id have no platform
+    template. Reported by name, never invented.
+
+    Asserts the SHAPE, not the count. This read `== 17`, contradicting this
+    file's own docstring — the drop's README is explicit that row counts move
+    and the shape does not, and a count assertion fails on the next drop even
+    when the behaviour under test (skip, with a named reason, inventing nothing)
+    is completely unchanged.
+    """
     _ensure_loaded(db)
     report = load_catalog(db)
     db.rollback()
 
     skipped = report.table("formula_region_coverage").skipped
-    assert len(skipped) == 17
+    assert skipped, "the flat cohort should still be reported as skipped"
     for key, why in skipped:
+        assert key, "a skipped row must be named, not just counted"
         assert "no platform template" in why
         assert "·" in key, "the flat cohort bakes its region into the id"
 

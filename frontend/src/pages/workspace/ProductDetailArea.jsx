@@ -418,7 +418,24 @@ function ShouldCostBreakdownTable({ breakdown, error, sym }) {
             )}
             {breakdown.components.map((c, i) => (
               <tr key={i}>
-                <td style={{ fontSize: 12 }}>{c.label}{c.commodity_name ? <span style={{ color: 'var(--muted)' }}> · {c.commodity_name}</span> : null}</td>
+                <td style={{ fontSize: 12 }}>
+                  {/* Scrum 27 — a line that came through a nested cost model is
+                      indented and named. A breakdown that flattened a sub-model
+                      into an anonymous row would hide the structure the whole
+                      feature exists to show. */}
+                  {c.via_cost_model_name && (
+                    <span style={{ color: 'var(--accent4)', marginRight: 6 }} title={`Resolved from the nested cost model "${c.via_cost_model_name}"`}>
+                      ↳
+                    </span>
+                  )}
+                  {c.label}
+                  {c.commodity_name ? <span style={{ color: 'var(--muted)' }}> · {c.commodity_name}</span> : null}
+                  {c.via_cost_model_name && (
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginLeft: 14 }}>
+                      via {c.via_cost_model_name}
+                    </div>
+                  )}
+                </td>
                 <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{c.weight_pct.toFixed(1)}%</td>
                 <td style={{ ...mono, fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>{fmt(c.base_value)}</td>
                 <td style={{ ...mono, fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>{fmt(c.current_value)}</td>

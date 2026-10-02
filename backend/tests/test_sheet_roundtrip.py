@@ -393,3 +393,56 @@ def test_apply_is_idempotent_on_already_applied_diffs(client_as, admin, coverage
     db.expire_all()
     cov = db.query(FormulaRegionCoverage).filter(FormulaRegionCoverage.template_id == coverage_setup["t1"].id).first()
     assert float(cov.base_price) == 150.0
+
+
+# ── Filter binding is per-payload (B5 regression) ────────────────────────────
+
+class _FakeRequest:
+    """Only `query_params` is read by `_bind_filter`; a real Request needs an
+    ASGI scope this test has no reason to build."""
+
+    def __init__(self, params):
+        self.query_params = params
+
+
+def test_each_payload_binds_its_own_filter_fields():
+    """The router used to hardcode the FIRST payload's filter fields and pass
+    them into whatever spec was asked for. Pydantic drops unknown kwargs
+    silently, so `dimension_decision`'s `kind` was always None and every export
+    covered the whole unresolved register regardless of the facet picked —
+    silently wrong data rather than an error.
+
+    Needs no database: it is a pure check that each spec binds from its own
+    `model_fields`.
+    """
+    from app.routers.sheets import _bind_filter
+    from app.services.sheet_roundtrip import PAYLOAD_REGISTRY
+
+    qs = {"kind": "industry", "min_occurrences": "5",
+          "subfamily_id": "7", "needs_review": "true", "bogus": "x"}
+
+    prices = _bind_filter(PAYLOAD_REGISTRY["formula_coverage_price"], _FakeRequest(qs))
+    assert prices.subfamily_id == 7
+    assert prices.needs_review is True
+    assert not hasattr(prices, "kind"), "price filter must not grow a dimension field"
+
+    dims = _bind_filter(PAYLOAD_REGISTRY["dimension_decision"], _FakeRequest(qs))
+    assert dims.kind == "industry", "the facet must actually reach the filter"
+    assert dims.min_occurrences == 5
+    assert not hasattr(dims, "subfamily_id")
+
+
+def test_an_unknown_query_param_is_ignored_but_a_bad_value_is_refused():
+    """A stray param is not an error; a malformed value for a REAL field must
+    not fall back to the default and quietly widen the slice."""
+    import pytest as _pytest
+    from fastapi import HTTPException
+    from app.routers.sheets import _bind_filter
+    from app.services.sheet_roundtrip import PAYLOAD_REGISTRY
+
+    spec = PAYLOAD_REGISTRY["dimension_decision"]
+    assert _bind_filter(spec, _FakeRequest({"nonsense": "1"})).kind is None
+
+    with _pytest.raises(HTTPException) as exc:
+        _bind_filter(spec, _FakeRequest({"min_occurrences": "not-a-number"}))
+    assert exc.value.status_code == 422

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import pathlib
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import text
@@ -852,3 +853,50 @@ def test_the_queue_doubles_as_the_cross_library_coverage_index(db, tenant_a, cli
     finally:
         _cleanup(db, template_ids=[clean_tpl.id, bad_tpl.id],
                  code_ids=[good.id, unbought.id], series_ids=[s_ok.id, s_dry.id])
+
+
+def test_a_signoff_with_no_fingerprint_is_treated_as_stale(db, tenant_a):
+    """M1. A sign-off recorded before `review_fingerprint` existed carries
+    `reviewed_at` and no fingerprint.
+
+    The invalidation check required a non-NULL fingerprint to DIFFER, so those
+    rows could never be invalidated: `signed_off` stayed True forever and
+    `needs_review` was pinned False however the grade later computed. One such
+    row exists in the live catalogue — a combo silently exempt from review for
+    good, which is the opposite of what pinning a sign-off to a line set is for.
+
+    Unknown is treated as stale. The cost is asking a reviewer to confirm once.
+    """
+    s_dry = _series(db)
+    unbought = _code(db, s_dry, resolution="no_series")
+    tpl, cov = _combo(db, created_by=tenant_a["user_id"],
+                      lines=[(100, unbought, "index", False)])
+    try:
+        # The legacy shape: signed off, but nothing recorded about WHAT was signed.
+        cov.reviewed_at = datetime.now(timezone.utc)
+        cov.reviewed_by_id = tenant_a["user_id"]
+        cov.review_fingerprint = None
+        cov.needs_review = False
+        db.commit()
+
+        result = apply_assessment(db, cov)
+        db.commit()
+
+        assert result.sign_off_invalidated is True
+        assert cov.reviewed_at is None, "a sign-off nobody can verify must not stand"
+        assert cov.review_fingerprint is None
+        assert cov.trust_grade == GRADE_BLOCKED
+        assert cov.needs_review is True, (
+            "the combo must return to the queue — it was permanently exempt before"
+        )
+
+        # A sign-off made NOW carries a fingerprint, so it survives a re-grade…
+        sign_off(db, cov, tenant_a["user_id"])
+        db.commit()
+        assert cov.review_fingerprint is not None
+        again = apply_assessment(db, cov)
+        db.commit()
+        assert again.sign_off_invalidated is False
+        assert cov.needs_review is False, "a live, verifiable sign-off still outranks the grade"
+    finally:
+        _cleanup(db, template_ids=[tpl.id], code_ids=[unbought.id], series_ids=[s_dry.id])

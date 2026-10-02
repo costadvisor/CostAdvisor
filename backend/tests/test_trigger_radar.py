@@ -25,6 +25,7 @@ radar **suggests** a negotiation state and never sets it.
 """
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -934,3 +935,118 @@ def test_window_scoped_subscription_rejects_a_scope_it_cannot_use(db, tenant_a, 
         json={"trigger_type": "gap", "supplier_id": sup.id},
     )
     assert r.status_code == 422, r.text
+
+
+def test_contract_terms_never_reach_a_costing_only_role(
+        db, tenant_a, user_factory, client_as):
+    """B2. The radar reaches contract data from the other side.
+
+    `contracts.*` was split out so that "everyone who could run a costing"
+    cannot read notice dates and cadences — but the window endpoints gated on
+    `costing.view`, and three feeds carry contract data:
+
+      clause_deadline  headline, evidence AND driver_key carry the reference,
+                       term end, notice days and deadline
+      gap              evidence.contract_id, and `closes_on` IS the deadline
+      buy_window       `closes_on` IS the deadline
+
+    A clause-deadline window is withheld entirely (redacting leaves a husk that
+    still discloses a contract exists with a deadline in range); the other two
+    are redacted, because the window is about the product.
+    """
+    member = user_factory()
+    db.add(TeamMembership(user_id=member["user_id"], team_id=tenant_a["team_id"],
+                          role="member"))
+    role = Role(team_id=tenant_a["team_id"], name=f"Coster-{uuid.uuid4().hex[:6]}")
+    db.add(role)
+    db.flush()
+    perm = db.query(Permission).filter(Permission.key == "costing.view").one()
+    db.add(RolePermission(role_id=role.id, permission_id=perm.id))
+    db.add(TeamMemberRole(user_id=member["user_id"], team_id=tenant_a["team_id"],
+                          role_id=role.id))
+    db.commit()
+
+    today = date.today()
+    deadline = today + timedelta(days=30)
+    contract = Contract(
+        team_id=tenant_a["team_id"], reference="SECRET-REF-2026",
+        term_start=today - timedelta(days=300), term_end=today + timedelta(days=75),
+        auto_renew=True, notice_days=45, price_review_cadence="quarterly",
+    )
+    contract.notice_deadline = deadline
+    db.add(contract)
+    db.flush()
+
+    clause_win = NegotiationWindow(
+        team_id=tenant_a["team_id"], driver="clause_deadline",
+        driver_key=f"clause_deadline:contract:{contract.id}:{deadline.isoformat()}",
+        scope_type="contract", scope_contract_id=contract.id,
+        headline="supplier contract SECRET-REF-2026 auto-renews on 2026-11-12",
+        opens_on=today, closes_on=deadline, close_basis="clause_deadline",
+        state="open", coverage="covered",
+        evidence={"contract_id": str(contract.id), "reference": "SECRET-REF-2026",
+                  "notice_deadline": deadline.isoformat(), "notice_days": 45,
+                  "price_review_cadence": "quarterly"},
+        opened_at=datetime.now(timezone.utc),
+    )
+    gap_win = NegotiationWindow(
+        team_id=tenant_a["team_id"], driver="gap",
+        driver_key=f"gap:cost_model:{uuid.uuid4()}:2026Q2",
+        scope_type="cost_model", scope_contract_id=contract.id,
+        headline="Widget is 28.0% above should-cost",
+        opens_on=today, closes_on=deadline, close_basis="clause_deadline",
+        state="open", coverage="covered",
+        evidence={"gap_pct": 28.0, "contract_id": str(contract.id)},
+        opened_at=datetime.now(timezone.utc),
+    )
+    db.add_all([clause_win, gap_win])
+    db.commit()
+    ids = [clause_win.id, gap_win.id]
+    try:
+        c = client_as(member)
+        body = c.get(f"/api/radar/windows?team_id={tenant_a['team_id']}").json()
+        mine = {w["id"]: w for w in body}
+
+        assert str(clause_win.id) not in mine, "a contract window must be withheld entirely"
+
+        gap = mine[str(gap_win.id)]
+        assert gap["scope_contract_id"] is None
+        assert gap["closes_on"] is None, "the notice deadline leaked as closes_on"
+        assert gap["closes_in_days"] is None
+        assert gap["close_basis"] == "unknown"
+        blob = json.dumps(gap)
+        assert "SECRET-REF-2026" not in blob
+        assert str(contract.id) not in blob
+        assert "quarterly" not in blob
+
+        # The detail read is gated too, and 404s rather than 403s so the role
+        # cannot probe for a contract window's existence by status code.
+        assert c.get(f"/api/radar/windows/{clause_win.id}").status_code == 404
+        detail = c.get(f"/api/radar/windows/{gap_win.id}")
+        assert detail.status_code == 200
+        assert "contract_id" not in detail.json()["evidence"]
+        assert detail.json()["evidence"]["gap_pct"] == 28.0, "non-contract evidence must survive"
+
+        # Dismissing a contract window takes the contract permission.
+        assert c.post(f"/api/radar/windows/{clause_win.id}/dismiss").status_code == 403
+        # The gap window's dismiss is deliberately NOT asserted here: it gates on
+        # `costing.edit`, which is not a row in `permissions` at all, so no role
+        # can grant it and this member is refused for an unrelated reason. That
+        # is a real pre-existing defect, tracked separately — asserting it here
+        # would tie this contract-leak test to a bug it does not own.
+
+        # An owner (who holds contracts.*) still sees everything.
+        owner = client_as(tenant_a)
+        full = {w["id"]: w for w in
+                owner.get(f"/api/radar/windows?team_id={tenant_a['team_id']}").json()}
+        assert str(clause_win.id) in full
+        assert full[str(clause_win.id)]["closes_on"] == deadline.isoformat()
+        assert full[str(clause_win.id)]["scope_contract_id"] == str(contract.id)
+    finally:
+        db.rollback()
+        bypass_rls_var.set(True)
+        db.query(NegotiationWindow).filter(NegotiationWindow.id.in_(ids)).delete(
+            synchronize_session=False)
+        db.query(Contract).filter(Contract.id == contract.id).delete(
+            synchronize_session=False)
+        db.commit()

@@ -214,13 +214,26 @@ class SubjectLinks:
     subfamily_id: int | None = None
 
 
-def resolve_subject(db: Session, subject_type: str, subject_code: str) -> SubjectLinks:
+def resolve_subject(
+    db: Session, subject_type: str, subject_code: str,
+    cache: dict[tuple[str, str], "SubjectLinks"] | None = None,
+) -> SubjectLinks:
     """Convenience joins, never identity — the same rule as the editorial blocks.
 
     A hard FK on `template_id` would drop the template-less keys at import
     without raising, and nothing downstream could tell that from "never
     asserted".
+
+    `cache` is opt-in and caller-owned (never a module-level global): a bulk
+    loader asserting thousands of rows against a few hundred distinct subjects
+    passes its own dict so repeats are one lookup instead of one query each —
+    safe because these reference tables aren't mutated mid-run. The single-call
+    API route (routers/dimensions.py) omits it and gets the original, always-
+    fresh behavior, so there's no staleness risk there.
     """
+    key = (subject_type, subject_code)
+    if cache is not None and key in cache:
+        return cache[key]
     links = SubjectLinks()
     if subject_type == "formula":
         row = db.query(FormulaTemplate).filter(
@@ -253,6 +266,8 @@ def resolve_subject(db: Session, subject_type: str, subject_code: str) -> Subjec
             if row:
                 links.subfamily_id = row.id
                 links.family_id = row.family_id
+    if cache is not None:
+        cache[key] = links
     return links
 
 
@@ -270,8 +285,13 @@ def assert_term(
     matched_alias: DimensionAlias | None = None,
     source: str = "loader",
     detail: dict | None = None,
+    subject_cache: dict[tuple[str, str], "SubjectLinks"] | None = None,
 ) -> DimensionAssertion:
-    """Idempotent by (scope, term, subject, region-or-wildcard)."""
+    """Idempotent by (scope, term, subject, region-or-wildcard).
+
+    `subject_cache` is passed straight through to resolve_subject — see its
+    docstring. Optional, caller-owned, no effect on the single-call API route.
+    """
     if subject_type not in SUBJECT_TYPES:
         raise HTTPException(422, f"Invalid subject_type. Allowed: {sorted(SUBJECT_TYPES)}")
 
@@ -295,7 +315,7 @@ def assert_term(
         db.flush()
         return existing
 
-    links = resolve_subject(db, subject_type, subject_code)
+    links = resolve_subject(db, subject_type, subject_code, cache=subject_cache)
     row = DimensionAssertion(
         team_id=team_id, term_id=term.id,
         subject_type=subject_type, subject_code=subject_code, region=region,

@@ -8,7 +8,9 @@ from pydantic import BaseModel, Field
 # silently never fires.
 TRIGGER_TYPES = {"index_move", "gap", "buy_window", "negotiation_window"}
 THRESHOLD_UNITS = {"pct", "currency"}
-CHANNELS = {"email", "slack"}
+# `push` is a third value here, not a parallel delivery system — the
+# subscription, the dedup key and the event ledger are all unchanged.
+CHANNELS = {"email", "slack", "push"}
 
 
 class SubscriptionCreate(BaseModel):

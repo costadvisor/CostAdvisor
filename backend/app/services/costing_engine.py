@@ -750,6 +750,7 @@ def calculate_brief(
             destination_country=cost_model.destination_country,
             currency=out_ccy, unit=out_unit,
             current_should_cost=0, current_actual_price=None,
+            current_floor=None,
             gap=None, gap_pct=None, total_impact=None,
             period_label="", evolution=[], narrative="No formula defined.",
             drivers=[],
@@ -777,6 +778,7 @@ def calculate_brief(
         raw_volumes[(av.year, av.quarter)] = float(av.volume)
 
     evo_periods = []
+    last_indexed_cost_raw = None  # pre-margin cost of the final period, for the floor below
     for year, quarter, month, label in periods:
         # Use the current formula for all periods (matches Evolution's default
         # "active" mode) so both pages produce identical theoretical lines.
@@ -789,6 +791,7 @@ def calculate_brief(
             db, period_fv, cost_model, region,
             period_ref_year, period_ref_quarter, year, quarter, period_base_price
         )
+        last_indexed_cost_raw = indexed_cost
         theoretical, _ = _apply_margin(indexed_cost, period_fv.margin_type, period_fv.margin_value, period_base_price)
         actual = actuals.get((year, quarter))
 
@@ -813,6 +816,18 @@ def calculate_brief(
     current_actual = last_period.actual if last_period else None
     current_gap = last_period.gap if last_period else None
     current_gap_pct = last_period.gap_pct if last_period else None
+
+    # The floor is the current period's cost *before* margin — should-cost
+    # already bakes in an assumed acceptable margin, so it's a ceiling of
+    # "fair," not a walk-away number. Converted the same way `theoretical`
+    # is (same FX/unit pipeline), at the same final period.
+    current_floor = None
+    if last_period and last_indexed_cost_raw is not None:
+        floor_y, floor_q = periods[-1][0], periods[-1][1]
+        current_floor = round(_apply_unit(
+            _apply_fx(db, last_indexed_cost_raw, model_ccy, out_ccy, floor_y, floor_q, team_id=cost_model.team_id),
+            model_unit, out_unit,
+        ), 4)
 
     volumes_missing = not bool(raw_volumes)
     total_impact = None
@@ -898,6 +913,7 @@ def calculate_brief(
         currency=out_ccy,
         unit=out_unit,
         current_should_cost=current_sc,
+        current_floor=current_floor,
         current_actual_price=current_actual,
         gap=current_gap,
         gap_pct=current_gap_pct,
@@ -1120,11 +1136,24 @@ def _compute_indexed_cost_detailed(
                 component_label=line.label, period=cur_label,
                 reason="index-linked component has no bound commodity",
             ))
+        elif line.component_type == "model":
+            # Scrum 27 — a nested cost model that could not be expanded. It
+            # keeps its weight (dropping it would silently rescale every other
+            # line) but rides flat, and the reason is reported rather than
+            # letting it pass for a fixed cost.
+            has_data = False
+            ratio = 1.0
+            data_gaps.append(DataGap(
+                component_label=line.label, period=cur_label,
+                reason=line.unresolved_reason or "sub-model could not be resolved",
+            ))
         else:
             ratio = 1.0
         contribution = comp_base * weight * ratio
         indexed_cost += contribution
         components.append(ComponentBreakdown(
+            via_cost_model_id=line.via_cost_model_id,
+            via_cost_model_name=line.via_cost_model_name,
             label=line.label,
             commodity_id=line.commodity_id,
             commodity_name=line.commodity_name,

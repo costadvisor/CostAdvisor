@@ -23,8 +23,13 @@ import QuoteExtraction from './pages/QuoteExtraction';
 import Contracts from './pages/Contracts';
 import Curation from './pages/Curation';
 import Support from './pages/Support';
+import SupportConsole from './pages/SupportConsole';
 import Scenarios from './pages/Scenarios';
 import Dimensions from './pages/Dimensions';
+import Validation from './pages/Validation';
+import PriceListImport from './pages/PriceListImport';
+import IndexSourcing from './pages/IndexSourcing';
+import AiCostModeler from './pages/AiCostModeler';
 import Team from './pages/Team';
 import Privacy from './pages/Privacy';
 import Profile from './pages/Profile';
@@ -37,8 +42,10 @@ import MonitorArea from './pages/workspace/MonitorArea';
 import ForecastArea from './pages/workspace/ForecastArea';
 import NegotiateArea from './pages/workspace/NegotiateArea';
 import NegotiateDetailArea from './pages/workspace/NegotiateDetailArea';
+import NegotiationPrepArea from './pages/workspace/NegotiationPrepArea';
 import IntelligenceArea from './pages/workspace/IntelligenceArea';
 import IntelligenceComboArea from './pages/workspace/IntelligenceComboArea';
+import WhatsLeft from './pages/WhatsLeft';
 import { useAuth } from './AuthContext';
 
 export default function App() {
@@ -75,8 +82,16 @@ export default function App() {
             <Route path="/contracts" element={<Contracts />} />
             <Route path="/curation" element={<Curation />} />
             <Route path="/support" element={<Support />} />
+            {/* Its own route, not a tab inside /admin: that page is
+                super-admin-only and every other tab on it calls
+                super-admin endpoints. See pages/SupportConsole.jsx. */}
+            <Route path="/support-console" element={<SupportConsole />} />
             <Route path="/scenarios" element={<Scenarios />} />
             <Route path="/dimensions" element={<Dimensions />} />
+            <Route path="/validation" element={<Validation />} />
+            <Route path="/price-lists" element={<PriceListImport />} />
+            <Route path="/index-sourcing" element={<IndexSourcing />} />
+            <Route path="/ai-cost-modeler" element={<AiCostModeler />} />
             <Route path="/fx-rates" element={<Navigate to="/index-library" replace />} />
             <Route path="/index-library" element={<IndexLibraryArea />} />
             <Route path="/portfolio" element={<PortfolioArea />} />
@@ -84,12 +99,17 @@ export default function App() {
             <Route path="/monitor" element={<MonitorArea />} />
             <Route path="/forecast" element={<ForecastArea />} />
             <Route path="/negotiate" element={<NegotiateArea />} />
+            <Route path="/negotiate/:costModelId/prep" element={<NegotiationPrepArea />} />
             <Route path="/negotiate/:costModelId" element={<NegotiateDetailArea />} />
             <Route path="/intelligence" element={<IntelligenceArea />} />
             {/* Combo grain is the library's own; the cost-model route resolves a
                 product to the same combo and reports how it got there. */}
             <Route path="/intelligence/combo/:templateId/:region" element={<IntelligenceComboArea />} />
             <Route path="/intelligence/:costModelId" element={<IntelligenceComboArea />} />
+
+            {/* Was the index of six clickable mockups; all six are built, so it
+                now lists only what no coding session can close. */}
+            <Route path="/preview" element={<WhatsLeft />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

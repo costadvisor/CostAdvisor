@@ -151,7 +151,7 @@ def test_a_series_that_loses_its_history_loses_its_profile(db):
 def test_a_month_with_no_interior_observation_blocks_the_fit(db):
     """Filling a missing month with 100 would have the profile claim a flat
     month it never measured."""
-    # 30 points but only 11 distinct calendar months in the interior window.
+    # 33 points but only 11 distinct calendar months in the interior window.
     points = [(2022, m, 100.0) for m in range(1, 12)] * 3
     assert compute_factors(points) is None
 

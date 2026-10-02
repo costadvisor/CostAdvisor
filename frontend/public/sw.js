@@ -62,3 +62,52 @@ self.addEventListener('fetch', (event) => {
 
   // Everything else (HTML shell, /api, /auth) -- untouched, straight to network.
 });
+
+// ── Web push ──────────────────────────────────────────────────────────────
+// The payload is {title, body, url}, sent by services/push.py. `url` is what
+// makes a notification worth tapping: an alert about one product should open
+// that product, not the dashboard and a search.
+
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    // A relay can deliver an empty or non-JSON push (some browsers send one
+    // to verify a subscription). Showing something generic is better than
+    // throwing inside the handler, which some browsers punish by dropping
+    // the subscription.
+    payload = {};
+  }
+  const title = payload.title || 'CostAdvisor';
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: payload.body || '',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      // Collapses repeats of the same alert on the device rather than
+      // stacking them, matching the dedup the alert ledger already does
+      // server-side.
+      tag: payload.tag || payload.url || 'costadvisor',
+      data: { url: payload.url || '/' },
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      // Focus an already-open tab rather than opening a second one — an app
+      // that spawns a new window per notification is quickly unusable.
+      for (const client of clients) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          client.navigate(target);
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(target);
+    }),
+  );
+});

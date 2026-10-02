@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import PushNotifications from '../components/PushNotifications';
 import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { THEMES } from '../utils/theme';
@@ -142,6 +143,8 @@ export default function Profile() {
           ))}
         </div>
       </div>
+
+      <div style={{ marginBottom: 20 }}><PushNotifications /></div>
 
       <div className="ca-card" style={{ borderColor: 'var(--danger-bg-strong)' }}>
         <div className="ca-card-title" style={{ color: 'var(--accent2)' }}>Delete account</div>

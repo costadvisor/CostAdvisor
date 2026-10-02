@@ -341,6 +341,10 @@ class ComboDiagnosis:
     template_id: uuid.UUID
     template_code: str | None
     region: str
+    # Which recipe was diagnosed. A (template, region) can carry several — the
+    # catalog retarget keys combos on (formula, region, variant) precisely
+    # because some templates ship two recipes for one region.
+    variant: str
     coverage_exists: bool
     priceable: bool
     reason: str | None = None
@@ -350,7 +354,8 @@ class ComboDiagnosis:
     type_coded_lines: int = 0
 
 
-def diagnose_combo(db: Session, template_id: uuid.UUID, region: str) -> ComboDiagnosis:
+def diagnose_combo(db: Session, template_id: uuid.UUID, region: str,
+                   variant: str = "") -> ComboDiagnosis:
     """Name the specific lines blocking a combo, and the specific reason each.
 
     Reads the line -> type code -> series chain, so a reason is one of: the
@@ -362,6 +367,14 @@ def diagnose_combo(db: Session, template_id: uuid.UUID, region: str) -> ComboDia
     Lines with no type-code link are reported separately rather than counted
     as healthy — that link arrives with the catalog retarget, and until then
     an empty blocker list means "not yet analysable", not "all fine".
+
+    **Scoped to one `variant`.** A (template, region) pair can carry several
+    recipes — bentonite activated vs natural, talc treated vs untreated — which
+    is why `formula_template_components.variant` exists and why combos are keyed
+    on (formula, region, variant). Pooling them produced arithmetic that cannot
+    be true: the live bentonite combo at NA reported 148% blocked weight against
+    a recipe whose own invariant is that weights close at 100. The default `""`
+    is the unvaried recipe, which is what all single-variant templates carry.
     """
     template = db.query(FormulaTemplate).filter(FormulaTemplate.id == template_id).first()
     coverage = (
@@ -369,7 +382,12 @@ def diagnose_combo(db: Session, template_id: uuid.UUID, region: str) -> ComboDia
         .filter(
             FormulaRegionCoverage.template_id == template_id,
             FormulaRegionCoverage.region == region,
+            FormulaRegionCoverage.variant == variant,
         )
+        # Ordered because `.first()` over a non-unique key is otherwise whatever
+        # Postgres happens to return; with the variant filter this is a single
+        # row, and the ordering keeps it that way if the key ever widens again.
+        .order_by(FormulaRegionCoverage.variant)
         .first()
     )
 
@@ -377,6 +395,7 @@ def diagnose_combo(db: Session, template_id: uuid.UUID, region: str) -> ComboDia
         template_id=template_id,
         template_code=template.code if template else None,
         region=region,
+        variant=variant,
         coverage_exists=coverage is not None,
         priceable=False,
     )
@@ -384,7 +403,10 @@ def diagnose_combo(db: Session, template_id: uuid.UUID, region: str) -> ComboDia
         diagnosis.reason = "formula template not found"
         return diagnosis
     if coverage is None:
-        diagnosis.reason = f"no coverage row for region {region!r}"
+        diagnosis.reason = (
+            f"no coverage row for region {region!r}"
+            + (f" variant {variant!r}" if variant else "")
+        )
         return diagnosis
 
     # Region-specific lines, falling back to the template-level (region-NULL)
@@ -394,16 +416,20 @@ def diagnose_combo(db: Session, template_id: uuid.UUID, region: str) -> ComboDia
         .filter(
             FormulaTemplateComponent.template_id == template_id,
             FormulaTemplateComponent.region == region,
+            FormulaTemplateComponent.variant == variant,
         )
         .order_by(FormulaTemplateComponent.sort_order)
         .all()
     )
     if not lines:
+        # The template-level set is authored through the API, which does not
+        # carry variants — so it is always the unvaried recipe.
         lines = (
             db.query(FormulaTemplateComponent)
             .filter(
                 FormulaTemplateComponent.template_id == template_id,
                 FormulaTemplateComponent.region.is_(None),
+                FormulaTemplateComponent.variant == "",
             )
             .order_by(FormulaTemplateComponent.sort_order)
             .all()

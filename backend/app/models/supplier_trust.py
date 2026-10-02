@@ -46,6 +46,20 @@ class SupplierTrustScore(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
+    @property
+    def resolution(self) -> str:
+        """How this score was reached: `producer` when it was computed over
+        every supplier row in the team naming the same canonical company,
+        `raw_supplier_name` when it was not.
+
+        A property rather than a column: the value is already recorded in
+        `inputs` beside the numbers it explains, and a column would create a
+        second answer that can disagree with it. Pydantic reads it through
+        `from_attributes`, and the default covers rows written before the
+        producer re-point.
+        """
+        return (self.inputs or {}).get("resolution", "raw_supplier_name")
+
     supplier = relationship("Supplier")
     product = relationship("Product")
     subfamily = relationship("Subfamily")

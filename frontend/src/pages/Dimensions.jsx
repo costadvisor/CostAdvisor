@@ -266,12 +266,23 @@ function Explorer({ teamId }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {hits.map((h, i) => (
+                    {hits.map((h, i) => {
+                      const openHit = grain === 'team' && h.cost_model_id
+                        ? () => navigate(`/portfolio/${h.cost_model_id}`)
+                        : null;
+                      return (
+                      /* Only a team hit with a cost model actually goes
+                         anywhere, so the row advertises itself as a control
+                         only when it is one — a tab stop that does nothing is
+                         worse than no tab stop. */
                       <tr key={i}
-                        onClick={() => {
-                          if (grain === 'team' && h.cost_model_id) navigate(`/portfolio/${h.cost_model_id}`);
-                        }}
-                        style={{ cursor: grain === 'team' && h.cost_model_id ? 'pointer' : 'default' }}>
+                        onClick={openHit}
+                        tabIndex={openHit ? 0 : undefined}
+                        role={openHit ? 'button' : undefined}
+                        onKeyDown={openHit ? (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openHit(); }
+                        } : undefined}
+                        style={{ cursor: openHit ? 'pointer' : 'default' }}>
                         <td>
                           {grain === 'team' ? (h.product_name || '—')
                             : (h.template_name || h.subject_code)}
@@ -328,7 +339,8 @@ function Explorer({ teamId }) {
                           </span>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

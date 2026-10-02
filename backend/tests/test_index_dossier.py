@@ -27,8 +27,8 @@ from sqlalchemy import text
 from app.database import bypass_rls_var
 from app.models.index_data import CommodityIndex
 from app.models.index_dossier import (
-    IndexDossier, IndexDriver, IndexProducerRole, VolatilityCalibration,
-    normalize_signal,
+    IndexDossier, IndexDriver, IndexProducerRole, VolatilityBreakpoint,
+    VolatilityCalibration, normalize_signal,
 )
 from app.models.index_layer import IndexMonthlyValue
 from app.services.drop.dossier_loader import (
@@ -41,6 +41,7 @@ from app.services.index_dossier import (
     percentile_for, recompute_volatility_calibration, series_dispersion,
     volatility_percentile,
 )
+from app.services.calibration_purge import purge
 from app.services.producers import resolve_raw_name
 
 DROP_RAW = (pathlib.Path(__file__).resolve().parents[2]
@@ -81,6 +82,50 @@ def _cleanup(db, *, series_ids=(), calibration_ids=(), producer_ids=()):
         db.execute(text("DELETE FROM commodity_indexes WHERE id = :i"), {"i": sid})
     for pid in producer_ids:
         db.execute(text("DELETE FROM producers WHERE id = :i"), {"i": str(pid)})
+    db.commit()
+
+
+@pytest.fixture(autouse=True)
+def _restore_active_calibration(db):
+    """Put the active volatility ladder back after every test in this module.
+
+    `recompute_volatility_calibration` deactivates whatever is active and commits
+    a new active row — that is the behaviour under test. But `_cleanup` here
+    commits rather than rolling back, and although it has always accepted a
+    `calibration_ids` kwarg, **not one test ever passed it**. Six tests recompute.
+
+    While the suite shared the app's database that left the real, product-facing
+    `active_calibration()` pointing at a ladder fitted to four synthetic series
+    at 11 rungs against a production default of 21 — so every percentile the app
+    served came from test fixtures, and 150 junk rows accumulated. The separate
+    test database (conftest) stops that reaching production, but the
+    contamination is still real *inside* a run: `test_intelligence` reads
+    `active_calibration()` and would otherwise pick up whichever ladder this
+    module happened to leave behind.
+
+    An autouse fixture rather than six `calibration_ids=[...]` arguments, because
+    the seventh recomputing test would have to remember, and the first six did
+    not.
+    """
+    bypass_rls_var.set(True)
+    prior_active = db.execute(text(
+        "SELECT id FROM volatility_calibrations WHERE is_active")).scalar()
+    before = {r[0] for r in db.execute(text("SELECT id FROM volatility_calibrations"))}
+    yield
+    db.rollback()
+    bypass_rls_var.set(True)
+    after = {r[0] for r in db.execute(text("SELECT id FROM volatility_calibrations"))}
+    created = after - before
+    for cid in created:
+        db.execute(text("DELETE FROM volatility_breakpoints WHERE calibration_id = :i"),
+                   {"i": str(cid)})
+        db.execute(text("DELETE FROM volatility_calibrations WHERE id = :i"),
+                   {"i": str(cid)})
+    # Reactivate only after the replacements are gone — a partial unique index
+    # allows exactly one active row.
+    if prior_active is not None:
+        db.execute(text("UPDATE volatility_calibrations SET is_active = true WHERE id = :i"),
+                   {"i": str(prior_active)})
     db.commit()
 
 
@@ -569,3 +614,108 @@ def test_a_shared_series_conflict_is_reported_not_overwritten(db, _dossiers_load
     # And the specific dossier wins over a generic one that merely fans out:
     # `electricity` fans to elec-*, so it loses those slots to elec-cn / elec-eu.
     assert "elec-cn" not in losers and "elec-eu" not in losers
+
+
+def test_recomputing_does_not_leak_the_active_ladder_to_other_tests(db):
+    """The guard on the guard: a recompute really does replace the active row,
+    and the autouse fixture really does put the prior one back.
+
+    Without the restore, `test_intelligence`'s volatility percentile would be
+    read against whichever synthetic ladder this module last committed — which
+    is exactly what happened in production data before the test database landed.
+    """
+    bypass_rls_var.set(True)
+    prior = db.execute(text(
+        "SELECT id FROM volatility_calibrations WHERE is_active")).scalar()
+
+    fresh = recompute_volatility_calibration(db, n_rungs=11, min_points=13)
+    db.commit()
+    now_active = db.execute(text(
+        "SELECT id FROM volatility_calibrations WHERE is_active")).scalar()
+    assert now_active == fresh.id, "a recompute must take over the active slot"
+    if prior is not None:
+        assert now_active != prior
+    # The fixture restores `prior` on teardown; the next test in this module
+    # asserting against the ladder proves it.
+
+
+# ── The purge of test-written calibrations (D2) ─────────────────────────────
+#
+# Before T0.1 the suite ran against the application database, so every test
+# calling `recompute_volatility_calibration` committed a real vintage fitted
+# over the live library *plus* that test's synthetic series. `purge` is the
+# one-off cleanup; these pin the predicate, because the cost of getting it
+# wrong is deleting a real vintage.
+#
+# `purge` is table-wide by design, so these assert about the rows they create
+# rather than about totals.
+
+def _calibration(db, *, n_series, n_rungs=21, note=None, active=False, rungs=2):
+    cal = VolatilityCalibration(
+        method="mom_pct_stdev", n_rungs=n_rungs, n_series=n_series,
+        min_points=13, is_active=active, note=note)
+    db.add(cal)
+    db.flush()
+    for rung in range(rungs):
+        db.add(VolatilityBreakpoint(
+            calibration_id=cal.id, rung=rung, dispersion=1.0 + rung))
+    db.commit()
+    return cal
+
+
+def test_the_purge_never_touches_the_active_calibration(db):
+    """Whatever else is true of it. `percentile_for` reads only the active row,
+    which is what makes the purge unobservable to every consumer — and that
+    holds only if the active row is categorically exempt."""
+    reference = active_calibration(db).n_series
+    # Deliberately contaminated-looking: no note, a surplus series count.
+    doomed = _calibration(db, n_series=reference + 5, note=None)
+    report = purge(db, apply=False)
+    assert doomed.id in {c.id for c in db.query(VolatilityCalibration)
+                         .filter(VolatilityCalibration.is_active.is_(False))}
+    assert report.n_deleted >= 1
+    # The active row is in `kept`, never in the deletion set.
+    assert any("ACTIVE" in line for line in report.kept)
+
+
+def test_an_authored_calibration_is_kept_however_it_was_fitted(db):
+    """`seed_dossiers` stamps its own note and the rebuilt active row explains
+    itself. A note is the record of who made it, so it is never junk."""
+    reference = active_calibration(db).n_series
+    kept = _calibration(db, n_series=reference + 5, note="seed_dossiers")
+    purge(db, apply=True)
+    assert db.query(VolatilityCalibration).filter(
+        VolatilityCalibration.id == kept.id).first() is not None
+
+
+def test_an_older_smaller_vintage_is_kept(db):
+    """Fewer series than today is what a vintage *is* — the library grew. Only
+    an impossible surplus proves synthetic rows were present, which is why the
+    predicate is `>` and not `!=`."""
+    reference = active_calibration(db).n_series
+    older = _calibration(db, n_series=max(reference - 10, 1), note=None)
+    purge(db, apply=True)
+    assert db.query(VolatilityCalibration).filter(
+        VolatilityCalibration.id == older.id).first() is not None
+
+
+def test_a_contaminated_calibration_goes_with_its_breakpoints(db):
+    reference = active_calibration(db).n_series
+    doomed = _calibration(db, n_series=reference + 3, note=None, rungs=4)
+    purge(db, apply=True)
+    assert db.query(VolatilityCalibration).filter(
+        VolatilityCalibration.id == doomed.id).first() is None
+    assert db.query(VolatilityBreakpoint).filter(
+        VolatilityBreakpoint.calibration_id == doomed.id).count() == 0
+
+
+def test_the_dry_run_writes_nothing(db):
+    """The dry path is the real path with the transaction rolled back, so a
+    report is a rehearsal rather than a separate code path that could drift."""
+    reference = active_calibration(db).n_series
+    doomed = _calibration(db, n_series=reference + 2, note=None)
+    report = purge(db, apply=False)
+    db.rollback()
+    assert report.n_deleted >= 1
+    assert db.query(VolatilityCalibration).filter(
+        VolatilityCalibration.id == doomed.id).first() is not None

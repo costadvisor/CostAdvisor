@@ -35,7 +35,9 @@ from app.models.cost_model import CostModel, FormulaVersion
 from app.models.formula_template import (
     FormulaRegionCoverage, FormulaTemplate, FormulaTemplateComponent,
 )
-from app.models.index_data import CommodityIndex, IndexValue
+from app.models.index_data import (
+    CommodityIndex, IndexOverride, IndexValue, TeamIndexSource,
+)
 from app.models.index_layer import IndexMonthlyValue
 from app.models.index_seasonality import IndexSeasonalFactor
 from app.models.product import Product
@@ -132,7 +134,8 @@ def _cleanup(db, *, template_ids=(), series_ids=(), product_ids=(),
     for tid in template_ids:
         db.execute(text("DELETE FROM formula_templates WHERE id = :i"), {"i": str(tid)})
     for sid in series_ids:
-        for table in ("index_seasonal_factors", "index_monthly_values", "index_values"):
+        for table in ("index_seasonal_factors", "index_monthly_values",
+                      "index_values", "index_overrides", "team_index_sources"):
             db.execute(text(f"DELETE FROM {table} WHERE commodity_id = :i"), {"i": sid})
         db.execute(text("DELETE FROM commodity_indexes WHERE id = :i"), {"i": sid})
     db.commit()
@@ -184,6 +187,138 @@ def test_the_fast_path_agrees_with_the_canonical_single_period_evaluator(db, ten
         _cleanup(db, template_ids=[tpl.id], series_ids=[s.id])
 
 
+def test_a_team_override_is_applied_not_merely_disclosed(db, tenant_a):
+    """`derive` took a `team_id` and ignored it, reading the platform series in
+    bulk and seeing none of the tiers `data_resolver` consults first. The claim
+    was withdrawn where that bit (D1); this applies the tier instead.
+    """
+    s = _series(db, quarterly=_quarters(BASE, [100, 120]))
+    tpl, cov = _combo(db, tenant_a["user_id"], lines=[(100, s, "index")])
+    try:
+        db.add(IndexOverride(
+            team_id=tenant_a["team_id"], commodity_id=s.id, region="Europe",
+            year=2024, quarter=2, value=999, uploaded_by=tenant_a["user_id"]))
+        db.commit()
+
+        result = derive(db, tpl.id, "Europe", team_id=tenant_a["team_id"])
+        # 999 over a base of 100 — the override, not the scraped 120.
+        assert result.series[-1]["level"] == pytest.approx(999.0)
+        assert result.components[0]["value_source"] == "team_override"
+        assert result.value_sources["matches_costing_engine"] is True
+        assert result.value_sources["divergences"] == []
+
+        # And it is the number the costing engine would return, asserted
+        # against the resolver rather than merely claimed.
+        from app.services.data_resolver import get_single_index_value_detailed
+        value, source = get_single_index_value_detailed(
+            db, tenant_a["team_id"], s.id, "Europe", 2024, 2)
+        assert source == "team_override" and value == 999
+
+        # Without a team, the platform series still wins — the tier is the
+        # team's, not a global rewrite.
+        assert derive(db, tpl.id, "Europe").series[-1]["level"] == pytest.approx(120.0)
+    finally:
+        _cleanup(db, template_ids=[tpl.id], series_ids=[s.id])
+
+
+def test_a_null_override_is_a_deliberate_blank_not_a_miss(db, tenant_a):
+    """`data_resolver` treats a null override as the team saying their source
+    does not cover that period, and resolves to nothing rather than falling
+    through to the scraped value. Restoring the scraped number here would put
+    back a value the team removed."""
+    s = _series(db, quarterly=_quarters(BASE, [100, 120]))
+    tpl, cov = _combo(db, tenant_a["user_id"], lines=[(100, s, "index")])
+    try:
+        db.add(IndexOverride(
+            team_id=tenant_a["team_id"], commodity_id=s.id, region="Europe",
+            year=2024, quarter=2, value=None, uploaded_by=tenant_a["user_id"]))
+        db.commit()
+        result = derive(db, tpl.id, "Europe", team_id=tenant_a["team_id"])
+        # Q2 has no value at all now, so the window ends at the base period
+        # rather than reporting a gap — there is no period asking for a number
+        # that is missing.
+        assert [p["level"] for p in result.series] == [pytest.approx(100.0)]
+        # The scraped 120 must not reappear anywhere: that is the value the
+        # team deliberately blanked.
+        assert all(p["level"] == pytest.approx(100.0) for p in result.series)
+
+        # Without the team, the same combo still sees the scraped Q2.
+        assert derive(db, tpl.id, "Europe").series[-1]["level"] == pytest.approx(120.0)
+    finally:
+        _cleanup(db, template_ids=[tpl.id], series_ids=[s.id])
+
+
+def test_a_team_fixed_source_is_applied(db, tenant_a):
+    """The other team tier: a fixed value pinned for this commodity and region
+    outranks the series for every period, not just one."""
+    s = _series(db, quarterly=_quarters(BASE, [100, 120]))
+    tpl, cov = _combo(db, tenant_a["user_id"], lines=[(100, s, "index")])
+    try:
+        db.add(TeamIndexSource(
+            team_id=tenant_a["team_id"], commodity_id=s.id, region="Europe",
+            source_type="fixed", fixed_value=42,
+            created_by=tenant_a["user_id"]))
+        db.commit()
+        result = derive(db, tpl.id, "Europe", team_id=tenant_a["team_id"])
+        assert result.components[0]["value_source"] == "fixed"
+        # Fixed across every period, so base and current are the same number
+        # and the level is flat at 100 — not the scraped +20%.
+        assert result.components[0]["base_value"] == pytest.approx(42.0)
+        assert result.components[0]["current_value"] == pytest.approx(42.0)
+        assert result.series[-1]["level"] == pytest.approx(100.0)
+        assert result.value_sources["matches_costing_engine"] is True
+    finally:
+        _cleanup(db, template_ids=[tpl.id], series_ids=[s.id])
+
+
+def test_a_composite_is_computed_from_its_components(db, tenant_a):
+    """A composite is computed live for every caller, so this one was never a
+    tenancy question — it diverged with no team in play at all."""
+    base = _series(db, quarterly=_quarters(BASE, [100, 120]))
+    comp = _series(db)
+    comp.composite_expression = "X * 2"
+    comp.composite_variables = {"X": {"type": "index", "commodity_id": base.id}}
+    db.commit()
+    tpl, cov = _combo(db, tenant_a["user_id"], lines=[(100, comp, "index")])
+    try:
+        result = derive(db, tpl.id, "Europe")
+        assert result.components[0]["value_source"] == "composite"
+        assert result.components[0]["base_value"] == pytest.approx(200.0)
+        assert result.components[0]["current_value"] == pytest.approx(240.0)
+        assert result.series[-1]["level"] == pytest.approx(120.0)
+        assert result.value_sources["matches_costing_engine"] is True
+    finally:
+        _cleanup(db, template_ids=[tpl.id], series_ids=[comp.id, base.id])
+
+
+def test_a_nested_composite_is_reported_rather_than_half_computed(db, tenant_a):
+    """The overlay expands one level of components into the bulk fetch;
+    recursing would cost a round per level and the flat-in-periods budget is the
+    point of this engine. No composite in the library nests today, so this
+    guards against a future one being silently computed from a component that
+    never resolved."""
+    base = _series(db, quarterly=_quarters(BASE, [100, 120]))
+    inner = _series(db)
+    inner.composite_expression = "X"
+    inner.composite_variables = {"X": {"type": "index", "commodity_id": base.id}}
+    outer = _series(db)
+    outer.composite_expression = "Y"
+    outer.composite_variables = {"Y": {"type": "index", "commodity_id": inner.id}}
+    db.commit()
+    tpl, cov = _combo(db, tenant_a["user_id"], lines=[(100, outer, "index")])
+    try:
+        result = derive(db, tpl.id, "Europe")
+        assert result.value_sources["matches_costing_engine"] is False
+        [div] = result.value_sources["divergences"]
+        assert "another composite" in div["reason"]
+        # The unusable series is the one the cost line references, not its
+        # component — that is what somebody has to go and look at.
+        assert div["commodity_ids"] == [outer.id]
+    finally:
+        _cleanup(db, template_ids=[tpl.id],
+                 series_ids=[outer.id, inner.id, base.id])
+
+
 def test_margin_inside_the_hundred_is_not_applied_twice(db, tenant_a):
     """`coverage.margin_pct` is descriptive — the margin line is already inside
     the recipe, and applying the percentage again would double-count it."""
@@ -222,7 +357,7 @@ def test_the_drops_monthly_series_is_visible_and_the_store_is_named(db, tenant_a
         assert result.value_sources["by_store"]["index_monthly_values"] == 1
         # No longer a divergence: the costing engine reads this store too.
         assert result.value_sources["matches_costing_engine"] is True
-        assert "the two agree" in result.value_sources["note"]
+        assert "quarter-mean of actual months" in result.value_sources["note"]
 
         # And the two really do agree, rather than merely claiming to — the
         # resolver is asked directly for the same period the combo evaluated.
@@ -614,6 +749,62 @@ def test_an_unknown_template_is_404_not_an_empty_payload(db, tenant_a, client_as
         f"/api/intelligence/combos/{uuid.uuid4()}/Europe"
         f"?team_id={tenant_a['team_id']}")
     assert r.status_code == 404
+
+
+def test_the_team_tiers_do_not_scale_with_the_window_either(db, tenant_a):
+    """The constraint that shaped how the tiers are applied.
+
+    Calling `data_resolver` per lookup would have been the obvious way to make
+    Intelligence agree with the costing engine — and it would have cost one
+    query per (line, period), which is exactly the design this engine exists to
+    avoid. The tiers are fetched in bulk instead, so a team read is a fixed
+    number of extra queries, not a per-period one.
+    """
+    from sqlalchemy import event
+
+    short = _series(db, quarterly=_quarters(BASE, [100, 110]))
+    long = _series(db, quarterly=_quarters(BASE, [100 + i for i in range(12)]))
+    short_tpl, _ = _combo(db, tenant_a["user_id"], lines=[(100, short, "index")])
+    long_tpl, _ = _combo(db, tenant_a["user_id"], lines=[(100, long, "index")])
+    # A real override on each, so the overlay is actually doing work.
+    for series in (short, long):
+        db.add(IndexOverride(
+            team_id=tenant_a["team_id"], commodity_id=series.id, region="Europe",
+            year=2024, quarter=2, value=105, uploaded_by=tenant_a["user_id"]))
+    db.commit()
+
+    def count(fn):
+        calls = []
+        engine = db.get_bind()
+
+        def before(conn, cursor, statement, params, context, many):
+            calls.append(statement)
+
+        event.listen(engine, "before_cursor_execute", before)
+        try:
+            fn()
+        finally:
+            event.remove(engine, "before_cursor_execute", before)
+        return len(calls)
+
+    team = tenant_a["team_id"]
+    try:
+        db.expire_all()
+        derive(db, short_tpl.id, "Europe", team_id=team)
+        db.expire_all()
+        n_short = count(lambda: derive(db, short_tpl.id, "Europe", team_id=team))
+        db.expire_all()
+        derive(db, long_tpl.id, "Europe", team_id=team)
+        db.expire_all()
+        n_long = count(lambda: derive(db, long_tpl.id, "Europe", team_id=team))
+
+        assert n_long == n_short, (
+            f"{n_short} queries for 2 periods vs {n_long} for 12 with a team — "
+            "the tier overlay is scaling with the window"
+        )
+    finally:
+        _cleanup(db, template_ids=[short_tpl.id, long_tpl.id],
+                 series_ids=[short.id, long.id])
 
 
 def test_the_query_budget_does_not_grow_with_the_number_of_periods(db, tenant_a):

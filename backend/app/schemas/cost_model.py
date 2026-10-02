@@ -54,10 +54,13 @@ class FormulaComponentItem(BaseModel):
     # the exact-case-sensitive-name-match fragility at the root (Scrum 28b).
     commodity_id: int | None = None
     weight: float
-    # "index" | "fixed" | None — server infers from commodity_name/commodity_id
-    # presence when not supplied (see cost_models.py), so existing callers
-    # that never send this keep behaving exactly as before.
-    component_type: Literal['index', 'fixed'] | None = None
+    # "index" | "fixed" | "model" | None — server infers from whichever intent
+    # signal is present when not supplied (see cost_models.py), so existing
+    # callers that never send this keep behaving exactly as before.
+    component_type: Literal['index', 'fixed', 'model'] | None = None
+    # Scrum 27 — this line IS another cost model. Its lines fold into this one
+    # with their weights multiplied; the child's own base price is not used.
+    child_cost_model_id: uuid.UUID | None = None
     depth: int | None = None
     via_template_id: uuid.UUID | None = None
     line_region: str | None = None
@@ -169,6 +172,10 @@ class FormulaComponentOut(BaseModel):
     is_proxy: bool | None = None
 
     model_config = {"from_attributes": True}
+    # Scrum 27 — the nested cost model this line resolves to, and its product
+    # name for display, so a breakdown can say what a sub-model actually is.
+    child_cost_model_id: uuid.UUID | None = None
+    child_cost_model_name: str | None = None
 
 
 class FormulaVersionOut(BaseModel):

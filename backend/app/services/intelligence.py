@@ -62,7 +62,10 @@ from sqlalchemy.orm import Session
 
 from app.constants.trust import GRADE_CAVEATS, GRADE_UNRATED
 from app.models.formula_template import FormulaRegionCoverage, FormulaTemplate
-from app.models.index_data import CommodityIndex, IndexValue
+from app.services.costing_engine import safe_eval_expr
+from app.models.index_data import (
+    CommodityIndex, IndexOverride, IndexValue, TeamIndexSource,
+)
 from app.models.index_layer import IndexMonthlyValue
 from app.models.index_seasonality import IndexSeasonalFactor
 from app.services.formula_resolver import (
@@ -131,22 +134,161 @@ def cycle_verdict(percentile: float | None, spread: float) -> tuple[str, str]:
 
 # ── Bulk history reads ───────────────────────────────────────────────────────
 
+def _composite_rows(db: Session, commodity_ids: set[int]) -> dict[int, CommodityIndex]:
+    """The composite series among these commodities, if any.
+
+    A composite is computed live from other series for every caller, so it is
+    the one tier here that has nothing to do with tenancy — it diverged even
+    with no team in play.
+    """
+    if not commodity_ids:
+        return {}
+    return {
+        c.id: c
+        for c in db.query(CommodityIndex).filter(
+            CommodityIndex.id.in_(commodity_ids),
+            CommodityIndex.composite_expression.isnot(None),
+        ).all()
+    }
+
+
+def _composite_component_ids(composites: dict[int, CommodityIndex]) -> set[int]:
+    """The series a composite reads, so the bulk fetch can cover them too.
+
+    One level only, deliberately. `data_resolver.compute_composite_value`
+    recurses with a cycle guard, but recursing here would mean a second bulk
+    round per level and the flat-in-periods budget is the whole reason this
+    engine exists. No composite in the library nests today (measured: 0), and a
+    nested one is reported as an unresolved divergence rather than silently
+    half-computed.
+    """
+    out: set[int] = set()
+    for ci in composites.values():
+        for var in (ci.composite_variables or {}).values():
+            if isinstance(var, dict) and var.get("type") == "index":
+                cid = var.get("commodity_id")
+                if cid:
+                    out.add(int(cid))
+    return out
+
+
+def _evaluate_composite(
+    ci: CommodityIndex,
+    history: dict[int, dict[tuple[int, int], float]],
+    period: tuple[int, int],
+) -> float | None:
+    """One composite's value at one period, from series already in memory.
+
+    Mirrors `compute_composite_value`'s contract in the way that matters: a
+    missing component yields **None**, never a fabricated 0. A composite whose
+    inputs are not all present simply has no value that period, which is what
+    the costing engine does too.
+    """
+    variables: dict[str, float] = {}
+    for name, var in (ci.composite_variables or {}).items():
+        if not isinstance(var, dict):
+            return None
+        if var.get("type") == "fixed":
+            value = var.get("value")
+            if value is None:
+                return None
+            variables[name] = float(value)
+            continue
+        cid = var.get("commodity_id")
+        value = history.get(int(cid), {}).get(period) if cid else None
+        if value is None:
+            return None
+        variables[name] = float(value)
+    try:
+        return float(safe_eval_expr(ci.composite_expression, variables))
+    except Exception:
+        # A composite that cannot evaluate has no value; it must not take the
+        # whole payload down, and a swallowed number here would be worse than
+        # none. The line rides flat and is named in `data_gaps` upstream.
+        return None
+
+
+def _team_overlay(
+    db: Session, commodity_ids: set[int], region: str, team_id: uuid.UUID | None,
+) -> tuple[dict[int, float], dict[int, dict[tuple[int, int], float | None]]]:
+    """The two team tiers `data_resolver` consults ahead of the platform series.
+
+    Two bulk queries, both independent of the window length, and only when a
+    team is given — so the constant-in-periods budget holds.
+
+    Returns `(fixed, overrides)`. An override value of **None is meaningful**:
+    `data_resolver` treats a null override as a deliberate blank ("the team's
+    source does not cover this period") and resolves to nothing rather than
+    falling through to the scraped value. Dropping those rows here would
+    silently restore a number the team removed.
+    """
+    if team_id is None or not commodity_ids:
+        return {}, {}
+
+    fixed = {
+        cid: float(value)
+        for cid, value in db.query(
+            TeamIndexSource.commodity_id, TeamIndexSource.fixed_value
+        ).filter(
+            TeamIndexSource.team_id == team_id,
+            TeamIndexSource.commodity_id.in_(commodity_ids),
+            TeamIndexSource.region == region,
+            TeamIndexSource.source_type == "fixed",
+            TeamIndexSource.fixed_value.isnot(None),
+        ).all()
+    }
+
+    # Exact region wins over GLOBAL, which is `data_resolver`'s own fallback.
+    exact: dict[int, dict[tuple[int, int], float | None]] = defaultdict(dict)
+    globals_: dict[int, dict[tuple[int, int], float | None]] = defaultdict(dict)
+    for cid, row_region, year, quarter, value in db.query(
+        IndexOverride.commodity_id, IndexOverride.region,
+        IndexOverride.year, IndexOverride.quarter, IndexOverride.value,
+    ).filter(
+        IndexOverride.team_id == team_id,
+        IndexOverride.commodity_id.in_(commodity_ids),
+        IndexOverride.region.in_({region, "GLOBAL"}),
+    ).all():
+        target = exact if row_region == region else globals_
+        target[cid][(int(year), int(quarter))] = (
+            float(value) if value is not None else None)
+
+    overrides: dict[int, dict[tuple[int, int], float | None]] = {}
+    for cid in set(exact) | set(globals_):
+        merged = dict(globals_.get(cid, {}))
+        merged.update(exact.get(cid, {}))
+        overrides[cid] = merged
+    return fixed, overrides
+
+
 def _quarterly_history(
-    db: Session, commodity_ids: set[int], region: str
+    db: Session, commodity_ids: set[int], region: str,
+    team_id: uuid.UUID | None = None,
 ) -> tuple[dict[int, dict[tuple[int, int], float]], dict[int, str]]:
-    """Every quarterly value for the given commodities, in one query.
+    """Every quarterly value for the given commodities, in a fixed number of
+    queries whatever the window length.
 
     Region handling mirrors `data_resolver`'s priority in spirit — the exact
     region wins, GLOBAL is the fallback — but is done here in memory rather than
     per (commodity, period), which is what keeps the budget constant in the
     number of periods.
+
+    When a team is given, the tiers `data_resolver` consults **ahead** of the
+    platform series are applied on top, in its order: a composite computed live,
+    then the team's fixed source, then the team's override for that period. Each
+    is fetched in bulk rather than per lookup, so the budget is unchanged in
+    shape.
     """
     if not commodity_ids:
         return {}, {}
+    # A composite reads other series, so those have to be in the bulk fetch even
+    # when no cost line names them directly.
+    composites = _composite_rows(db, commodity_ids)
+    fetch_ids = commodity_ids | _composite_component_ids(composites)
     rows = (
         db.query(IndexValue.commodity_id, IndexValue.region, IndexValue.year,
                  IndexValue.quarter, IndexValue.value)
-        .filter(IndexValue.commodity_id.in_(commodity_ids))
+        .filter(IndexValue.commodity_id.in_(fetch_ids))
         .all()
     )
     exact: dict[int, dict] = defaultdict(dict)
@@ -155,7 +297,7 @@ def _quarterly_history(
         target = exact if row_region == region else fallback
         target[cid][(int(year), int(quarter))] = float(value)
     out: dict[int, dict] = {}
-    for cid in commodity_ids:
+    for cid in fetch_ids:
         merged = dict(fallback.get(cid, {}))
         merged.update(exact.get(cid, {}))
         if merged:
@@ -169,7 +311,7 @@ def _quarterly_history(
     # source of truth. Only consulted for commodities the quarterly table does
     # not cover, so a legacy series is never overridden.
     source = {cid: "index_values" for cid in out}
-    missing = commodity_ids - set(out)
+    missing = fetch_ids - set(out)
     if missing:
         for cid, points in _monthly_history(db, missing).items():
             by_quarter: dict[tuple[int, int], list[float]] = defaultdict(list)
@@ -178,7 +320,60 @@ def _quarterly_history(
             if by_quarter:
                 out[cid] = {p: sum(v) / len(v) for p, v in by_quarter.items()}
                 source[cid] = "index_monthly_values"
-    return out, source
+
+    # ── The tiers data_resolver consults first, in its order ────────────────
+    # Composite before the team tiers, matching `get_single_index_value_detailed`
+    # exactly: a composite series is computed from its components and a team
+    # override on the composite itself is never consulted over there either.
+    for cid, ci in composites.items():
+        periods = set()
+        for var in (ci.composite_variables or {}).values():
+            if isinstance(var, dict) and var.get("type") == "index" and var.get("commodity_id"):
+                periods |= set(out.get(int(var["commodity_id"]), {}))
+        computed = {}
+        for period in periods:
+            value = _evaluate_composite(ci, out, period)
+            if value is not None:
+                computed[period] = value
+        if computed:
+            out[cid] = computed
+            source[cid] = "composite"
+        else:
+            out.pop(cid, None)
+            source.pop(cid, None)
+
+    fixed, overrides = _team_overlay(db, commodity_ids, region, team_id)
+    for cid, value in fixed.items():
+        if cid in composites:
+            continue
+        # A fixed source is constant across every period the series has, which
+        # is what "fixed" means over in the resolver.
+        existing = out.get(cid) or {}
+        out[cid] = {period: value for period in existing} or {}
+        source[cid] = "fixed"
+    for cid, by_period in overrides.items():
+        if cid in composites or cid in fixed:
+            continue
+        merged = dict(out.get(cid, {}))
+        for period, value in by_period.items():
+            if value is None:
+                # A null override is a deliberate blank, not a miss: the team is
+                # saying their source does not cover this period. Restoring the
+                # scraped value here would put back a number they removed.
+                merged.pop(period, None)
+            else:
+                merged[period] = value
+        if merged:
+            out[cid] = merged
+            source[cid] = "team_override"
+        else:
+            out.pop(cid, None)
+            source.pop(cid, None)
+
+    # Components pulled in only to feed a composite are not cost lines; leaving
+    # them in would put series nothing references into `by_store`.
+    return ({cid: v for cid, v in out.items() if cid in commodity_ids},
+            {cid: v for cid, v in source.items() if cid in commodity_ids})
 
 
 def _monthly_history(
@@ -257,10 +452,11 @@ class Intelligence:
     # Read from SCRUM-78's stored field, never recomputed here.
     trust: dict = field(default_factory=dict)
     data_gaps: list[dict] = field(default_factory=list)
-    # Which store the levels came from, and a note when that is not the store
-    # the costing engine reads. Stated rather than hidden: this engine can see
-    # the drop's monthly series and `data_resolver` cannot, so the two will
-    # disagree on exactly those combos until that tier is added there.
+    # Which store the levels came from, whether that is the number the costing
+    # engine would produce, and — where it is not — which tier of
+    # `data_resolver` this bulk read cannot see. Stated rather than hidden: a
+    # composite, a team's fixed source or a team's override all outrank the
+    # platform series over there and are invisible here.
     value_sources: dict = field(default_factory=dict)
 
 
@@ -312,6 +508,73 @@ def _pct_change(series: list[dict], quarters: int) -> float | None:
         return None
     return round((latest - earlier) / earlier * 100, 2)
 
+
+def _costing_engine_divergences(
+    db: Session,
+    commodities: dict[int, CommodityIndex],
+    commodity_ids: set[int],
+    region: str,
+    team_id: uuid.UUID | None,
+) -> list[dict]:
+    """Where this engine and the costing engine would still disagree, and why.
+
+    The three tiers `data_resolver` consults ahead of the platform series — a
+    composite, a team's fixed `TeamIndexSource`, a team's `IndexOverride` — are
+    now applied in `_quarterly_history`, in the resolver's own order and in
+    bulk, so they are no longer divergences. What this reports is what remains.
+
+    **A nested composite.** The overlay expands one level of composite
+    components into the bulk fetch; recursing would cost a round per level and
+    the flat-in-periods budget is the point of this engine. No composite in the
+    library nests today, so this is a guard against a future one being silently
+    half-computed rather than a live condition.
+
+    Two lower-tier fallbacks are deliberately not reported here, because they
+    are already visible per line and reporting them again would bury the
+    structural finding above. `data_resolver` falls back past the exact region
+    and GLOBAL to *any* region, and finally carries the last observation
+    forward; this engine stops at GLOBAL and lets a line with no value for a
+    period ride flat, which `data_gaps` names line by line. That difference is
+    stated in the payload note when it applies.
+    """
+    if not commodity_ids:
+        return []
+    out: list[dict] = []
+
+    def _entry(reason: str, ids: set[int]) -> None:
+        if not ids:
+            return
+        keys = sorted(
+            (commodities[i].commodity_key or commodities[i].name)
+            for i in ids if i in commodities
+        )
+        out.append({"reason": reason, "commodity_ids": sorted(ids),
+                    "commodity_keys": keys})
+
+    composites = {cid: c for cid, c in commodities.items()
+                  if c.composite_expression}
+    if composites:
+        component_ids = _composite_component_ids(composites)
+        nested = {
+            cid
+            for cid, c in (
+                {r.id: r for r in db.query(CommodityIndex).filter(
+                    CommodityIndex.id.in_(component_ids),
+                    CommodityIndex.composite_expression.isnot(None),
+                ).all()} if component_ids else {}
+            ).items()
+        }
+        if nested:
+            # Name the composite that cannot be computed, not its component:
+            # the unusable series is the one a cost line actually references.
+            unusable = {
+                cid for cid, c in composites.items()
+                if _composite_component_ids({cid: c}) & nested
+            }
+            _entry("composite reads another composite — computed one level only",
+                   unusable)
+
+    return out
 
 def derive(
     db: Session,
@@ -383,7 +646,8 @@ def derive(
         return out
 
     commodity_ids = {l["commodity_id"] for l in lines if l["commodity_id"]}
-    quarterly, value_source = _quarterly_history(db, commodity_ids, region)
+    quarterly, value_source = _quarterly_history(
+        db, commodity_ids, region, team_id)
     base_period = (coverage.base_year, coverage.base_quarter)
 
     # The window runs from the anchor to the latest period any line has.
@@ -410,11 +674,12 @@ def derive(
     # ── Components at the latest period ─────────────────────────────────────
     weight_sum = sum(l["effective_weight_pct"] for l in lines)
     current = periods[-1]
-    names = {
-        c.id: (c.commodity_key or c.name)
+    commodities = {
+        c.id: c
         for c in db.query(CommodityIndex).filter(
             CommodityIndex.id.in_(commodity_ids)).all()
     } if commodity_ids else {}
+    names = {cid: (c.commodity_key or c.name) for cid, c in commodities.items()}
     for line in lines:
         ratio, base_value, current_value, has_data = 1.0, None, None, True
         if line["component_type"] == "index" and line["commodity_id"]:
@@ -463,16 +728,48 @@ def derive(
     # months. The field stays rather than being deleted: it is the one place a
     # caller can see which store a level came from, and a future second store
     # would need exactly this seam again.
+    divergences = _costing_engine_divergences(
+        db, commodities, commodity_ids, region, team_id)
+    if divergences:
+        note = (
+            "this level is NOT what the costing engine would produce: "
+            + "; ".join(f"{d['reason']} on {', '.join(d['commodity_keys'])}"
+                        for d in divergences)
+        )
+    else:
+        parts = []
+        team_tiers = [t for t in ("composite", "fixed", "team_override")
+                      if t in counts]
+        if team_tiers:
+            # Worth saying explicitly: these levels are NOT the raw platform
+            # series, and a reader comparing them against the index library
+            # would otherwise think the numbers were wrong.
+            parts.append(
+                "some lines resolve through "
+                + ", ".join(team_tiers)
+                + " — the tiers the costing engine consults first, applied here too")
+        if "index_monthly_values" in counts:
+            parts.append("some lines resolve through the drop's monthly series, "
+                         "which the costing engine reads at the same quarter-mean "
+                         "of actual months")
+        if out.data_gaps:
+            # The one remaining difference, stated where it applies rather than
+            # as a permanent caveat: past GLOBAL the costing engine keeps
+            # falling back (any region, then the last observation carried
+            # forward) and this engine stops, letting the line ride flat.
+            parts.append("lines named in data_gaps ride flat here, where the "
+                         "costing engine would fall back further")
+        note = ("; ".join(parts) if parts
+                else "every line resolves through the same store the costing "
+                     "engine reads")
     out.value_sources = {
         "by_store": dict(counts),
-        "matches_costing_engine": True,
-        "note": (
-            "some lines resolve through the drop's monthly series; the costing "
-            "engine reads that store too, at the same quarter-mean of actual "
-            "months, so the two agree"
-            if "index_monthly_values" in counts else
-            "every line resolves through the same store the costing engine reads"
-        ),
+        "matches_costing_engine": not divergences,
+        # Empty when the two agree. Each entry names the tier that fires and the
+        # series it fires on, so a caller can see *why* they disagree rather
+        # than only that they do.
+        "divergences": divergences,
+        "note": note,
     }
 
     out.change = {

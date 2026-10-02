@@ -19,7 +19,7 @@ a formula can only ever see platform templates and its own.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sqlalchemy.orm import Session
 
@@ -346,24 +346,163 @@ class EffectiveLine:
     # snapshot) has no type-code column, so a pinned line reaches the type-code
     # side through its series instead. Defaulted, so nothing else has to change.
     type_code_id: int | None = None
+    # Scrum 27 — which nested cost model a line came through, for display.
+    via_cost_model_id: uuid.UUID | None = None
+    via_cost_model_name: str | None = None
+    # Set on a `model` line that could NOT be expanded. The line stays in the
+    # recipe carrying its weight, and the engine turns this into a data gap —
+    # a sub-model that quietly vanished would silently rescale every other
+    # line, and one that quietly rode flat would look like a fixed cost.
+    unresolved_reason: str | None = None
 
 
-def _effective_lines_from_snapshot(fv) -> list[EffectiveLine]:
-    return [
-        EffectiveLine(
+# Scrum 27 — how deep one cost model may nest inside another. Same number and
+# the same reason as MAX_CHAIN_DEPTH for templates: past three hops nobody can
+# hold the recipe in their head, and the cap is what bounds the recursion below
+# even if a cycle somehow reached it.
+MAX_NEST_DEPTH = 3
+
+
+def _effective_lines_from_snapshot(
+    fv,
+    db: Session | None = None,
+    *,
+    depth: int = 0,
+    seen: frozenset = frozenset(),
+    via_id=None,
+    via_name: str | None = None,
+) -> list[EffectiveLine]:
+    """The frozen snapshot, with any nested child cost model expanded in place.
+
+    A `model` line contributes its child's INDEX COMPOSITION, not the child's
+    price: the child's lines fold in with their weights multiplied by this
+    line's weight, and the parent's own base_price stays the anchor. That is
+    the convention `flatten_components` already uses for a chained template,
+    and it is what keeps a recipe's weights summing to one.
+
+    `db` is optional so the one legacy call shape (no nesting possible without
+    a session) still works; without it a `model` line is reported unresolved
+    rather than silently flattened away.
+    """
+    lines: list[EffectiveLine] = []
+    for c in fv.components:
+        weight = float(c.weight)
+
+        if c.component_type == "model" or c.child_cost_model_id is not None:
+            reason = None
+            child_fv = None
+            child = None
+            if c.child_cost_model_id is None:
+                reason = "sub-model line has no cost model bound"
+            elif db is None:
+                reason = "sub-model could not be resolved"
+            elif c.child_cost_model_id in seen:
+                # A loop is unbounded recursion inside the engine, not a wrong
+                # number. The write-time guard should have stopped this, so
+                # reaching it means the graph was edited into a cycle some
+                # other way — report it, never follow it.
+                reason = "sub-model forms a circular reference"
+            elif depth + 1 > MAX_NEST_DEPTH:
+                reason = f"sub-model nests deeper than {MAX_NEST_DEPTH} levels"
+            else:
+                child = c.child_cost_model
+                child_fv = child.current_formula if child else None
+                if child_fv is None:
+                    reason = "sub-model has no formula yet"
+                elif child_fv.formula_type == "advanced":
+                    # An advanced child has no discrete components to fold in.
+                    # Refusing is honest; inventing a single opaque line for it
+                    # would put a number in the parent nothing can explain.
+                    reason = "sub-model uses an advanced expression, which cannot be nested"
+
+            if reason is not None:
+                lines.append(EffectiveLine(
+                    label=c.label, commodity_id=None, commodity_name=None,
+                    weight=weight, component_type="model",
+                    depth=c.depth, via_template_id=c.via_template_id,
+                    via_template_name=c.via_template.name if c.via_template else None,
+                    line_region=c.line_region, is_proxy=c.is_proxy,
+                    via_cost_model_id=c.child_cost_model_id,
+                    via_cost_model_name=None,
+                    unresolved_reason=reason,
+                ))
+                continue
+
+            child_name = c.child_cost_model_name or c.label
+            for nested in _effective_lines_from_snapshot(
+                child_fv, db,
+                depth=depth + 1,
+                seen=seen | {c.child_cost_model_id},
+                via_id=c.child_cost_model_id,
+                via_name=child_name,
+            ):
+                lines.append(replace(
+                    nested,
+                    weight=nested.weight * weight,
+                    # Depth is NOT incremented here: the recursive call was
+                    # already given depth+1 and its leaves carry the depth
+                    # relative to the root. Adding again double-counts, which
+                    # is exactly what the first version did.
+                    # The nearest enclosing sub-model wins, so a line reports
+                    # where it came from rather than the outermost hop.
+                    via_cost_model_id=nested.via_cost_model_id or c.child_cost_model_id,
+                    via_cost_model_name=nested.via_cost_model_name or child_name,
+                ))
+            continue
+
+        lines.append(EffectiveLine(
             label=c.label,
             commodity_id=c.commodity_id,
             commodity_name=c.commodity.name if c.commodity else None,
-            weight=float(c.weight),
+            weight=weight,
             component_type=c.component_type,
-            depth=c.depth,
+            depth=c.depth if via_id is None else (c.depth or 0) + depth,
             via_template_id=c.via_template_id,
             via_template_name=c.via_template.name if c.via_template else None,
             line_region=c.line_region,
             is_proxy=c.is_proxy,
-        )
-        for c in fv.components
-    ]
+            via_cost_model_id=via_id,
+            via_cost_model_name=via_name,
+        ))
+    return lines
+
+
+def assert_valid_nesting(db: Session, parent_cost_model_id, child_cost_model_id) -> None:
+    """Write-time guard. Raises FormulaChainError with a reason a user can act on.
+
+    Runs at save rather than at calculation time because a loop here is an
+    infinite recursion inside the costing engine: failing where somebody can
+    still fix it is the whole point, and the same reasoning made
+    assert_valid_chain_input a write-time check for templates.
+    """
+    from app.models.cost_model import CostModel, FormulaComponent
+
+    if child_cost_model_id == parent_cost_model_id:
+        raise FormulaChainError("a cost model cannot contain itself")
+
+    # Walk DOWN from the child. If the parent appears anywhere beneath it, then
+    # adding the child under the parent closes a loop.
+    frontier = [(child_cost_model_id, 1)]
+    visited = set()
+    while frontier:
+        node, hops = frontier.pop()
+        if node in visited:
+            continue
+        visited.add(node)
+        if hops > MAX_NEST_DEPTH:
+            raise FormulaChainError(f"nesting would exceed {MAX_NEST_DEPTH} levels")
+        cm = db.get(CostModel, node)
+        fv = cm.current_formula if cm else None
+        if fv is None:
+            continue
+        for comp in fv.components:
+            if comp.child_cost_model_id is None:
+                continue
+            if comp.child_cost_model_id == parent_cost_model_id:
+                raise FormulaChainError(
+                    "circular reference: that cost model already depends on this one"
+                )
+            frontier.append((comp.child_cost_model_id, hops + 1))
 
 
 def get_effective_lines(db: Session, fv, cost_model) -> tuple[list[EffectiveLine], str | None]:
@@ -378,29 +517,29 @@ def get_effective_lines(db: Session, fv, cost_model) -> tuple[list[EffectiveLine
     serving a possibly-stale number.
     """
     if fv.link_mode != "tracking":
-        return _effective_lines_from_snapshot(fv), None
+        return _effective_lines_from_snapshot(fv, db), None
     if fv.source_coverage_id is None:
         # A version saved with link_mode="tracking" always had a
         # source_coverage_id at save time (FormulaVersionCreate requires both
         # or neither). Seeing one without the other now means the linked
         # coverage — or its parent template — was deleted and the FK's ON
         # DELETE SET NULL fired; that's a broken link, not "never linked".
-        return _effective_lines_from_snapshot(fv), "tracking link unavailable (combo deleted) — showing last-known formula"
+        return _effective_lines_from_snapshot(fv, db), "tracking link unavailable (combo deleted) — showing last-known formula"
 
     coverage = db.get(FormulaRegionCoverage, fv.source_coverage_id)
     if coverage is None:
         # Defensive backstop — unreachable via any real deletion path (the FK
         # above guarantees source_coverage_id is already None by then).
-        return _effective_lines_from_snapshot(fv), "tracking link unavailable (combo deleted) — showing last-known formula"
+        return _effective_lines_from_snapshot(fv, db), "tracking link unavailable (combo deleted) — showing last-known formula"
 
     try:
         raw_lines = flatten_components(db, coverage.template_id, region=cost_model.region)
     except FormulaChainError as exc:
-        return _effective_lines_from_snapshot(fv), f"tracking link broken ({exc}) — showing last-known formula"
+        return _effective_lines_from_snapshot(fv, db), f"tracking link broken ({exc}) — showing last-known formula"
 
     base_sum = sum(l["effective_weight_pct"] for l in raw_lines)
     if not raw_lines or base_sum <= 0:
-        return _effective_lines_from_snapshot(fv), "tracking link has no weighted lines — showing last-known formula"
+        return _effective_lines_from_snapshot(fv, db), "tracking link has no weighted lines — showing last-known formula"
 
     commodity_ids = {l["commodity_id"] for l in raw_lines if l["commodity_id"]}
     template_ids = {l["via_template_id"] for l in raw_lines if l["via_template_id"]}

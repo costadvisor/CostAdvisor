@@ -137,9 +137,10 @@ class IntelligenceOut(BaseModel):
     volatility: VolatilityOut | None = None
     trust: TrustOut | None = None
     data_gaps: list[DataGap] = []
-    # Which store the levels came from, and whether that matches what the
-    # costing engine reads. Stated rather than hidden — this engine can see the
-    # drop's monthly series and `data_resolver` cannot.
+    # Which store the levels came from, whether that matches what the costing
+    # engine would produce, and `divergences` naming the tier and the series
+    # wherever it does not — a composite, a team fixed source or a team
+    # override, none of which this engine's bulk read can see.
     value_sources: dict = {}
     # Where a product resolved from, when this was reached that way.
     resolved_via: str | None = None

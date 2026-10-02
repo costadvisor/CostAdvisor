@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     # secret domain, must not be shared. Generate the same way.
     provider_credential_encryption_key: str = ""
 
+    # Web push (VAPID). Public key is public by definition and is served from
+    # the API rather than baked into the frontend build, so rotating it does
+    # not need a rebuild. Both empty = push disabled, and every path checks.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_contact_email: str = "support@costadvisor.org"
+
     # JWT
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"

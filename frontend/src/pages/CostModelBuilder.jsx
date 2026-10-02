@@ -189,6 +189,8 @@ export default function CostModelBuilder() {
             via_template_id: c.via_template_id,
             line_region: c.line_region,
             is_proxy: c.is_proxy,
+            child_cost_model_id: c.child_cost_model_id || null,
+            child_cost_model_name: c.child_cost_model_name || null,
           })));
           const ftype = currentFv.formula_type || 'simple';
           setFormulaMode(ftype);
@@ -346,6 +348,10 @@ export default function CostModelBuilder() {
             via_template_id: c.via_template_id ?? null,
             line_region: c.line_region ?? null,
             is_proxy: c.is_proxy ?? null,
+            // Scrum 27 — this line IS another cost model. The backend rejects
+            // a cycle at save, which is where it has to fail: a loop is
+            // unbounded recursion inside the engine, not a wrong number.
+            child_cost_model_id: c.child_cost_model_id ?? null,
           })),
         }),
       };
@@ -419,6 +425,19 @@ export default function CostModelBuilder() {
     next[i] = { ...next[i], [key]: val };
     setComponents(next);
   };
+  // Cost models this one may nest. The endpoint excludes the ones that would
+  // cycle and says why for the rest, so the picker never offers something the
+  // save would then reject.
+  const [nestable, setNestable] = useState([]);
+  useEffect(() => {
+    if (!costModelId) { setNestable([]); return; }
+    let cancelled = false;
+    api.get(`/api/cost-models/${costModelId}/nestable`)
+      .then(({ data }) => { if (!cancelled) setNestable(data.candidates || []); })
+      .catch(() => { if (!cancelled) setNestable([]); });
+    return () => { cancelled = true; };
+  }, [costModelId]);
+
   const addComp = () => setComponents([...components, { label: '', commodity_name: '', parts: 0 }]);
   const removeComp = (i) => setComponents(components.filter((_, j) => j !== i));
 
@@ -807,7 +826,9 @@ export default function CostModelBuilder() {
                       <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 60px 80px 90px 30px', gap: 8, marginBottom: 6, alignItems: 'center' }}>
                         <input className="ca-input" value={c.label} placeholder="Component label"
                           onChange={e => updateComp(i, 'label', e.target.value)} style={{ padding: '7px 8px' }} />
-                        <select className="ca-select" value={c.commodity_name || ''} style={{ fontSize: 11, padding: '7px 8px' }}
+                        <select className="ca-select"
+                          value={c.child_cost_model_id ? `model:${c.child_cost_model_id}` : (c.commodity_name || '')}
+                          style={{ fontSize: 11, padding: '7px 8px' }}
                           onChange={e => {
                             const name = e.target.value;
                             // Keep commodity_id (which save() now sends and the
@@ -817,17 +838,48 @@ export default function CostModelBuilder() {
                             // before. component_type follows the same edit so
                             // a manual "None" reads as deliberately fixed, not
                             // a broken link.
-                            const match = commodities.find(ci => ci.name === name);
                             const next = [...components];
-                            next[i] = {
-                              ...next[i], commodity_name: name,
-                              commodity_id: match ? match.id : null,
-                              component_type: name ? 'index' : 'fixed',
-                            };
+                            if (name.startsWith('model:')) {
+                              // A line is either index-linked or a sub-model,
+                              // never both — the backend rejects the pair, so
+                              // switching here clears the other side rather
+                              // than leaving a contradiction to be discovered
+                              // at save.
+                              const id = name.slice('model:'.length);
+                              const cand = nestable.find(n => n.cost_model_id === id);
+                              next[i] = {
+                                ...next[i], commodity_name: '', commodity_id: null,
+                                component_type: 'model',
+                                child_cost_model_id: id,
+                                child_cost_model_name: cand ? cand.product_name : null,
+                              };
+                            } else {
+                              const match = commodities.find(ci => ci.name === name);
+                              next[i] = {
+                                ...next[i], commodity_name: name,
+                                commodity_id: match ? match.id : null,
+                                component_type: name ? 'index' : 'fixed',
+                                child_cost_model_id: null,
+                                child_cost_model_name: null,
+                              };
+                            }
                             setComponents(next);
                           }}>
                           <option value="">None</option>
                           {commodities.map(ci => <option key={ci.id} value={ci.name}>{ci.name}</option>)}
+                          {/* Scrum 27 — a component that IS another cost model.
+                              Same control as the index picker, because from the
+                              recipe's point of view it occupies the same slot:
+                              the thing this line's weight is applied to. */}
+                          {nestable.some(n => n.eligible) && (
+                            <optgroup label="Nested cost model">
+                              {nestable.filter(n => n.eligible).map(n => (
+                                <option key={n.cost_model_id} value={`model:${n.cost_model_id}`}>
+                                  {n.product_name}{n.supplier_name ? ` \u00b7 ${n.supplier_name}` : ''}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
                         </select>
                         <NumberInput value={c.parts} allowNegative={false}
                           style={{ textAlign: 'right', padding: '7px 6px' }}
@@ -1035,7 +1087,11 @@ export default function CostModelBuilder() {
                     {components.map((c, i) => (
                       <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 80px 90px', gap: 8, marginBottom: 6, alignItems: 'center' }}>
                         <span style={{ fontSize: 13 }}>{c.label}</span>
-                        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{c.commodity_name || '\u2014'}</span>
+                        <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                          {c.child_cost_model_id
+                            ? `\u21b3 ${c.child_cost_model_name || 'nested cost model'}`
+                            : (c.commodity_name || '\u2014')}
+                        </span>
                         <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>
                           {(compWeight(c) * 100).toFixed(1)}%
                         </span>

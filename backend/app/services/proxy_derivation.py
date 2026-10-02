@@ -35,7 +35,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.constants.index_metadata import PROXY_OPERATIONS
-from app.models.formula_template import FormulaTemplateComponent
+from app.models.formula_template import FormulaTemplate, FormulaTemplateComponent
 from app.models.index_data import CommodityIndex
 from app.models.index_layer import IndexMonthlyValue, TypeCode
 
@@ -384,15 +384,28 @@ def swap_backlog(
     either into a weight-share aggregation would inflate every denominator and
     make the ranking meaningless.
     """
+    # Platform rows only. `formula_template_components` carries
+    # `tenant_isolation` RLS (visible = the template is platform OR the caller is
+    # in its team), so without this filter the same endpoint returns a different
+    # total to every caller: their own forks fold into a number presented as
+    # library-wide. Bypassing RLS would be worse, not better — it would pull
+    # EVERY team's private forks into an aggregate any authenticated user can
+    # read. Counting only `team_id IS NULL` is what this function's docstring
+    # already claims it is, and it is RLS-neutral: platform rows are visible to
+    # everyone under that policy, so the answer is identical for every caller by
+    # construction, with no bypass to leak.
     weights = (
         db.query(
             FormulaTemplateComponent.type_code_id.label("type_code_id"),
             func.sum(FormulaTemplateComponent.weight_pct).label("weight"),
             func.count(FormulaTemplateComponent.id).label("lines"),
         )
+        .join(FormulaTemplate,
+              FormulaTemplate.id == FormulaTemplateComponent.template_id)
         .filter(
             FormulaTemplateComponent.type_code_id.isnot(None),
             FormulaTemplateComponent.component_type == "index",
+            FormulaTemplate.team_id.is_(None),
         )
         .group_by(FormulaTemplateComponent.type_code_id)
         .subquery()
@@ -408,13 +421,19 @@ def swap_backlog(
 
     total = float(
         db.query(func.sum(FormulaTemplateComponent.weight_pct))
+        .join(FormulaTemplate,
+              FormulaTemplate.id == FormulaTemplateComponent.template_id)
         .filter(
             FormulaTemplateComponent.type_code_id.isnot(None),
             FormulaTemplateComponent.component_type == "index",
+            FormulaTemplate.team_id.is_(None),
         )
         .scalar()
         or 0
     )
+
+    # Resolves AND its series carries numbers — see `priceable_codes`.
+    priceable = priceable_codes(db)
 
     entries = [
         BacklogEntry(
@@ -426,11 +445,38 @@ def swap_backlog(
             ideal_index=tc.ideal_index,
             catalog_weight=float(weight or 0),
             line_count=int(lines or 0),
-            priceable=tc.resolution == "resolved",
+            priceable=tc.id in priceable,
         )
         for tc, weight, lines in query.limit(limit).all()
     ]
     return SwapBacklog(total_catalog_weight=total, entries=entries)
+
+
+def priceable_codes(db: Session) -> set:
+    """Ids of type codes that can actually produce a number.
+
+    The single definition of "priceable", because there were two and they
+    disagreed: the swap backlog said `resolution == "resolved"` while
+    `GET /type-codes/{code}/value` correctly refused a resolved code whose series
+    carries no rows — the `resolved_but_no_history` state defined in this very
+    module. A backlog that calls such a code priceable tells a buyer nothing is
+    wrong with a code that cannot price a single line.
+
+    One query for the whole with-history set, not one per code: the backlog
+    builds hundreds of entries and a per-entry existence check is an N+1. Same
+    shape `resolution.unpriceable_type_codes` already uses.
+    """
+    with_history = {
+        cid
+        for (cid,) in db.query(IndexMonthlyValue.commodity_id)
+        .filter(IndexMonthlyValue.kind == "actual")
+        .distinct()
+    }
+    return {
+        tc.id
+        for tc in db.query(TypeCode).filter(TypeCode.resolution == "resolved").all()
+        if tc.resolves_to_id in with_history
+    }
 
 
 def blocked_series(db: Session) -> list[dict]:

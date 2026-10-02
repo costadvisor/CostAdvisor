@@ -35,6 +35,22 @@ def require_team_role(db: Session, user: User, team_id: uuid.UUID, roles: list[s
     return membership
 
 
+def has_team_role(db: Session, user: User, team_id: uuid.UUID, roles: list[str]) -> bool:
+    """`require_team_role` as a question rather than a demand.
+
+    A read that reveals more to an admin than to a member needs to ASK, not to
+    raise and be caught. Added because `alerts.get_slack_webhook` was using a
+    permission key that does not exist as an is-admin proxy.
+    """
+    if user.is_super_admin:
+        return True
+    membership = db.query(TeamMembership).filter(
+        TeamMembership.user_id == user.id,
+        TeamMembership.team_id == team_id,
+    ).first()
+    return bool(membership and membership.role in roles)
+
+
 @router.post("/", response_model=TeamOut)
 def create_team(
     data: TeamCreate,

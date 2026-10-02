@@ -121,11 +121,13 @@ class TypeCode(Base):
 
     resolves_to = relationship("CommodityIndex")
 
-    @property
-    def is_priceable(self) -> bool:
-        """A code can only be costed when it resolves AND its series carries
-        numbers. `resolution == 'resolved'` alone is not enough."""
-        return self.resolution == "resolved"
+    # There is deliberately NO `is_priceable` property here. One existed, with a
+    # docstring saying "a code can only be costed when it resolves AND its series
+    # carries numbers — `resolution == 'resolved'` alone is not enough" — and a
+    # body that returned exactly `resolution == "resolved"`. The second half of
+    # the test needs a query the model has no session for, so the honest home for
+    # it is the service layer, where the with-history set is already loaded in
+    # bulk: see `services/proxy_derivation.priceable_codes`.
 
 
 class IndexCard(Base):

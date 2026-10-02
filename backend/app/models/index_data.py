@@ -77,9 +77,24 @@ class CommodityIndex(Base):
     # index_values, Scrum 57), so the code is validated at the API layer.
     composite_region: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
+    # ── Taxonomy link (Scrum 17 follow-up) ──────────────────────────────────
+    # Best-effort, derived from real recipe usage (FormulaTemplateComponent ->
+    # FormulaTemplate.family_id/subfamily_id) by the mapping pass — never set
+    # for a commodity no template references. NOT a substitute for the
+    # free-text `category` column above, which stays as the fallback for rows
+    # this can't (yet) place.
+    family_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("chemical_families.id", ondelete="SET NULL"), nullable=True
+    )
+    subfamily_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("subfamilies.id", ondelete="SET NULL"), nullable=True
+    )
+
     # Relationships
     values = relationship("IndexValue", back_populates="commodity", lazy="dynamic")
     proxy_for = relationship("CommodityIndex", remote_side=[id])
+    family = relationship("ChemicalFamily", foreign_keys=[family_id])
+    subfamily = relationship("Subfamily", foreign_keys=[subfamily_id])
 
 
 class IndexValue(Base):

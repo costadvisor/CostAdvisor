@@ -20,7 +20,9 @@ from app.schemas.supplier import (
 )
 from app.services.audit import log_event
 from app.services.permissions import require_permission
-from app.services.supplier_trust import compute_supplier_trust_scores, _grade_for
+from app.services.supplier_trust import (
+    compute_supplier_trust_scores, team_producer_map, _grade_for,
+)
 
 router = APIRouter()
 
@@ -218,9 +220,12 @@ def compute_all_trust_scores(
 ):
     require_team_role(db, current_user, team_id, ["owner", "admin"])
     suppliers = db.query(Supplier).filter(Supplier.team_id == team_id).order_by(Supplier.name).all()
+    # Built once: resolving every supplier name inside each call would make this
+    # loop quadratic in the team's supplier count.
+    producer_map = team_producer_map(db, team_id)
     summaries = []
     for s in suppliers:
-        rows = compute_supplier_trust_scores(db, team_id, s.id)
+        rows = compute_supplier_trust_scores(db, team_id, s.id, producer_map=producer_map)
         summaries.append(_summarize(s, rows))
     log_event(db, team_id, current_user.id, "compute_all", "supplier_trust_score", str(team_id),
               new_value={"supplier_count": len(suppliers)})

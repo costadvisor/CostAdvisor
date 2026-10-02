@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, Fragment } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import exportCsv from '../../utils/exportCsv';
@@ -68,6 +68,7 @@ function StatusBadge({ status }) {
 export default function PortfolioArea() {
   const { activeTeamId } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const confirm = useConfirm();
   const showAlert = useAlert();
 
@@ -107,6 +108,17 @@ export default function PortfolioArea() {
   // Add-product modal — embedded here so a new product shows up in this page's own
   // table immediately, with no navigation to /products and back.
   const [showAddProduct, setShowAddProduct] = useState(false);
+
+  // The onboarding tour deep-links here with this flag (instead of a query
+  // param, so it can't be bookmarked/shared into an unexpectedly-reopened
+  // modal) to open the same modal a manual "+ Add product" click would.
+  useEffect(() => {
+    if (location.state?.autoOpenAddProduct) {
+      setShowAddProduct(true);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Named (not an anonymous effect body) so the add-product modal can call it
   // after a save to refresh the table in place, mirroring Products.jsx's own

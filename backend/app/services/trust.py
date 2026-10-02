@@ -333,10 +333,21 @@ def apply_assessment(
     fingerprint = fingerprint_for(lines)
 
     invalidated = False
-    if coverage.reviewed_at is not None and coverage.review_fingerprint is not None \
-            and coverage.review_fingerprint != fingerprint:
-        # The sign-off was on a different recipe. Clear it rather than showing a
-        # stale green tick — a reviewer vouched for numbers that have since moved.
+    if coverage.reviewed_at is not None and coverage.review_fingerprint != fingerprint:
+        # The sign-off was on a different recipe — or, when the fingerprint is
+        # NULL, on a recipe nobody recorded. Clear it either way rather than
+        # showing a stale green tick for numbers that have since moved.
+        #
+        # The NULL case is not hypothetical: a sign-off made before this column
+        # existed carries `reviewed_at` with no fingerprint. The check used to
+        # require a non-NULL fingerprint to DIFFER, so those rows could never be
+        # invalidated — `signed_off` stayed True forever and `needs_review` was
+        # pinned False no matter what the grade later computed. A pre-migration
+        # sign-off became permanent, the opposite of what pinning a sign-off to a
+        # line set is for.
+        #
+        # Treating unknown as stale is the safe direction: the cost is asking a
+        # reviewer to confirm once, against a combo silently exempt forever.
         invalidated = True
         coverage.reviewed_at = None
         coverage.reviewed_by_id = None

@@ -450,3 +450,104 @@ def test_endpoints_need_no_team_id(db, tenant_a, client_as):
 def test_authentication_is_still_required(client):
     for path in ("/api/resolution/concentration", "/api/resolution/type-codes/X"):
         assert client.get(path).status_code == 401
+
+
+def test_a_combo_diagnosis_is_scoped_to_one_variant(db, tenant_a):
+    """A (template, region) can carry several recipes, and pooling them produces
+    arithmetic that cannot be true.
+
+    `formula_template_components.variant` exists because the catalog keys combos
+    on (formula, region, variant) — bentonite activated vs natural, talc treated
+    vs untreated. The diagnosis read filtered only on (template, region), so it
+    summed both recipes' lines: the live bentonite combo at NA reported **148%**
+    blocked weight against a recipe whose own invariant is that weights close at
+    100. Each variant must be diagnosed on its own lines.
+    """
+    dry = _series(db, f"dry-{uuid.uuid4().hex[:6]}", with_history=False)
+    blocked = _code(db, f"BLK-{uuid.uuid4().hex[:5]}", dry, resolution="no_series")
+    tpl = _combo(db, tenant_a, region="NA")
+    try:
+        # A second coverage row for the SAME region, differing only by variant.
+        db.add(FormulaRegionCoverage(template_id=tpl.id, region="NA",
+                                     variant="activated", base_price=1000))
+        db.commit()
+
+        # 60% blocked in each variant, authored separately.
+        for variant in ("", "activated"):
+            db.add(FormulaTemplateComponent(
+                template_id=tpl.id, region="NA", variant=variant,
+                name=f"blocked-{variant or 'plain'}", component_type="index",
+                commodity_id=dry.id, type_code_id=blocked.id,
+                weight_pct=60, is_proxy=False, sort_order=0,
+            ))
+            db.add(FormulaTemplateComponent(
+                template_id=tpl.id, region="NA", variant=variant,
+                name=f"fixed-{variant or 'plain'}", component_type="fixed",
+                weight_pct=40, is_proxy=False, sort_order=1,
+            ))
+        db.commit()
+
+        plain = diagnose_combo(db, tpl.id, "NA")
+        activated = diagnose_combo(db, tpl.id, "NA", variant="activated")
+
+        for d in (plain, activated):
+            assert d.total_lines == 2, "a variant must see only its own lines"
+            assert d.blocked_weight_pct <= 100, (
+                f"{d.blocked_weight_pct}% — variants were pooled again"
+            )
+            assert d.blocked_weight_pct == pytest.approx(60.0)
+
+        assert plain.variant == ""
+        assert activated.variant == "activated"
+        # And the endpoint echoes which recipe it answered about.
+        assert diagnose_combo(db, tpl.id, "NA", variant="nonexistent").coverage_exists is False
+    finally:
+        _cleanup(db, [tpl.id], [blocked.id], [dry.id])
+
+
+def test_platform_totals_do_not_include_any_team_fork(db, tenant_a, client_as):
+    """H3. The swap backlog is platform-grain by design — its own docstring says
+    it ranks what the CATALOGUE stands on.
+
+    `formula_template_components` carries `tenant_isolation` RLS, so before this
+    it returned a different total to every caller: their own forks folded into a
+    number presented as library-wide. Two users, one endpoint, two answers.
+
+    The fix is a `team_id IS NULL` filter, NOT an RLS bypass. A bypass would have
+    been worse than the bug — it would pull every team's private forks into an
+    aggregate any authenticated user can read. Filtering to platform rows is also
+    RLS-neutral: platform rows are visible to everyone under the policy, so the
+    answer is identical for every caller by construction.
+
+    No forked templates exist in the catalogue today; this builds one, because
+    Scrum 68 ships forking and the defect activates the moment a team uses it.
+    """
+    series = _series(db, f"fork-{uuid.uuid4().hex[:6]}", with_history=True)
+    code = _code(db, f"FRK-{uuid.uuid4().hex[:5]}", series)
+    fork = FormulaTemplate(
+        team_id=tenant_a["team_id"], created_by=tenant_a["user_id"],
+        name=f"fork-{uuid.uuid4().hex[:6]}", code=f"FK-{uuid.uuid4().hex[:6]}",
+        expression=None,
+    )
+    db.add(fork)
+    db.commit()
+    db.add(FormulaTemplateComponent(
+        template_id=fork.id, region="Europe", name="forked-line",
+        component_type="index", commodity_id=series.id, type_code_id=code.id,
+        weight_pct=100, is_proxy=False, sort_order=0,
+    ))
+    db.commit()
+    try:
+        body = client_as(tenant_a).get(
+            "/api/resolution/swap-backlog?limit=1000").json()
+        entry = next(e for e in body["entries"] if e["code"] == code.code)
+        assert entry["catalog_weight"] == 0.0, (
+            f"the caller's own fork leaked into the platform total "
+            f"({entry['catalog_weight']})"
+        )
+        assert entry["line_count"] == 0
+        # The code itself is platform reference data and must still be listed —
+        # the fix hides forked WEIGHT, not the existence of a type code.
+        assert entry["code"] == code.code
+    finally:
+        _cleanup(db, [fork.id], [code.id], [series.id])

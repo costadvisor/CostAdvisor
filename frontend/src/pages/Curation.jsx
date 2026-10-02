@@ -60,11 +60,18 @@ const TABS = [
   { key: 'dimensions', label: 'Dimension decisions' },
 ];
 
-function Badge({ map, value }) {
+function Badge({ map, value, badge }) {
   const m = map[value] || { label: value || '—', color: 'var(--muted)', bg: 'var(--surface2)' };
+  // The API ships the provenance label and caveat WITH the state that produced
+  // them (`ProvenanceBadge`), precisely so the wording cannot drift from the
+  // state machine. Where a block carries one, it wins; the local map stays as
+  // the colour source and as the fallback for versions, which carry a bare
+  // provenance string and no badge.
+  const label = badge?.label || m.label;
   return (
-    <span className="ca-badge" style={{ background: m.bg, color: m.color, fontWeight: 600 }}>
-      {m.label}
+    <span className="ca-badge" title={badge?.caveat || undefined}
+      style={{ background: m.bg, color: m.color, fontWeight: 600 }}>
+      {label}
     </span>
   );
 }
@@ -282,13 +289,29 @@ function TrustQueue({ teamId }) {
 
 /* ── 2. Editorial approvals ───────────────────────────────────────────────── */
 
-function VersionHistory({ blockId }) {
+function VersionHistory({ blockId, teamId }) {
   const [versions, setVersions] = useState(null);
+  const [err, setErr] = useState(null);
   useEffect(() => {
-    api.get(`/api/editorial/blocks/${blockId}/versions`)
-      .then(({ data }) => setVersions(data))
-      .catch(() => setVersions([]));
-  }, [blockId]);
+    let cancelled = false;
+    setVersions(null); setErr(null);
+    // `team_id` is REQUIRED by the route (it is a bare param, not a Query with a
+    // default), so omitting it 422s every call. It used to be omitted, and the
+    // failure was caught into an empty list — which rendered exactly like a
+    // block that genuinely only ever had one version. A fetch that failed and a
+    // history that is empty must not look the same, so the error is now shown.
+    api.get(`/api/editorial/blocks/${blockId}/versions`, { params: { team_id: teamId } })
+      .then(({ data }) => { if (!cancelled) setVersions(data); })
+      .catch(e => { if (!cancelled) setErr(formatApiError(e) || 'Could not load version history.'); });
+    return () => { cancelled = true; };
+  }, [blockId, teamId]);
+  if (err) {
+    return (
+      <div style={{ fontSize: 10, color: 'var(--accent2)', marginTop: 8 }}>
+        Version history unavailable — {err}
+      </div>
+    );
+  }
   if (!versions) return <div style={{ fontSize: 10, color: 'var(--muted)' }}>Loading history…</div>;
   return (
     <div style={{ marginTop: 8 }}>
@@ -420,7 +443,7 @@ function EditorialQueue({ teamId }) {
                     </td>
                     <td>{b.block_type}</td>
                     <td>
-                      <Badge map={PROVENANCE} value={b.provenance} />
+                      <Badge map={PROVENANCE} value={b.provenance} badge={b.badge} />
                       {b.team_id === null && (
                         <span style={{ fontSize: 9, color: 'var(--muted)' }} title="Platform library"> plat</span>
                       )}
@@ -457,7 +480,7 @@ function EditorialQueue({ teamId }) {
                 {' · '}v{open.current_version_no ?? '—'}
               </div>
             </div>
-            <Badge map={PROVENANCE} value={open.provenance} />
+            <Badge map={PROVENANCE} value={open.provenance} badge={open.badge} />
           </div>
 
           {/* The badge's own caveat, shipped with the state machine rather than
@@ -488,7 +511,7 @@ function EditorialQueue({ teamId }) {
             </div>
           )}
 
-          <VersionHistory blockId={open.id} />
+          <VersionHistory blockId={open.id} teamId={teamId} />
 
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
             {!open.body_json && (

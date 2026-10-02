@@ -1001,7 +1001,21 @@ export default function IndexLibraryArea() {
       />
 
       {showResolution && (
-        <ResolutionModal onClose={() => setShowResolution(false)} />
+        <ResolutionModal
+          onClose={() => setShowResolution(false)}
+          /* The concentration table's whole point is "these N codes all resolve
+             to one series" — so the series has to be reachable from it. It
+             hands back a commodity_id; a commodity can hold several region
+             rows, so prefer one that actually carries values. Searches `rows`,
+             not `visibleRows`, so an active filter can't hide the target. */
+          onOpenSeries={(commodityId) => {
+            const candidates = rows.filter(r => r.commodity_id === commodityId);
+            const row = candidates.find(r => r.latest != null) || candidates[0];
+            if (!row) return;
+            setShowResolution(false);
+            setPopupRow(row);
+          }}
+        />
       )}
 
       {showDerived && (

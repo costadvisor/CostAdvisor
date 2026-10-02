@@ -116,7 +116,7 @@ def _json(name: str):
 
 # ── functionality (mechanical) ────────────────────────────────────────────────
 
-def _load_functionality(db: Session, out: DimensionLoadReport) -> None:
+def _load_functionality(db: Session, out: DimensionLoadReport, subject_cache: dict) -> None:
     diff = _diff(out.report, "functionality terms")
     taxonomy = _json("FUNCTIONALITY_TAXONOMY")
     terms = {}
@@ -152,11 +152,11 @@ def _load_functionality(db: Session, out: DimensionLoadReport) -> None:
                 DimensionAssertion.team_id.is_(None)).first()
             assert_term(db, alias.term, subject_type="formula",
                         subject_code=subject_code, raw_value=raw,
-                        matched_alias=alias, source="loader")
+                        matched_alias=alias, source="loader", subject_cache=subject_cache)
             _tick(adiff, bool(existed))
 
 
-def _load_functionality_family(db: Session, out: DimensionLoadReport) -> None:
+def _load_functionality_family(db: Session, out: DimensionLoadReport, subject_cache: dict) -> None:
     """The second, disjoint scheme — its own kind, deliberately.
 
     Family defaults are asserted on the family; subfamily overrides on the
@@ -193,7 +193,7 @@ def _load_functionality_family(db: Session, out: DimensionLoadReport) -> None:
                     DimensionAssertion.team_id.is_(None)).first()
                 assert_term(db, term, subject_type=subject_type,
                             subject_code=subject_code, raw_value=raw,
-                            source="loader")
+                            source="loader", subject_cache=subject_cache)
                 _tick(adiff, bool(existed))
 
     out.notes.append(
@@ -204,7 +204,7 @@ def _load_functionality_family(db: Session, out: DimensionLoadReport) -> None:
 
 # ── industry (targets only; the mapping is an analyst decision) ──────────────
 
-def _load_industry(db: Session, out: DimensionLoadReport) -> None:
+def _load_industry(db: Session, out: DimensionLoadReport, subject_cache: dict) -> None:
     diff = _diff(out.report, "industry terms")
     for i, label in enumerate(_json("INDUSTRY_TAXONOMY")):
         before = db.query(DimensionTerm).filter(
@@ -248,13 +248,13 @@ def _load_industry(db: Session, out: DimensionLoadReport) -> None:
                 DimensionAssertion.team_id.is_(None)).first()
             assert_term(db, alias.term, subject_type="formula",
                         subject_code=subject_code, raw_value=raw,
-                        matched_alias=alias, source="loader")
+                        matched_alias=alias, source="loader", subject_cache=subject_cache)
             _tick(adiff, bool(existed))
 
 
 # ── compliance flags (two sources, no adjudicator) ───────────────────────────
 
-def _load_compliance(db: Session, out: DimensionLoadReport) -> None:
+def _load_compliance(db: Session, out: DimensionLoadReport, subject_cache: dict) -> None:
     """Loads no terms and asserts only what the decision file already mapped.
 
     Two reasons, both measured. The raw side is **239 distinct labels**, many of
@@ -316,6 +316,7 @@ def _load_compliance(db: Session, out: DimensionLoadReport) -> None:
                 # Which file(s) named it, so the membership disagreement stays
                 # visible on the row rather than only in a load log.
                 detail={"severity": severity, "named_by": sources},
+                subject_cache=subject_cache,
             )
             _tick(adiff, bool(existed))
 
@@ -336,7 +337,7 @@ def _load_compliance(db: Session, out: DimensionLoadReport) -> None:
 
 # ── supply_region + substitution_risk (bounded, so they load) ────────────────
 
-def _load_supply_region(db: Session, out: DimensionLoadReport) -> None:
+def _load_supply_region(db: Session, out: DimensionLoadReport, subject_cache: dict) -> None:
     diff = _diff(out.report, "supply_region terms")
     for i, code in enumerate(_json("REGS")):
         before = db.query(DimensionTerm).filter(
@@ -374,11 +375,11 @@ def _load_supply_region(db: Session, out: DimensionLoadReport) -> None:
                     DimensionAssertion.team_id.is_(None)).first()
                 assert_term(db, alias.term, subject_type="formula",
                             subject_code=subject_code, raw_value=raw,
-                            matched_alias=alias, source="loader")
+                            matched_alias=alias, source="loader", subject_cache=subject_cache)
                 _tick(adiff, bool(existed))
 
 
-def _load_substitution_risk(db: Session, out: DimensionLoadReport) -> None:
+def _load_substitution_risk(db: Session, out: DimensionLoadReport, subject_cache: dict) -> None:
     diff = _diff(out.report, "substitution_risk terms")
     for code, label, order in RISK_TERMS:
         before = db.query(DimensionTerm).filter(
@@ -416,7 +417,7 @@ def _load_substitution_risk(db: Session, out: DimensionLoadReport) -> None:
                     DimensionAssertion.team_id.is_(None)).first()
                 assert_term(db, alias.term, subject_type="formula",
                             subject_code=subject_code, raw_value=raw,
-                            matched_alias=alias, source="loader")
+                            matched_alias=alias, source="loader", subject_cache=subject_cache)
                 _tick(adiff, bool(existed))
 
     out.notes.append(
@@ -499,12 +500,19 @@ def load_dimensions(db: Session) -> DimensionLoadReport:
     # queue never shrinks and nobody trusts it.
     clear_unresolved(db)
 
-    _load_functionality(db, out)
-    _load_functionality_family(db, out)
-    _load_industry(db, out)
-    _load_compliance(db, out)
-    _load_supply_region(db, out)
-    _load_substitution_risk(db, out)
+    # Shared across every facet below: resolve_subject's joins are read-only
+    # against reference tables this run never mutates, and thousands of
+    # assertions repeat the same handful of subjects (a formula tagged with
+    # several industries, say) — one dict turns that into one query per
+    # distinct subject instead of one per assertion.
+    subject_cache: dict[tuple[str, str], object] = {}
+
+    _load_functionality(db, out, subject_cache)
+    _load_functionality_family(db, out, subject_cache)
+    _load_industry(db, out, subject_cache)
+    _load_compliance(db, out, subject_cache)
+    _load_supply_region(db, out, subject_cache)
+    _load_substitution_risk(db, out, subject_cache)
     _load_producers(db, out)
 
     from app.models.dimension import UnresolvedValue

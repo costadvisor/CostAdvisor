@@ -65,28 +65,25 @@ from app.services.permissions import require_permission, require_platform_permis
 router = APIRouter()
 
 
-def _first_team_id(db: Session, user_id: uuid.UUID) -> uuid.UUID | None:
-    """The actor's first team, used only to attribute a *team* template's audit.
-
-    Never used for platform templates any more: attributing a platform action to
-    whichever team the actor happens to belong to put the event in an unrelated
-    tenant's log, and skipped it entirely for an actor with no team.
-    `log_platform_event` covers that case.
-    """
-    m = db.query(TeamMembership).filter(TeamMembership.user_id == user_id).first()
-    return m.team_id if m else None
-
-
 def _audit_template_event(db: Session, template, user_id: uuid.UUID,
                           event_type: str, entity_type: str, entity_id: str,
-                          new_value: dict | None = None) -> None:
-    """Audit an action on a template, whichever tenancy it has."""
+                          new_value: dict | None = None,
+                          previous_value: dict | None = None) -> None:
+    """Audit an action on a template, whichever tenancy it has.
+
+    Replaces `template.team_id or _first_team_id(...)` guarded by
+    `if audit_team_id:`, which failed two ways at once: a platform action was
+    filed under whichever team the actor happened to belong to — and
+    `audit_logs.team_id` CASCADEs on team delete, so removing that team erased
+    the record — while an actor with NO team skipped the audit entirely, which
+    is precisely the super-admin case where the record matters most.
+    """
     if template.team_id is not None:
         log_event(db, template.team_id, user_id, event_type, entity_type,
-                  entity_id, new_value=new_value)
+                  entity_id, previous_value=previous_value, new_value=new_value)
         return
     log_platform_event(db, user_id, event_type, entity_type, entity_id,
-                       new_value=new_value)
+                       previous_value=previous_value, new_value=new_value)
 
 
 def _coverage_out(db: Session, row) -> "FormulaCoverageOut":
@@ -255,11 +252,10 @@ def create_formula(
     db.add(template)
     db.flush()
 
-    audit_team_id = data.team_id or _first_team_id(db, current_user.id)
-    if audit_team_id:
-        log_event(db, audit_team_id, current_user.id, "create", "formula_template",
-                  str(template.id),
-                  new_value={"name": data.name, "platform": data.team_id is None})
+    _audit_template_event(db, template, current_user.id, "create",
+                          "formula_template", str(template.id),
+                          new_value={"name": data.name,
+                                     "platform": data.team_id is None})
 
     db.expunge(template)
     db.commit()
@@ -296,11 +292,10 @@ def update_formula(
     if data.variables is not None:
         template.variables = data.variables
 
-    audit_team_id = template.team_id or _first_team_id(db, current_user.id)
-    if audit_team_id:
-        log_event(db, audit_team_id, current_user.id, "update", "formula_template",
-                  str(template.id), previous_value=prev,
-                  new_value={"name": template.name})
+    _audit_template_event(db, template, current_user.id, "update",
+                          "formula_template", str(template.id),
+                          previous_value=prev,
+                          new_value={"name": template.name})
 
     db.flush()
     db.expunge(template)
@@ -426,10 +421,9 @@ def delete_formula(
             detail="This formula is used as an input by another formula — remove that reference first",
         )
 
-    audit_team_id = template.team_id or _first_team_id(db, current_user.id)
-    if audit_team_id:
-        log_event(db, audit_team_id, current_user.id, "delete", "formula_template",
-                  str(template_id), previous_value={"name": template.name})
+    _audit_template_event(db, template, current_user.id, "delete",
+                          "formula_template", str(template_id),
+                          previous_value={"name": template.name})
 
     db.delete(template)
     try:
@@ -709,12 +703,11 @@ def upsert_coverage(
     row.base_quarter = data.base_quarter
     db.flush()
 
-    audit_team_id = template.team_id or _first_team_id(db, current_user.id)
-    if audit_team_id:
-        log_event(db, audit_team_id, current_user.id,
-                  "create" if created else "update", "formula_region_coverage",
-                  f"{template_id}:{region}",
-                  new_value={"base_price": data.base_price, "margin_pct": data.margin_pct})
+    _audit_template_event(db, template, current_user.id,
+                          "create" if created else "update",
+                          "formula_region_coverage", f"{template_id}:{region}",
+                          new_value={"base_price": data.base_price,
+                                     "margin_pct": data.margin_pct})
 
     out = _coverage_out(db, row)
     db.expunge(row)
@@ -783,10 +776,8 @@ def delete_coverage(
     if not row:
         raise HTTPException(status_code=404, detail="No coverage for this region")
 
-    audit_team_id = template.team_id or _first_team_id(db, current_user.id)
-    if audit_team_id:
-        log_event(db, audit_team_id, current_user.id, "delete", "formula_region_coverage",
-                  f"{template_id}:{region}")
+    _audit_template_event(db, template, current_user.id, "delete",
+                          "formula_region_coverage", f"{template_id}:{region}")
 
     db.delete(row)
     db.commit()
@@ -813,10 +804,10 @@ def propose_estimator_recipe(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    audit_team_id = template.team_id or _first_team_id(db, current_user.id)
-    if audit_team_id:
-        log_event(db, audit_team_id, current_user.id, "propose", "estimator_proposal",
-                  f"{template_id}:{region}", new_value={"status": proposal.status, "line_count": len(proposal.lines)})
+    _audit_template_event(db, template, current_user.id, "propose",
+                          "estimator_proposal", f"{template_id}:{region}",
+                          new_value={"status": proposal.status,
+                                     "line_count": len(proposal.lines)})
     db.commit()
     return proposal
 
@@ -856,10 +847,10 @@ def approve_estimator_proposal(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    audit_team_id = template.team_id or _first_team_id(db, current_user.id)
-    if audit_team_id:
-        log_event(db, audit_team_id, current_user.id, "approve", "estimator_proposal",
-                  str(proposal_id), new_value={"template_id": str(proposal.template_id), "region": proposal.region})
+    _audit_template_event(db, template, current_user.id, "approve",
+                          "estimator_proposal", str(proposal_id),
+                          new_value={"template_id": str(proposal.template_id),
+                                     "region": proposal.region})
 
     out = _coverage_out(db, coverage)
     db.expunge(coverage)
@@ -884,9 +875,8 @@ def reject_estimator_proposal(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    audit_team_id = template.team_id or _first_team_id(db, current_user.id)
-    if audit_team_id:
-        log_event(db, audit_team_id, current_user.id, "reject", "estimator_proposal", str(proposal_id))
+    _audit_template_event(db, template, current_user.id, "reject",
+                          "estimator_proposal", str(proposal_id))
     db.commit()
     return {"status": "rejected"}
 
@@ -961,10 +951,12 @@ async def upload_coverage_prices(
                 cov.margin_pct = r["margin_pct"]
 
     if not dry_run and updated:
-        audit_team_id = _first_team_id(db, current_user.id)
-        if audit_team_id:
-            log_event(db, audit_team_id, current_user.id, "update", "formula_region_coverage",
-                      "bulk_price_upload", new_value={"filename": filename, "updated": updated})
+        # This endpoint is gated on PLATFORM formulas.edit, so the upload is a
+        # platform action by construction — there is no template to read a tier
+        # from, and no tenant to borrow.
+        log_platform_event(db, current_user.id, "update", "formula_region_coverage",
+                           "bulk_price_upload",
+                           new_value={"filename": filename, "updated": updated})
         db.commit()
 
     return {"filename": filename, "rows_processed": updated, "errors": errors, "dry_run": dry_run}

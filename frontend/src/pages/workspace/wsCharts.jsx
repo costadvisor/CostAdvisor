@@ -41,13 +41,19 @@ export function Sparkline({ data = [], color, width = 84, height = 26, label }) 
 }
 
 /* ── MultiLineChart — axes, grid, N lines, optional ref + forecast split ─ */
+// `band` draws a filled uncertainty envelope behind the lines:
+// { lo: [], hi: [], color? }, index-aligned with xLabels, null where it does
+// not apply. Added for the real projection intervals on the Forecast tab — a
+// forecast line without its interval reads as more certain than it is.
 export function MultiLineChart({
   series = [], xLabels = [], height = 200, refValue = null, refLabel,
-  splitIndex = null, splitLabel = 'Forecast',
+  splitIndex = null, splitLabel = 'Forecast', band = null,
 }) {
   const W = 720, H = height, PAD = { l: 48, r: 14, t: 16, b: 28 };
-  const all = series.flatMap(s => s.values).filter(v => v != null);
+  const bandVals = band ? [...(band.lo || []), ...(band.hi || [])].filter(v => v != null) : [];
+  const all = [...series.flatMap(s => s.values).filter(v => v != null), ...bandVals];
   if (all.length < 2) return <div style={{ color: 'var(--muted)', fontSize: 12, padding: 16 }}>No data.</div>;
+  // Scale includes the band, or a wide interval is silently clipped.
   const minV = Math.min(...all, refValue ?? Infinity) * 0.98;
   const maxV = Math.max(...all, refValue ?? -Infinity) * 1.02;
   const N = xLabels.length || Math.max(...series.map(s => s.values.length));
@@ -73,6 +79,16 @@ export function MultiLineChart({
             {refLabel && <text x={W - PAD.r} y={yS(refValue) - 4} textAnchor="end" {...AXIS}>{refLabel}</text>}
           </g>
         )}
+        {band && (() => {
+          const idx = [];
+          for (let i = 0; i < N; i++) {
+            if (band.lo?.[i] != null && band.hi?.[i] != null) idx.push(i);
+          }
+          if (idx.length < 2) return null;
+          const top = idx.map(i => `${xS(i).toFixed(1)},${yS(band.hi[i]).toFixed(1)}`);
+          const bottom = idx.slice().reverse().map(i => `${xS(i).toFixed(1)},${yS(band.lo[i]).toFixed(1)}`);
+          return <polygon points={[...top, ...bottom].join(' ')} fill={band.color || 'var(--chart-fill)'} stroke="none" />;
+        })()}
         {splitIndex != null && splitIndex < N && (
           <g>
             <line x1={xS(splitIndex)} y1={PAD.t} x2={xS(splitIndex)} y2={H - PAD.b} stroke="var(--border-light)" strokeWidth={1} strokeDasharray="2 3" />

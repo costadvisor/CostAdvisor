@@ -158,10 +158,30 @@ class FormulaComponent(Base):
     line_region: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_proxy: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
+    # Scrum 27 — a component that IS another cost model ("Lego" formulas).
+    # Set together with component_type="model".
+    #
+    # What nesting means numerically, because the other reading is tempting and
+    # wrong: the child contributes its INDEX COMPOSITION, not its absolute
+    # price. Its lines fold into the parent with their weights multiplied by
+    # this line's weight, exactly as a chained FormulaTemplate already does,
+    # and the parent's own base_price stays the anchor. Using the child's price
+    # instead would need a consumption factor and a unit model that do not
+    # exist here, and would break the invariant that a recipe's weights sum
+    # to one.
+    #
+    # RESTRICT, not SET NULL: a deleted child would silently change the
+    # parent's price. Refusing the delete and saying why is the same choice
+    # the catalog makes for a template used as an input.
+    child_cost_model_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("cost_models.id", ondelete="RESTRICT"), nullable=True
+    )
+
     # Relationships
     formula_version = relationship("FormulaVersion", back_populates="components")
     commodity = relationship("CommodityIndex")
     via_template = relationship("FormulaTemplate")
+    child_cost_model = relationship("CostModel", foreign_keys=[child_cost_model_id])
 
     @property
     def commodity_name(self) -> str | None:
@@ -170,3 +190,10 @@ class FormulaComponent(Base):
     @property
     def via_template_name(self) -> str | None:
         return self.via_template.name if self.via_template else None
+
+    @property
+    def child_cost_model_name(self) -> str | None:
+        if not self.child_cost_model:
+            return None
+        product = self.child_cost_model.product
+        return product.name if product else None

@@ -115,6 +115,35 @@ def test_sibling_inheritance(db, tenant_a, client_as):
         _cleanup(db, [t.id], [idx_a.id, idx_b.id])
 
 
+def test_sibling_inheritance_flags_weaker_cross_region_fallback(db, tenant_a, client_as):
+    """A commodity with real data, but only in a THIRD region unrelated to
+    both the sibling's source region and the target region, is still
+    'available' (data_resolver's own scraped_any_region fallback would
+    genuinely resolve it) — but the reason names it as a weaker signal
+    rather than presenting it at the same strength as a direct regional
+    match (Phase 2 item 3, post-Wave-3 roadmap)."""
+    idx_cross = _mk_index(db, f"IDX-{uuid.uuid4().hex[:8]}")
+    t = _mk_template(db, "cross-region-test", tenant_a["user_id"], team_id=tenant_a["team_id"])
+    _mk_coverage(db, t.id, "Europe", "CONF-HIGH")
+    _mk_component(db, t.id, "Europe", "Feedstock C", 100, commodity_id=idx_cross.id)
+    # Data only in MEA — neither the sibling's own region (Europe) nor the
+    # proposal's target region (NA), nor GLOBAL.
+    db.add(IndexValue(commodity_id=idx_cross.id, region="MEA", year=2025, quarter=1, value=50))
+    db.commit()
+
+    c = client_as(tenant_a)
+    try:
+        r = c.post(f"/api/formulas/{t.id}/estimator/propose", params={"region": "NA"})
+        assert r.status_code == 200, r.text
+        line = r.json()["lines"][0]
+        # Real availability (the resolver's own any-region fallback would
+        # genuinely resolve this) — never silently excluded.
+        assert line["series_available"] is True
+        assert "weaker" in line["candidate_reason"]
+    finally:
+        _cleanup(db, [t.id], [idx_cross.id])
+
+
 def test_no_evidence_returns_evaluable_false(db, tenant_a, client_as):
     t = _mk_template(db, "no-evidence", tenant_a["user_id"], team_id=tenant_a["team_id"])
     c = client_as(tenant_a)

@@ -135,9 +135,13 @@ def delete_note(
     ).first()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
-    # Author can delete own; otherwise needs costing.edit.
+    # Author can delete own; otherwise needs edit rights on the cost model.
+    # This asked for `costing.edit`, which is not a permission that exists — the
+    # `costing` category holds only `view`. A key absent from the vocabulary can
+    # never be granted by a plan or a role, so it resolved only through the
+    # membership fallback and denied every member holding a custom role.
     if note.author_user_id != current_user.id:
-        require_permission(db, current_user, cm.team_id, "costing.edit")
+        require_permission(db, current_user, cm.team_id, "cost_models.edit")
     else:
         require_permission(db, current_user, cm.team_id, "costing.view")
     log_event(db, cm.team_id, current_user.id, "delete", "cost_model_note", str(note.id))
@@ -154,7 +158,9 @@ def set_flag(
     current_user: User = Depends(get_current_user),
 ):
     cm = _get_model_or_404(db, cost_model_id)
-    require_permission(db, current_user, cm.team_id, "costing.edit")
+    # Setting the negotiation flag edits the cost model; `costing.edit` never
+    # existed as a permission row (see the note on note deletion above).
+    require_permission(db, current_user, cm.team_id, "cost_models.edit")
     if data.negotiation_state not in NEGOTIATION_STATES:
         raise HTTPException(status_code=422, detail=f"Invalid state. Allowed: {sorted(NEGOTIATION_STATES)}")
     prev = cm.negotiation_state

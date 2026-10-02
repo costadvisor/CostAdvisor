@@ -16,9 +16,10 @@ from app.routers import (
     volumes, costing, scenarios, suppliers, chemical_families, subfamilies,
     fx_rates, audit, portfolio, admin, ai, account, freight_lanes,
     invites, access_requests, settings as settings_router, formulas, demo, regions,
-    collaboration, alerts, provider_credentials, sheets, quotes, resolution,
+    collaboration, alerts, provider_credentials, sheets, quotes, price_lists,
+    negotiation_prep, push, ai_cost_modeler, resolution,
     contracts, radar, editorial, dimensions, index_dossier, seasonality,
-    intelligence, support,
+    intelligence, support, index_validation,
 )
 # Imported for its side effect: registers the before_flush listener that
 # auto-registers region codes so the region FK never rejects a user write.
@@ -99,9 +100,17 @@ app.include_router(indexes.router, prefix="/api/indexes", tags=["indexes"])
 # Platform-grain index resolution reads (Scrum 74) — deliberately its own
 # surface rather than a mode of /api/indexes, which is team-scoped.
 app.include_router(resolution.router, prefix="/api/resolution", tags=["resolution"])
+# Data-quality findings over those same layers (Scrum 34). Same platform
+# grain and the same reasoning for living on its own surface.
+app.include_router(index_validation.router, prefix="/api/validation",
+                  tags=["validation"])
 app.include_router(provider_credentials.router, prefix="/api/indexes", tags=["provider-credentials"])
 app.include_router(sheets.router, prefix="/api/sheets", tags=["sheets"])
 app.include_router(quotes.router, prefix="/api/quotes", tags=["quotes"])
+app.include_router(price_lists.router, prefix="/api/price-lists", tags=["price-lists"])
+app.include_router(negotiation_prep.router, prefix="/api/negotiation-prep", tags=["negotiation-prep"])
+app.include_router(push.router, prefix="/api/push", tags=["push"])
+app.include_router(ai_cost_modeler.router, prefix="/api/ai-cost-modeler", tags=["ai-cost-modeler"])
 app.include_router(prices.router, prefix="/api/prices", tags=["prices"])
 app.include_router(volumes.router, prefix="/api/volumes", tags=["volumes"])
 app.include_router(fx_rates.router, prefix="/api/fx-rates", tags=["fx-rates"])

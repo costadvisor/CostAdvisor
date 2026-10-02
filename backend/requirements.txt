@@ -21,3 +21,4 @@ slowapi==0.1.9
 google-api-python-client==2.165.0
 google-auth-oauthlib==1.4.0
 sentry-sdk==2.19.0
+pywebpush==2.5.0

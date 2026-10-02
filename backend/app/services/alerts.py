@@ -165,6 +165,12 @@ def _triggers_for_subscription(db: Session, sub: AlertSubscription):
 def _deliver(db: Session, sub: AlertSubscription, team: Team, message: str) -> bool:
     """Send one alert over its channel. Returns True if delivered."""
     try:
+        if sub.channel == "push":
+            # Best-effort like the other two: a device that cannot be reached
+            # must not stop the alert being recorded.
+            from app.services.push import send_to_user
+            url = f"/portfolio/{sub.cost_model_id}" if sub.cost_model_id else "/monitor"
+            return send_to_user(db, sub.user_id, "CostAdvisor alert", message, url) > 0
         if sub.channel == "slack":
             if not team.slack_webhook_url:
                 return False

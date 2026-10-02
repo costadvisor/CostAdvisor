@@ -23,6 +23,13 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
   const [scrapeConfig, setScrapeConfig] = useState('{}');
   const [fixedValue, setFixedValue] = useState('');
   const [uploadFile, setUploadFile] = useState(null);
+  const [pcProvider, setPcProvider] = useState('');
+  const [pcSeriesId, setPcSeriesId] = useState('');
+  // Team's own configured provider credentials, filtered to verified ones —
+  // pointing a new source at an unverified/expired credential would just
+  // fail on first scrape, so don't offer it here (Team Settings is where
+  // it gets verified).
+  const [teamCredentials, setTeamCredentials] = useState([]);
   const [compositeExpr, setCompositeExpr] = useState('');
   const [compositeVars, setCompositeVars] = useState({});
   // Region the composite is computed for; '' = region-agnostic (reports as GLOBAL).
@@ -44,8 +51,20 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
       setHighlightedIndex(-1);
       setCustomUnit('');
       setCustomCurrency('');
+      setPcProvider('');
+      setPcSeriesId('');
     }
   }, [isOpen]);
+
+  // Load the team's own verified provider credentials once the modal opens.
+  useEffect(() => {
+    if (!isOpen || !teamId) return;
+    let alive = true;
+    api.get('/api/indexes/provider-credentials', { params: { team_id: teamId } })
+      .then(res => { if (alive) setTeamCredentials((res.data || []).filter(c => c.status === 'ok')); })
+      .catch(() => { if (alive) setTeamCredentials([]); });
+    return () => { alive = false; };
+  }, [isOpen, teamId]);
 
   // Load the convertible currency set once the modal opens. Failure is non-fatal:
   // the list falls back to whatever currencies existing indexes already use, so the
@@ -146,6 +165,10 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
       setMessage({ type: 'error', text: 'Enter a fixed value.' });
       return;
     }
+    if (sourceType === 'provider_credential' && (!pcProvider || !pcSeriesId.trim())) {
+      setMessage({ type: 'error', text: 'Select a provider and enter a series ID.' });
+      return;
+    }
 
     setSaving(true);
     setMessage(null);
@@ -171,7 +194,9 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
         region: region,
         source_type: sourceType,
         scrape_url: sourceType === 'scrape_url' ? scrapeUrl : null,
-        scrape_config: sourceType === 'scrape_url' ? config : null,
+        scrape_config: sourceType === 'scrape_url' ? config
+          : sourceType === 'provider_credential' ? { provider: pcProvider, series_id: pcSeriesId.trim() }
+          : null,
         fixed_value: sourceType === 'fixed' ? parseFloat(fixedValue) : null,
       });
 
@@ -202,6 +227,8 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
       setScrapeConfig('{}');
       setFixedValue('');
       setUploadFile(null);
+      setPcProvider('');
+      setPcSeriesId('');
       onAdded();
       setTimeout(() => onClose(), 600);
     } catch (err) {
@@ -468,9 +495,34 @@ export default function AddIndexModal({ isOpen, onClose, commodities, teamId, on
             <option value="scrape_url">Scrape URL</option>
             <option value="upload">Upload</option>
             <option value="fixed">Fixed (constant value)</option>
+            <option value="provider_credential">Provider (e.g. Fastmarkets)</option>
             {isSuperAdmin && <option value="composite">Composite (calculated from other indexes)</option>}
           </select>
         </div>
+
+        {sourceType === 'provider_credential' && (
+          <div style={{ marginBottom: 14 }}>
+            <label className="ca-label">Provider</label>
+            <select className="ca-select" value={pcProvider} onChange={e => setPcProvider(e.target.value)}>
+              <option value="">Select a configured provider…</option>
+              {teamCredentials.map(c => (
+                <option key={c.id} value={c.provider}>{c.provider}</option>
+              ))}
+            </select>
+            {teamCredentials.length === 0 && (
+              <div style={{ fontSize: 10, color: 'var(--accent3)', marginTop: 4 }}>
+                No verified provider credentials for this team yet — add and verify one under Team → Settings first.
+              </div>
+            )}
+            <label className="ca-label" style={{ marginTop: 10 }}>Series ID</label>
+            <input
+              className="ca-input"
+              value={pcSeriesId}
+              onChange={e => setPcSeriesId(e.target.value)}
+              placeholder="e.g. MB-STE-0032"
+            />
+          </div>
+        )}
 
         {sourceType === 'composite' && (
           <div style={{ marginBottom: 14 }}>

@@ -123,20 +123,41 @@ def _linked_price_history(
     return history if len(history) >= MIN_QUARTERS else None
 
 
-def _has_usable_series(db: Session, commodity_id: int, region: str) -> bool:
-    """Structurally usable — not 'has a value for a specific period' (that's
-    an ordinary, expected data_gap elsewhere), but 'could ever resolve at
-    all'. A composite computes live and never carries its own IndexValue
-    rows, so it's checked separately, never conflated with blocked."""
+def _has_usable_series(db: Session, commodity_id: int, region: str) -> tuple[bool, str]:
+    """Structurally usable, AND at what fidelity — not 'has a value for a
+    specific period' (that's an ordinary, expected data_gap elsewhere), but
+    'could ever resolve at all, and how well for the TARGET region'.
+
+    Returns (available, tier):
+      - "region" — resolves via the resolver's own strong tiers (an exact
+        region match, or GLOBAL) — real availability for this region.
+      - "any_region" — the commodity has data, but only in some other,
+        unrelated region; still real (this is `data_resolver`'s own deepest
+        fallback, `scraped_any_region`, not a fabrication), but a materially
+        weaker cross-region signal that a sibling-inherited proposal line
+        should never present at the same strength as a direct regional
+        match (Scrum 57's per-region proxy-fidelity concern, applied here).
+      - "none" — no usable series anywhere.
+
+    A composite computes live and never carries its own IndexValue rows, so
+    it's checked separately, never conflated with blocked.
+    """
     ci = db.query(CommodityIndex).filter(CommodityIndex.id == commodity_id).first()
     if not ci:
-        return False
+        return False, "none"
     if ci.composite_expression:
-        return True
+        return True, "region"
     if ci.retrieval_status == "blocked":
-        return False
+        return False, "none"
     from app.models.index_data import IndexValue
-    return db.query(IndexValue.id).filter(IndexValue.commodity_id == commodity_id).first() is not None
+    if db.query(IndexValue.id).filter(
+        IndexValue.commodity_id == commodity_id,
+        IndexValue.region.in_([region, "GLOBAL"]),
+    ).first() is not None:
+        return True, "region"
+    if db.query(IndexValue.id).filter(IndexValue.commodity_id == commodity_id).first() is not None:
+        return True, "any_region"
+    return False, "none"
 
 
 def _correlation_for_commodity(
@@ -212,13 +233,20 @@ def propose_recipe(db: Session, template_id: uuid.UUID, region: str) -> dict:
 
         proposed = []
         for l in sibling_lines:
-            available = _has_usable_series(db, l.commodity_id, region) if l.commodity_id else True
+            available, tier = (
+                _has_usable_series(db, l.commodity_id, region) if l.commodity_id else (True, "region")
+            )
             reason = f"Inherited from {source_region}'s recipe for this same formula"
             r = correlations.get(l.commodity_id)
             if r is not None:
                 reason += f"; correlation r={r:.2f} against {len(price_history)}q of linked price history"
             if not available:
                 reason += " (no usable series in this region — flagged, not excluded)"
+            elif tier == "any_region":
+                reason += (
+                    " (no data in this region or GLOBAL — resolves only via a weaker "
+                    "cross-region fallback; treat this line's fidelity accordingly)"
+                )
             proposed.append({
                 "name": l.name, "component_type": l.component_type, "commodity_id": l.commodity_id,
                 "weight_pct": round(float(l.weight_pct) / total_weight * 100.0, 4),

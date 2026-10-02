@@ -42,8 +42,9 @@ from app.services.drop.index_loader import load_index_layer
 from app.services.proxy_derivation import (
     ABSENT, CURRENT, STALE, UNRESOLVABLE_AMBIGUOUS, UNRESOLVABLE_NO_HISTORY,
     UNRESOLVABLE_NO_SERIES, blocked_series, derivation_spec, derive_value,
-    resolve_with_provenance, swap_backlog, type_code_value,
+    priceable_codes, resolve_with_provenance, swap_backlog, type_code_value,
 )
+from app.services.resolution import resolve_type_code
 
 needs_drop = pytest.mark.skipif(
     not drop_available(), reason="costadvisor-data drop not present in this checkout"
@@ -84,9 +85,17 @@ def _code(db, series, *, resolution="resolved", **kw) -> TypeCode:
     return tc
 
 
-def _combo(db, tenant, region="Europe"):
+def _combo(db, tenant, region="Europe", *, platform=False):
+    """`platform=True` makes a CATALOG template (team_id NULL).
+
+    The swap backlog ranks platform catalog weight, so a test about catalog
+    weight must build a platform row. Using a team template here was convenient
+    but wrong: it meant those tests passed only because the backlog was counting
+    team forks, which is the defect H3 fixed.
+    """
     tpl = FormulaTemplate(
-        team_id=tenant["team_id"], created_by=tenant["user_id"],
+        team_id=None if platform else tenant["team_id"],
+        created_by=tenant["user_id"],
         name=f"tpl-{uuid.uuid4().hex[:6]}", code=f"C-{uuid.uuid4().hex[:6]}",
         expression=None,
     )
@@ -401,7 +410,7 @@ def test_the_backlog_is_ranked_by_live_catalog_weight(db, tenant_a):
     s = _series(db)
     heavy = _code(db, s, swap_priority="A")
     light = _code(db, s, swap_priority="A")
-    tpl = _combo(db, tenant_a)
+    tpl = _combo(db, tenant_a, platform=True)   # catalog weight = platform rows
     try:
         db.add(FormulaTemplateComponent(
             template_id=tpl.id, region="Europe", name="heavy",
@@ -436,7 +445,7 @@ def test_margin_and_fixed_lines_stay_out_of_the_weight_denominator(db, tenant_a)
     ranking meaningless."""
     s = _series(db)
     tc = _code(db, s)
-    tpl = _combo(db, tenant_a)
+    tpl = _combo(db, tenant_a, platform=True)   # catalog weight = platform rows
     try:
         before = swap_backlog(db, limit=1).total_catalog_weight
         db.add(FormulaTemplateComponent(
@@ -472,7 +481,7 @@ def test_an_unpriceable_code_carrying_weight_appears_with_it(db, tenant_a):
     dry = _series(db)
     tc = _code(db, dry, resolution="no_series", swap_priority="A",
                ideal_index="the assessment we would rather have")
-    tpl = _combo(db, tenant_a)
+    tpl = _combo(db, tenant_a, platform=True)   # catalog weight = platform rows
     try:
         db.add(FormulaTemplateComponent(
             template_id=tpl.id, region="Europe", name="Unbought feed",
@@ -597,3 +606,47 @@ def test_no_loaded_series_has_an_executable_derivation_yet(db):
         f"{len(configured)} series now carry executable proxy specs — "
         "the derivation path is no longer idle; retire this test"
     )
+
+
+def test_the_backlog_and_the_value_endpoint_agree_on_priceable(db):
+    """H4/M7. There were two definitions of "priceable" and they disagreed.
+
+    The swap backlog said `resolution == "resolved"`. But this module already
+    defines `resolved_but_no_history` — a code that resolves to a real series
+    carrying no numbers — and `resolve_type_code` correctly calls that
+    unresolvable. So the backlog told a buyer nothing was wrong with a code that
+    cannot price a single line.
+
+    This case does not occur in the live catalogue today (every resolved code has
+    values), so it is constructed here: a latent contradiction that only shows up
+    once a series is added before its data, or its values are purged. Relying on
+    live data would have left it untested, which is exactly how it shipped.
+    """
+    dry = _series(db)                      # resolves, but no monthly values
+    wet = _series(db)
+    _months(db, wet, [(2024, m, 100.0 + m, "actual") for m in range(1, 7)])
+    dry_code = _code(db, dry, resolution="resolved")
+    wet_code = _code(db, wet, resolution="resolved")
+    try:
+        priceable = priceable_codes(db)
+        assert wet_code.id in priceable
+        assert dry_code.id not in priceable, (
+            "a resolved code whose series carries no numbers is not priceable"
+        )
+
+        entries = {e.code: e for e in swap_backlog(db, limit=1000).entries}
+        assert entries[wet_code.code].priceable is True
+        assert entries[dry_code.code].priceable is False
+
+        # …and that is the same answer the single-code read already gave. That
+        # read (resolution.py:126) had the definition right all along; the
+        # backlog was the odd one out, which is why the two could disagree about
+        # the same code without anything failing.
+        assert resolve_type_code(db, dry_code.code)["priceable"] is False
+        assert resolve_type_code(db, wet_code.code)["priceable"] is True
+        for code_obj in (dry_code, wet_code):
+            assert (entries[code_obj.code].priceable
+                    is resolve_type_code(db, code_obj.code)["priceable"])
+    finally:
+        _cleanup(db, code_ids=[dry_code.id, wet_code.id],
+                 series_ids=[dry.id, wet.id])

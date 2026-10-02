@@ -77,6 +77,32 @@ def test_team_scope_is_visible_to_teammates(client_as, tenant_a, db):
     _delete_teammate(db, teammate["user_id"])
 
 
+def test_is_staff_answers_for_each_kind_of_caller(client_as, tenant_a, support_agent,
+                                                  user_factory):
+    """The probe the Support console's entry point is built on.
+
+    It exists because /auth/me carries no platform-role list, so the frontend
+    cannot tell a Support Agent from a plain user client-side. Until now nothing
+    called it and nothing tested it, while the console it was written for had no
+    door at all.
+    """
+    assert client_as(support_agent).get(
+        "/api/support/is-staff").json()["is_staff"] is True
+    assert client_as(tenant_a).get(
+        "/api/support/is-staff").json()["is_staff"] is False
+    # A super admin qualifies without holding the role — `_is_staff` short-
+    # circuits on it, which is what keeps the existing console working.
+    admin = user_factory(is_super_admin=True)
+    assert client_as(admin).get(
+        "/api/support/is-staff").json()["is_staff"] is True
+
+
+def test_is_staff_requires_authentication(client):
+    """A failed probe must not read as staff. The frontend denies on error, and
+    this is the other half of that contract."""
+    assert client.get("/api/support/is-staff").status_code == 401
+
+
 def test_staff_can_reply_and_change_status(client_as, tenant_a, support_agent):
     user_c = client_as(tenant_a)
     thread = user_c.post(f"/api/support/threads?team_id={tenant_a['team_id']}",

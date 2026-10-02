@@ -104,3 +104,27 @@ class FREDPPIChlorineScraper(FREDScraper):
     """PPI: Alkalies and chlorine (monthly, index 1982=100)."""
     commodity_name = "PPI Chlorine USA"
     SERIES_ID = "WPU061303"
+
+
+# ── FD-1 remainder: 2026-07 catalog drop short-code names ──────────────
+# The current catalog's commodities are named with short type-codes (CU,
+# CORN, LNG-JKM, ...), not the descriptive names the scrapers above use —
+# so these three are registered directly against the new codes.
+
+class FREDCopperScraper(FREDScraper):
+    """Global price of Copper (IMF Primary Commodity Prices, monthly, USD/metric ton)."""
+    commodity_name = "CU"
+    SERIES_ID = "PCOPPUSDM"
+
+
+class FREDCornScraper(FREDScraper):
+    """Global price of Corn (IMF Primary Commodity Prices, monthly, USD/metric ton)."""
+    commodity_name = "CORN"
+    SERIES_ID = "PMAIZMTUSDM"
+
+
+class FREDLNGJKMScraper(FREDScraper):
+    """Global price of LNG, Asia — FRED's published proxy for the JKM Asia LNG
+    benchmark (IMF Primary Commodity Prices, monthly, USD/MMBtu)."""
+    commodity_name = "LNG-JKM"
+    SERIES_ID = "PNGASJPUSDM"

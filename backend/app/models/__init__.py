@@ -45,8 +45,13 @@ from app.models.auth_event import AuthEvent
 from app.models.index_projection import IndexProjectionRun, IndexProjectionPoint
 from app.models.sheet_import_run import SheetImportRun, SheetImportRowDiff
 from app.models.support import SupportThread, SupportMessage, SupportCannedResponse, SupportFAQ
+from app.models.index_validation import (
+    IndexValidationFinding, IndexValidationRun,
+)
 
 __all__ = [
+    "IndexValidationFinding",
+    "IndexValidationRun",
     "User",
     "Team",
     "TeamMembership",

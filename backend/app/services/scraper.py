@@ -281,6 +281,7 @@ from app.services.scrapers.fred import (
     FREDScraper,
     FREDECIScraper, FREDPPIChemicalsScraper, FREDIndustrialProductionScraper,
     FREDPPIChlorineScraper,
+    FREDCopperScraper, FREDCornScraper, FREDLNGJKMScraper,
 )
 from app.services.scrapers.ecb import (
     ECBScraper,
@@ -317,6 +318,12 @@ SCRAPER_REGISTRY: dict[str, type[BaseScraper]] = {
     "PPI Chemicals USA": FREDPPIChemicalsScraper,
     "Industrial Production USA": FREDIndustrialProductionScraper,
     "PPI Chlorine USA": FREDPPIChlorineScraper,
+    # FD-1 remainder — 2026-07 catalog drop short-code names (verified live
+    # against fred.stlouisfed.org; see fred.py for why these are keyed
+    # differently from the descriptive names above)
+    "CU": FREDCopperScraper,
+    "CORN": FREDCornScraper,
+    "LNG-JKM": FREDLNGJKMScraper,
     # ECB (exchange rates)
     "EUR/USD": ECBEURUSDScraper,
     "GBP/EUR": ECBGBPEURScraper,

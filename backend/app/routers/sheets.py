@@ -4,17 +4,17 @@ it as a reviewable diff, apply the diff as a separate explicit action.
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.user import User
 from app.models.sheet_import_run import SheetImportRun, SheetImportRowDiff
 from app.routers.auth import get_current_user
-from app.routers.formulas import _first_team_id
 from app.schemas.sheet_roundtrip import SheetImportRunOut, SheetApplyResult
-from app.services.audit import log_event
+from app.services.audit import log_platform_event
 from app.services.permissions import require_platform_permission
 from app.services.sheet_roundtrip import get_spec
 from app.services.sheet_roundtrip.excel_io import build_export_workbook, read_import_rows
@@ -30,25 +30,49 @@ def _resolve_spec(payload_key: str):
         raise HTTPException(status_code=404, detail=f"Unknown sheet payload '{payload_key}'")
 
 
-# NOTE: the query params below are the one registered payload's filter
-# fields (FormulaCoveragePriceFilter). The payload-spec layer (query_rows/
-# apply_change/get_current_value) is genuinely generic — adding a second
-# payload is a new spec + registry entry — but FastAPI's static typing means
-# a single route's OpenAPI-visible query params can't vary per path-param
-# value. With one registered payload today, a concrete param list here is
-# simpler and more honest than a fake "generic" filter blob; a second
-# payload with different filter fields would extend this list.
+def _bind_filter(spec, request: Request):
+    """Build the payload's OWN filter object from the query string.
+
+    This used to be a hardcoded `subfamily_id`/`needs_review` pair — the fields
+    of the first registered payload — passed straight into
+    `spec.filter_schema(...)`. The comment here even predicted the failure ("a
+    second payload with different filter fields would extend this list"), and
+    when `dimension_decision` arrived it did not: Pydantic drops unknown kwargs
+    silently, so `DimensionDecisionFilter.kind` was always None and every
+    dimension export covered the entire unresolved register regardless of the
+    facet the user picked. Silently wrong data, no error.
+
+    Reading the spec's own `model_fields` means a third payload needs no change
+    here at all. The cost is that the filter params no longer appear per-route in
+    OpenAPI — they vary by `payload_key`, which a single static signature cannot
+    express — so the accepted fields are named in each route's docstring instead.
+    Unknown query params are ignored (a stray `?foo=1` is not an error); a
+    malformed value for a real field is a 422 rather than a silent default.
+    """
+    fields = spec.filter_schema.model_fields
+    supplied = {k: v for k, v in request.query_params.items() if k in fields}
+    try:
+        return spec.filter_schema(**supplied)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors())
+
+
 @router.get("/{payload_key}/export")
 def export_sheet(
     payload_key: str,
-    subfamily_id: int | None = Query(None),
-    needs_review: bool | None = Query(None),
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Export a filtered slice as a styled workbook.
+
+    Filter params vary by payload and are read from the query string:
+    `formula_coverage_price` accepts `subfamily_id`/`needs_review`;
+    `dimension_decision` accepts `kind`/`min_occurrences`.
+    """
     spec = _resolve_spec(payload_key)
     require_platform_permission(db, current_user, spec.permission_key)
-    filter_spec = spec.filter_schema(subfamily_id=subfamily_id, needs_review=needs_review)
+    filter_spec = _bind_filter(spec, request)
 
     rows = spec.query_rows(db, filter_spec)
     buf = build_export_workbook(spec, rows)
@@ -62,17 +86,21 @@ def export_sheet(
 @router.post("/{payload_key}/import", response_model=SheetImportRunOut)
 async def import_sheet(
     payload_key: str,
+    request: Request,
     file: UploadFile = File(...),
-    subfamily_id: int | None = Query(None),
-    needs_review: bool | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Computes and persists a diff. Never mutates the underlying payload
-    table — applying is a separate call (POST .../import-runs/{id}/apply)."""
+    table — applying is a separate call (POST .../import-runs/{id}/apply).
+
+    Filter params vary by payload and are read from the query string; see
+    `export_sheet`. The diff is always computed against the same slice the
+    filter names, so a reimport is compared with live rows, not a snapshot.
+    """
     spec = _resolve_spec(payload_key)
     require_platform_permission(db, current_user, spec.permission_key)
-    filter_spec = spec.filter_schema(subfamily_id=subfamily_id, needs_review=needs_review)
+    filter_spec = _bind_filter(spec, request)
 
     content = await file.read()
     try:
@@ -131,12 +159,16 @@ def apply_sheet_import(
     run.applied_by = current_user.id
     run.applied_at = datetime.now(timezone.utc)
 
-    audit_team_id = _first_team_id(db, current_user.id)
-    if audit_team_id:
-        log_event(
-            db, audit_team_id, current_user.id, "apply", "sheet_import_run", str(run.id),
-            new_value={"payload_key": run.payload_key, "applied": len(applied), "skipped_stale": len(skipped_stale)},
-        )
+    # Applying a sheet is gated on a PLATFORM permission (`spec.permission_key`
+    # via require_platform_permission), so it is a platform action with no tenant
+    # to attribute it to. It used to borrow the actor's first team — misfiling it,
+    # and losing the record entirely when that team was deleted or when the actor
+    # had no team at all, which is the super-admin case this most needs to cover.
+    log_platform_event(
+        db, current_user.id, "apply", "sheet_import_run", str(run.id),
+        new_value={"payload_key": run.payload_key, "applied": len(applied),
+                   "skipped_stale": len(skipped_stale)},
+    )
     db.commit()
     db.refresh(run)
     return SheetApplyResult(run=run, applied=applied, skipped_stale=skipped_stale)

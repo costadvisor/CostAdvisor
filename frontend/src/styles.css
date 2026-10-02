@@ -721,6 +721,18 @@ input[type=range] { padding: 0; cursor: pointer; accent-color: var(--accent); }
   body, #root { background: #fff; color: #111; }
   .ca-nav, .ca-no-print { display: none !important; }
   .ca-print-only { display: block !important; }
+  /* Print-isolation for a subtree embedded inside a modal/overlay that has
+     no dedicated print route of its own (e.g. FormulaDetailModal's
+     negotiation-position panel). Toggle `ca-print-isolate` on <body> right
+     before/after window.print(), and mark exactly one ancestor subtree per
+     print call with `ca-print-isolate-target`. Uses visibility (not display)
+     so it works regardless of DOM nesting depth or position:fixed ancestors. */
+  body.ca-print-isolate * { visibility: hidden !important; }
+  body.ca-print-isolate .ca-print-isolate-target,
+  body.ca-print-isolate .ca-print-isolate-target * { visibility: visible !important; }
+  body.ca-print-isolate .ca-print-isolate-target {
+    position: absolute; left: 0; top: 0; width: 100%; padding: 16px;
+  }
   .ca-card { border: 1px solid #ddd; background: #fff; box-shadow: none; }
   .ca-metric { border: 1px solid #ddd; background: #fafafa; }
   .ca-page { padding: 0; max-width: 100%; }

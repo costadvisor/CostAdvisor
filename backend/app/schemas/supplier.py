@@ -31,10 +31,11 @@ class SupplierTrustScoreOut(BaseModel):
     grade: str | None
     inputs: dict
     computed_at: datetime
-    # Same disclosure as SupplierTrustScoresResponse.resolution below, repeated
-    # here so the single-supplier endpoints (which return a bare list of these,
-    # not the wrapped multi-supplier response) carry it too — not just the
-    # all-suppliers listing.
+    # How THIS score was reached: "producer" when it pooled every supplier row
+    # in the team naming the same canonical company, "raw_supplier_name" when it
+    # did not (unmapped name, a name asserting several companies, or a company
+    # the team spells only one way). Read from the model property, so it states
+    # what actually happened per row rather than a blanket caveat.
     resolution: str = "raw_supplier_name"
 
     model_config = {"from_attributes": True}
@@ -50,9 +51,10 @@ class SupplierTrustSummaryOut(BaseModel):
 
 
 class SupplierTrustScoresResponse(BaseModel):
-    # Deliberately not resolved through a canonical producer entity — see
-    # services/supplier_trust.py's module docstring. Stated here rather than
-    # left implicit so a supplier under two spellings reads as a known
-    # limitation, not a bug, wherever this response is consumed.
+    # Top-level default only. Scoring now resolves through the canonical
+    # `Producer` master where it can, but that succeeds per supplier, not per
+    # response — so the truthful flag is the per-row one on
+    # SupplierTrustScoreOut above. This stays as the conservative wrapper-level
+    # answer for a caller that reads no further.
     resolution: str = "raw_supplier_name"
     suppliers: list[SupplierTrustSummaryOut]

@@ -25,7 +25,7 @@ export default function Brief() {
 
   const {
     product_name, supplier_name, destination_country, currency, unit,
-    current_should_cost, current_actual_price, gap, gap_pct,
+    current_should_cost, current_floor, current_actual_price, gap, gap_pct,
     total_impact, volumes_missing, period_label, evolution, narrative, drivers,
   } = data;
   const sym = currency === 'EUR' ? '\u20AC' : '$';
@@ -116,6 +116,44 @@ export default function Brief() {
               {gap !== null ? `${gap > 0 ? '+' : ''}${sym}${gap.toFixed(3)} (${gap_pct > 0 ? '+' : ''}${gap_pct.toFixed(1)}%)` : ''}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Negotiation Position — the buyer's defensible range. Floor
+          (cost_before_margin) and should-cost come straight from the brief
+          response; nothing here predicts a supplier counter — that needs
+          real supplier-cost data this app doesn't have. */}
+      <div className="ca-card" style={{ marginBottom: 16 }}>
+        <div className="ca-card-title">Negotiation Position</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Floor</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 700, color: 'var(--accent4)' }}>
+              {current_floor != null ? `${sym}${current_floor.toFixed(3)}` : '—'}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>cost before margin — a minimum, not a target</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Should-Cost</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 700, color: 'var(--accent)' }}>
+              {sym}{current_should_cost.toFixed(3)}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>fair price — open near here</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Current Ask</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 700, color: 'var(--accent4)' }}>
+              {current_actual_price !== null ? `${sym}${current_actual_price.toFixed(3)}` : '—'}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>what the supplier is charging today</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+          {current_floor != null
+            ? <>Your defensible range for this product is <strong>{sym}{current_floor.toFixed(3)}</strong> to{' '}
+                <strong>{sym}{current_should_cost.toFixed(3)}</strong> — anchor the conversation near should-cost and hold
+                the floor as your walk-away point, not your opening offer.</>
+            : 'The floor (cost before margin) is not available for this formula.'}
         </div>
       </div>
 

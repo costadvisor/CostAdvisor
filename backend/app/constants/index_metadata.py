@@ -34,6 +34,13 @@ FREQUENCIES = (
     "Monthly/Quarterly",
     "Quarterly / Monthly",
     "Annual (est.)",
+    # A per-region cadence stated as one string. The DB-5 loader stores a card's
+    # frequency as free text so this loads today, but the pre-drop seeders
+    # (`seed_index_metadata`, `seed_catalog`) assert against this tuple, so the
+    # two paths disagreed about whether the drop was loadable. SCRUM-34's
+    # `frequency_outside_vocabulary` check is what found it, and what will find
+    # the next one.
+    "Quarterly (NA/EU) · Annual (CN/IN/MEA/LA/APAC)",
 )
 
 # What the index feeds in a should-cost formula.

@@ -15,7 +15,7 @@ from app.schemas.cost_model import (
 )
 from app.services.audit import log_event
 from app.services.permissions import require_permission
-from app.services.formula_resolver import get_visible_coverage
+from app.services.formula_resolver import FormulaChainError, assert_valid_nesting, get_visible_coverage
 
 router = APIRouter()
 
@@ -27,7 +27,7 @@ def resolve_commodity_id(db: Session, name: str) -> int | None:
     return commodity.id if commodity else None
 
 
-def _resolve_component_fields(db: Session, comp) -> dict:
+def _resolve_component_fields(db: Session, comp, team_id=None, parent_cost_model_id=None) -> dict:
     """Turn a FormulaComponentItem into FormulaComponent kwargs (Scrum 28b).
 
     An explicit commodity_id (already resolved by the caller, e.g. via GET
@@ -45,7 +45,32 @@ def _resolve_component_fields(db: Session, comp) -> dict:
     else:
         commodity_id = resolve_commodity_id(db, comp.commodity_name)
 
-    component_type = comp.component_type or ("index" if (commodity_id or comp.commodity_name) else "fixed")
+    child_id = comp.child_cost_model_id
+    if child_id is not None:
+        child = db.query(CostModel).filter(
+            CostModel.id == child_id, CostModel.team_id == team_id
+        ).first()
+        # Not only RLS: a nested model has to belong to the same team, or a
+        # price would depend on a row this team can neither see nor maintain.
+        if child is None:
+            raise HTTPException(status_code=400, detail="Unknown or inaccessible child_cost_model_id")
+        if parent_cost_model_id is not None:
+            try:
+                assert_valid_nesting(db, parent_cost_model_id, child_id)
+            except FormulaChainError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+    component_type = comp.component_type or (
+        "model" if child_id
+        else "index" if (commodity_id or comp.commodity_name)
+        else "fixed"
+    )
+    # Stated explicitly rather than inferred away: a line cannot be both.
+    if child_id is not None and commodity_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="A component is either index-linked or a sub-model, not both",
+        )
 
     return dict(
         label=comp.label,
@@ -56,6 +81,7 @@ def _resolve_component_fields(db: Session, comp) -> dict:
         via_template_id=comp.via_template_id,
         line_region=comp.line_region,
         is_proxy=comp.is_proxy,
+        child_cost_model_id=child_id,
     )
 
 
@@ -142,7 +168,10 @@ def create_cost_model(
     db.flush()
 
     for comp in data.formula.components:
-        fc = FormulaComponent(formula_version_id=fv.id, **_resolve_component_fields(db, comp))
+        # No parent id yet on create, so there is nothing a child could cycle
+        # back to; the team-ownership check still runs.
+        fc = FormulaComponent(formula_version_id=fv.id,
+                              **_resolve_component_fields(db, comp, team_id))
         db.add(fc)
     # Autoflush is off session-wide — without this, the lazy-loaded
     # formula_versions[0].components below re-queries before these pending
@@ -259,7 +288,8 @@ def renegotiate(
         ).delete()
 
         for comp in data.components:
-            fc = FormulaComponent(formula_version_id=existing.id, **_resolve_component_fields(db, comp))
+            fc = FormulaComponent(formula_version_id=existing.id,
+                                  **_resolve_component_fields(db, comp, cm.team_id, cm.id))
             db.add(fc)
 
         db.flush()
@@ -299,7 +329,8 @@ def renegotiate(
         db.flush()
 
         for comp in data.components:
-            fc = FormulaComponent(formula_version_id=fv.id, **_resolve_component_fields(db, comp))
+            fc = FormulaComponent(formula_version_id=fv.id,
+                                  **_resolve_component_fields(db, comp, cm.team_id, cm.id))
             db.add(fc)
 
         db.flush()
@@ -366,6 +397,61 @@ def delete_version(
     return {"status": "deleted"}
 
 
+@router.get("/{cost_model_id}/nestable")
+def list_nestable(
+    cost_model_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Cost models this one may nest, with the ones that would cycle excluded.
+
+    Offering a candidate the save would reject is how a picker teaches somebody
+    to distrust it, so the exclusion happens here rather than as an error after
+    the fact. The same walk backs both.
+    """
+    cm = db.query(CostModel).filter(CostModel.id == cost_model_id).first()
+    if not cm:
+        raise HTTPException(status_code=404, detail="Cost model not found")
+    require_permission(db, current_user, cm.team_id, "cost_models.view")
+
+    candidates = (
+        db.query(CostModel)
+        .filter(CostModel.team_id == cm.team_id, CostModel.id != cm.id)
+        .all()
+    )
+    out = []
+    for c in candidates:
+        try:
+            assert_valid_nesting(db, cm.id, c.id)
+        except FormulaChainError as exc:
+            out.append({
+                "cost_model_id": str(c.id),
+                "product_name": c.product.name if c.product else None,
+                "supplier_name": c.supplier.name if c.supplier else None,
+                "region": c.region,
+                "eligible": False,
+                # Named, not just excluded: "why is X missing from this list"
+                # is the first question anybody asks.
+                "reason": str(exc),
+            })
+            continue
+        fv = c.current_formula
+        out.append({
+            "cost_model_id": str(c.id),
+            "product_name": c.product.name if c.product else None,
+            "supplier_name": c.supplier.name if c.supplier else None,
+            "region": c.region,
+            "eligible": fv is not None and fv.formula_type != "advanced",
+            "reason": (
+                None if fv is not None and fv.formula_type != "advanced"
+                else "has no formula yet" if fv is None
+                else "uses an advanced expression, which cannot be nested"
+            ),
+        })
+    out.sort(key=lambda r: (not r["eligible"], r["product_name"] or ""))
+    return {"candidates": out}
+
+
 @router.post("/{cost_model_id}/clone", response_model=CostModelOut, status_code=201)
 def clone_cost_model(
     cost_model_id: uuid.UUID,
@@ -427,6 +513,10 @@ def clone_cost_model(
                 via_template_id=comp.via_template_id,
                 line_region=comp.line_region,
                 is_proxy=comp.is_proxy,
+                # Scrum 27 — same reasoning as source_coverage_id above: a
+                # clone that quietly lost its sub-models would not be an
+                # equivalent formula.
+                child_cost_model_id=comp.child_cost_model_id,
             )
             db.add(fc)
         db.flush()  # see the matching comment in create_cost_model

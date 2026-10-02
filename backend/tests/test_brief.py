@@ -124,6 +124,39 @@ def test_brief_happy_path(client_as, tenant_a, brief_model):
     assert isinstance(b["narrative"], str) and b["narrative"].strip()
 
 
+def test_brief_floor_equals_should_cost_at_zero_margin(client_as, tenant_a, brief_model):
+    """current_floor (cost before margin) is a new field alongside
+    current_should_cost. With margin_value=0 (this fixture) there's nothing
+    to strip, so the two must be identical."""
+    r = client_as(tenant_a).post("/api/costing/brief", json={"cost_model_id": str(brief_model.id)})
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["current_floor"] == pytest.approx(b["current_should_cost"])
+    assert b["current_floor"] == pytest.approx(111.0)
+
+
+def test_brief_floor_is_below_should_cost_with_real_margin(client_as, tenant_a, brief_model, db):
+    """With a nonzero pct margin, _component_base strips it from base_price
+    *before* indexing, so the floor scales down proportionally with the same
+    index ratio (100 * 0.9 * 1.11 = 99.9) while should-cost is invariant to
+    margin_value (comp_base's shrink and _apply_margin's re-inflation exactly
+    cancel: 99.9 / 0.9 = 111.0, identical to the zero-margin case) — should-cost
+    is anchored to reproduce base_price at the base period regardless of how
+    much of it margin claims. This proves the floor isn't should-cost relabeled:
+    it moves with margin_value in the economically correct direction (higher
+    margin -> lower floor relative to should-cost) while should-cost doesn't."""
+    fv = brief_model.current_formula
+    fv.margin_value = 10  # pct margin
+    db.commit()
+
+    r = client_as(tenant_a).post("/api/costing/brief", json={"cost_model_id": str(brief_model.id)})
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["current_should_cost"] == pytest.approx(111.0)  # unchanged from zero-margin
+    assert b["current_floor"] == pytest.approx(99.9)
+    assert b["current_floor"] < b["current_should_cost"]
+
+
 def test_brief_generation_is_audited(client_as, tenant_a, brief_model, db):
     """Scrum 10 — assembling the negotiation brief (the exportable deliverable)
     writes a security-relevant audit event attributed to the acting user."""

@@ -62,8 +62,12 @@ function ComboTile({ result, name, family, onOpen }) {
   const cy = CYCLE[cycle?.verdict] || null;
 
   return (
+    /* A clickable div is invisible to the keyboard and to a screen reader;
+       without this there was no keyboard path to any combo detail at all. */
     <div className="ca-card" style={{ cursor: 'pointer', transition: 'border-color .15s' }}
+      role="button" tabIndex={0} aria-label={`${name}, ${family}`}
       onClick={onOpen}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
       onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
       onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
@@ -146,22 +150,54 @@ export default function IntelligenceArea() {
   const [search, setSearch] = useState('');
   const [regionFilter, setRegionFilter] = useState('all');
   const [page, setPage] = useState(0);
+  const [catalogTotal, setCatalogTotal] = useState(null);
 
   // The catalogue index: every (template, region) pair. This is the cross-library
   // coverage listing unit 11 added — a catalogue needs all of them, so it asks
   // without the review filter.
+  //
+  // It used to ask for `limit: 500` once and drop the `total` the response
+  // carries. The library holds more than that, so roughly half the catalogue was
+  // never fetched — while the family counts and region chips rendered as though
+  // it were complete. Showing part of a set as if it were all of it is the one
+  // thing this page must not do, so it pages to the end.
+  //
+  // Safe to load in full: `derive` only ever runs over `pageCombos`, the 50 rows
+  // actually on screen, so a larger index does not multiply the derive calls.
   useEffect(() => {
     if (!activeTeamId) return;
+    let cancelled = false;
     setLoading(true); setError(null);
-    Promise.all([
-      api.get('/api/formulas/', { params: { team_id: activeTeamId } }),
-      api.get('/api/formulas/review-queue', {
-        params: { team_id: activeTeamId, order_by: 'code', limit: 500 },
-      }),
-    ])
-      .then(([t, q]) => { setTemplates(t.data); setCombos(q.data.rows || []); })
-      .catch(err => setError(formatApiError(err)))
-      .finally(() => setLoading(false));
+
+    const page = (offset) => api.get('/api/formulas/review-queue', {
+      // 500 is the route's own ceiling (`limit: int = Query(100, ge=1, le=500)`),
+      // so this is the fewest round trips the API allows, not an arbitrary size.
+      params: { team_id: activeTeamId, order_by: 'code', limit: 500, offset },
+    });
+
+    Promise.all([api.get('/api/formulas/', { params: { team_id: activeTeamId } }), page(0)])
+      .then(async ([t, first]) => {
+        const rows = first.data.rows || [];
+        const total = first.data.total ?? rows.length;
+        let all = rows;
+        if (rows.length < total) {
+          const offsets = [];
+          for (let o = rows.length; o < total; o += 500) offsets.push(o);
+          const rest = await Promise.all(offsets.map(o => page(o).then(r => r.data.rows || [])));
+          all = rows.concat(...rest);
+        }
+        if (cancelled) return;
+        setTemplates(t.data);
+        setCombos(all);
+        // Kept so the count line can state the truth if a page ever comes back
+        // short — silently showing fewer than the library holds is the defect
+        // this replaced.
+        setCatalogTotal(total);
+      })
+      .catch(err => { if (!cancelled) setError(formatApiError(err)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; };
   }, [activeTeamId]);
 
   const byId = useMemo(
@@ -269,6 +305,14 @@ export default function IntelligenceArea() {
 
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
             {filtered.length} combo{filtered.length === 1 ? '' : 's'}
+            {/* If the index ever comes back short of what the API says exists,
+                say so rather than letting a partial list read as the whole
+                catalogue. */}
+            {catalogTotal !== null && combos.length < catalogTotal && (
+              <span style={{ color: 'var(--accent3)' }}>
+                {' '}· only {combos.length} of {catalogTotal} loaded
+              </span>
+            )}
             {filtered.length > BATCH && ` · showing ${page * BATCH + 1}–${Math.min((page + 1) * BATCH, filtered.length)}`}
             {loadedCount > 0 && ` · ${evaluableCount} of ${loadedCount} on this page carry enough data to evaluate`}
             {deriving && ' · deriving…'}

@@ -712,3 +712,52 @@ def test_the_approvals_queue_filters_by_provenance(db, tenant_a, client_as):
         assert len(c.get(f"{base}&limit=1").json()) == 1
     finally:
         _cleanup(db, block_ids=made)
+
+
+def test_a_platform_write_is_not_filed_under_the_callers_team(
+        db, tenant_a, user_factory, client_as):
+    """M3. Writes to a PLATFORM block were audited against the caller-supplied
+    `team_id`.
+
+    Two failures in one: a platform action is filed under a tenant that did not
+    take it, and `audit_logs.team_id` CASCADEs on team delete — so removing that
+    team erases the record of a change to the shared library. Unit 11 fixed this
+    shape in `formulas.py` and it was never carried across.
+    """
+    from app.models.audit_log import AuditLog
+
+    # A super admin is the one actor who can author platform content without the
+    # Content Editor role — the same fixture the platform_block fixture uses.
+    admin = user_factory(is_super_admin=True)
+    c = client_as(admin)
+    made = []
+    try:
+        r = _post(c, admin, block_type="macro_drivers", platform=True)
+        assert r.status_code == 201, r.text
+        block_id = r.json()["id"]
+        made.append(block_id)
+        assert r.json()["team_id"] is None, "fixture did not actually make a platform block"
+
+        bypass_rls_var.set(True)
+        rows = db.query(AuditLog).filter(
+            AuditLog.entity_type == "editorial_block",
+            AuditLog.entity_id == block_id,
+        ).all()
+        assert rows, "the platform write was not audited at all"
+        assert all(row.team_id is None for row in rows), (
+            "a platform block's audit row borrowed a tenant: "
+            f"{[str(r.team_id) for r in rows]}"
+        )
+
+        # A TEAM block still files under its own team — the fix routes on the
+        # block's tier, it does not simply stop recording a team.
+        r2 = _post(client_as(tenant_a), tenant_a, block_type="supply", platform=False)
+        assert r2.status_code == 201, r2.text
+        made.append(r2.json()["id"])
+        team_rows = db.query(AuditLog).filter(
+            AuditLog.entity_type == "editorial_block",
+            AuditLog.entity_id == r2.json()["id"],
+        ).all()
+        assert team_rows and all(row.team_id == tenant_a["team_id"] for row in team_rows)
+    finally:
+        _cleanup(db, block_ids=made)

@@ -93,14 +93,14 @@ const SIGNAL_TYPES = [
   ['other', 'Other'],
 ];
 
-function CoverageChip({ coverage, codes = [], small }) {
+function CoverageChip({ coverage, codes = [] }) {
   const c = COVERAGE[coverage] || COVERAGE.unknown;
   const named = codes.length
     ? `${c.title}\nUnresolved: ${codes.join(', ')}`
     : c.title;
   return (
     <span className="ca-badge" title={named}
-      style={{ background: c.bg, color: c.color, fontWeight: 600, fontSize: small ? 9 : 10 }}>
+      style={{ background: c.bg, color: c.color, fontWeight: 600, fontSize: 10 }}>
       {c.label}
     </span>
   );
@@ -509,9 +509,15 @@ function Coverage({ teamId }) {
 
   useEffect(() => {
     if (!teamId) return;
+    // Guarded like the sibling `Windows` fetch: a fast team switch would
+    // otherwise let a stale response land after the component has moved on, and
+    // render one team's blind spots under another team's heading.
+    let cancelled = false;
+    setReport(null); setErr(null);
     api.get('/api/radar/coverage', { params: { team_id: teamId } })
-      .then(({ data }) => setReport(data))
-      .catch(e => setErr(formatApiError(e) || 'Could not load the coverage report.'));
+      .then(({ data }) => { if (!cancelled) setReport(data); })
+      .catch(e => { if (!cancelled) setErr(formatApiError(e) || 'Could not load the coverage report.'); });
+    return () => { cancelled = true; };
   }, [teamId]);
 
   if (err) return <div className="ca-card" style={{ color: 'var(--accent2)' }}>{err}</div>;
@@ -555,8 +561,18 @@ function Coverage({ teamId }) {
                 .sort((a, b) => ['unknown', 'partial', 'covered'].indexOf(a.coverage)
                               - ['unknown', 'partial', 'covered'].indexOf(b.coverage))
                 .map(m => (
+                  /* The Windows rows above are keyboard-reachable; these
+                     were not, so the coverage report was mouse-only. */
                   <tr key={m.cost_model_id} style={{ cursor: 'pointer' }}
-                    onClick={() => navigate(`/portfolio/${m.cost_model_id}`)}>
+                    tabIndex={0} role="button"
+                    aria-label={`${m.product || m.cost_model_id.slice(0, 8)}, coverage ${m.coverage}`}
+                    onClick={() => navigate(`/portfolio/${m.cost_model_id}`)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigate(`/portfolio/${m.cost_model_id}`);
+                      }
+                    }}>
                     <td>{m.product || m.cost_model_id.slice(0, 8)}</td>
                     <td><CoverageChip coverage={m.coverage} codes={m.unresolved_type_codes} /></td>
                     <td style={{ textAlign: 'right', fontFamily: "'JetBrains Mono', monospace" }}>
@@ -592,10 +608,12 @@ function Signals({ teamId, onChanged }) {
   });
 
   const load = useCallback(() => {
-    if (!teamId) return;
+    if (!teamId) return undefined;
+    let cancelled = false;
     api.get('/api/radar/signals', { params: { team_id: teamId } })
-      .then(({ data }) => setSignals(data))
-      .catch(e => setErr(formatApiError(e) || 'Could not load signals.'));
+      .then(({ data }) => { if (!cancelled) setSignals(data); })
+      .catch(e => { if (!cancelled) setErr(formatApiError(e) || 'Could not load signals.'); });
+    return () => { cancelled = true; };
   }, [teamId]);
 
   useEffect(load, [load]);
