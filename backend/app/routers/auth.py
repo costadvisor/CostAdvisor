@@ -24,6 +24,28 @@ from app.services.audit import log_auth_event
 router = APIRouter()
 settings = get_settings()
 
+
+def is_staff_account(userinfo: dict) -> bool:
+    """A Google account that may sign up without an invite or an approved
+    access request: one of our own staff.
+
+    True only when Google is authoritative for the address: the email is
+    verified AND the account carries the Workspace hosted-domain claim (`hd`)
+    for one of `settings.staff_email_domains`, and the email is on that domain.
+    An email that merely ends in the domain is not enough - a personal Google
+    account can carry any verified address, and only `hd` says the domain's
+    Workspace manages the account."""
+    domains = {d.strip().lower() for d in settings.staff_email_domains.split(",") if d.strip()}
+    if not domains:
+        return False
+    hd = (userinfo.get("hd") or "").strip().lower()
+    email = (userinfo.get("email") or "").strip().lower()
+    return (
+        userinfo.get("email_verified") is True
+        and hd in domains
+        and email.endswith("@" + hd)
+    )
+
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
@@ -196,6 +218,7 @@ async def callback(request: Request, db: Session = Depends(get_db)):
     # RLS bypass: no user identity is established yet during the OAuth callback.
     bypass_rls_var.set(True)
     user = db.query(User).filter(User.google_id == google_id).first()
+    signup_reason = None  # set when a new account is let in by the staff-domain rule
 
     # Account linking: bind a pre-provisioned account (seeded or otherwise
     # created ahead of first login, matched by its Google-verified, unique
@@ -221,7 +244,8 @@ async def callback(request: Request, db: Session = Depends(get_db)):
                 url=f"{settings.app_url}?login_error=signup_disabled", status_code=302
             )
 
-        # Gate: new users must have a pending team invite OR an accepted access request.
+        # Gate: new users must have a pending team invite OR an accepted access
+        # request - unless they are staff on one of our Workspace domains.
         has_team_invite = db.query(TeamInvite).filter(
             TeamInvite.invited_email == email,
             TeamInvite.status == "pending",
@@ -233,7 +257,11 @@ async def callback(request: Request, db: Session = Depends(get_db)):
             PlatformAccessRequest.status == "accepted",
         ).first()
 
-        if not has_team_invite and not has_access:
+        is_staff = is_staff_account(userinfo)
+        if is_staff and not has_team_invite and not has_access:
+            signup_reason = "staff_domain"
+
+        if not has_team_invite and not has_access and not is_staff:
             # Determine the right error to show in the UI
             pending_req = db.query(PlatformAccessRequest).filter(
                 PlatformAccessRequest.email == email,
@@ -279,7 +307,8 @@ async def callback(request: Request, db: Session = Depends(get_db)):
             user.display_name = display_name
         user.avatar_url = avatar_url
 
-    log_auth_event(db, email, "login_success", user_id=user.id, request=request)
+    log_auth_event(db, email, "login_success", user_id=user.id, reason=signup_reason,
+                   request=request)
     db.commit()
     bypass_rls_var.set(False)
 
