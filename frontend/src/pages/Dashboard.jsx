@@ -7,6 +7,8 @@ import { useConfirm, useAlert } from '../components/ConfirmDialog';
 import { DriftBar } from './workspace/wsCharts';
 import PriorityMatrix from '../components/PriorityMatrix';
 import BuyWindows from '../components/BuyWindows';
+import { dominantCurrency, fmtMoney, EXPOSURE_NOTE } from '../utils/currency';
+import DemoDataNote from '../components/DemoDataNote';
 
 // Severity colour tier mirrors the Monitor triage screen: price drift = alert,
 // index moved = watch, otherwise on-track.
@@ -40,16 +42,19 @@ export default function Dashboard() {
   useEffect(fetchPortfolio, [activeTeamId]);
 
   // Priority matrix (Scrum 20) — lazy-fetched on first open of the Matrix view.
+  // Spend exposure is reported in the team's dominant currency (as Monitor and
+  // Negotiate do), so it waits for the portfolio that says which one that is.
   useEffect(() => {
-    if (view !== 'matrix' || !activeTeamId || matrix !== null || matrixLoading) return;
+    if (view !== 'matrix' || !activeTeamId || loading || matrix !== null || matrixLoading) return;
     setMatrixLoading(true);
     setMatrixErr(null);
-    api.get('/api/portfolio/priority-matrix', { params: { team_id: activeTeamId } })
+    const reporting_currency = dominantCurrency(portfolio?.models) || 'USD';
+    api.get('/api/portfolio/priority-matrix', { params: { team_id: activeTeamId, reporting_currency } })
       .then(res => setMatrix(res.data))
       .catch(err => setMatrixErr(formatApiError(err)))
       .finally(() => setMatrixLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, activeTeamId]);
+  }, [view, activeTeamId, loading]);
 
   // Buy windows (Scrum 22) — lazy-fetched on first open of the Buy Windows view.
   useEffect(() => {
@@ -132,17 +137,22 @@ export default function Dashboard() {
   // portfolio with only small gaps doesn't render every bar near-full).
   const maxAbsGap = Math.max(25, ...sortedModels.map(m => Math.abs(m.gap_pct || 0)));
 
-  const SortHeader = ({ label, field }) => (
-    <th className="center" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(field)}>
+  const SortHeader = ({ label, field, title }) => (
+    <th className="center" title={title} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(field)}>
       {label} {sortKey === field ? (sortDir === 'asc' ? '\u25B2' : '\u25BC') : ''}
     </th>
   );
 
   return (
     <div className="ca-page ca-fade-in">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <div className="ca-h1">Portfolio Dashboard</div>
-        <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div className="ca-h1">Portfolio Dashboard</div>
+          <DemoDataNote />
+        </div>
+        {/* flexShrink 0: at 1280 the demo pill wraps under the title instead of
+            squeezing these buttons onto two lines each. */}
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
           <button className={`ca-btn ${view === 'table' ? 'ca-btn-primary' : 'ca-btn-ghost'}`} onClick={() => setView('table')}>Table</button>
           <button className={`ca-btn ${view === 'cards' ? 'ca-btn-primary' : 'ca-btn-ghost'}`} onClick={() => setView('cards')}>Cards</button>
           <button className={`ca-btn ${view === 'matrix' ? 'ca-btn-primary' : 'ca-btn-ghost'}`} onClick={() => setView('matrix')}>Matrix</button>
@@ -193,7 +203,7 @@ export default function Dashboard() {
                       <th className="center">Actual</th>
                       <SortHeader label="Gap %" field="gap_pct" />
                       <th>Severity</th>
-                      <SortHeader label="Exposure" field="exposure" />
+                      <SortHeader label="Exposure" field="exposure" title={EXPOSURE_NOTE} />
                       <th className="center">Flags</th>
                       <th className="center">Actions</th>
                     </tr>
@@ -208,10 +218,10 @@ export default function Dashboard() {
                           <td style={{ color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{m.product_reference || '\u2014'}</td>
                           <td className="center">{m.region}</td>
                           <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent)' }}>
-                            ${m.current_should_cost.toFixed(3)}
+                            {fmtMoney(m.current_should_cost, m.currency)}
                           </td>
                           <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent4)' }}>
-                            {m.latest_actual_price !== null ? `$${m.latest_actual_price.toFixed(3)}` : '\u2014'}
+                            {m.latest_actual_price !== null ? fmtMoney(m.latest_actual_price, m.currency) : '\u2014'}
                           </td>
                           <td className="center" style={{ color: m.gap_pct > 0 ? 'var(--accent2)' : m.gap_pct < 0 ? 'var(--accent)' : 'var(--muted)' }}>
                             {m.gap_pct !== null ? `${m.gap_pct > 0 ? '+' : ''}${m.gap_pct.toFixed(1)}%` : '\u2014'}
@@ -222,7 +232,7 @@ export default function Dashboard() {
                               : <span style={{ color: 'var(--muted)' }}>{'\u2014'}</span>}
                           </td>
                           <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>
-                            ${exposure.toLocaleString()}
+                            {fmtMoney(exposure, m.currency)}
                           </td>
                           <td className="center">
                             {m.flag_index_moved && <span title="Index moved >5%" style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 9, background: 'var(--info-bg)', color: 'var(--accent3)', marginRight: 4 }}>IDX</span>}
@@ -242,8 +252,10 @@ export default function Dashboard() {
                   </tbody>
                 </table>
               </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10, lineHeight: 1.6 }}>{EXPOSURE_NOTE}</div>
             </div>
           ) : (
+            <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
               {sortedModels.map(m => {
                 const exposure = Math.abs(m.cumulative_impact || m.gap || 0);
@@ -266,12 +278,12 @@ export default function Dashboard() {
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
                       <div>
                         <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Should-Cost</div>
-                        <div style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent)', fontWeight: 600 }}>${m.current_should_cost.toFixed(3)}</div>
+                        <div style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent)', fontWeight: 600 }}>{fmtMoney(m.current_should_cost, m.currency)}</div>
                       </div>
                       <div>
                         <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Actual</div>
                         <div style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent4)', fontWeight: 600 }}>
-                          {m.latest_actual_price !== null ? `$${m.latest_actual_price.toFixed(3)}` : '\u2014'}
+                          {m.latest_actual_price !== null ? fmtMoney(m.latest_actual_price, m.currency) : '\u2014'}
                         </div>
                       </div>
                       <div>
@@ -281,8 +293,8 @@ export default function Dashboard() {
                         </div>
                       </div>
                     </div>
-                    <div style={{ fontSize: 11, fontWeight: 600 }}>
-                      Exposure: <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>${exposure.toLocaleString()}</span>
+                    <div style={{ fontSize: 11, fontWeight: 600 }} title={EXPOSURE_NOTE}>
+                      Exposure: <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{fmtMoney(exposure, m.currency)}</span>
                     </div>
                     <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
                       <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={e => { e.stopPropagation(); navigate(`/cost-models/${m.cost_model_id}`); }}>View</button>
@@ -293,6 +305,8 @@ export default function Dashboard() {
                 );
               })}
             </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 12, lineHeight: 1.6 }}>{EXPOSURE_NOTE}</div>
+            </>
           )}
         </>
       )}

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import EvoChart from '../components/EvoChart';
 import api, { formatApiError } from '../api';
+import { curSym, fmtMoney, fmtSignedMoney } from '../utils/currency';
+import DemoDataNote from '../components/DemoDataNote';
 
 export default function Brief() {
   const { costModelId } = useParams();
@@ -28,7 +30,10 @@ export default function Brief() {
     current_should_cost, current_floor, current_actual_price, gap, gap_pct,
     total_impact, volumes_missing, period_label, evolution, narrative, drivers,
   } = data;
-  const sym = currency === 'EUR' ? '\u20AC' : '$';
+  const sym = curSym(currency);
+  // Per-unit figures at two decimals, sign in front of the symbol ("−€9.02").
+  const money = (v) => fmtMoney(v, currency, { decimals: 2 });
+  const signedMoney = (v) => fmtSignedMoney(v, currency, { decimals: 2 });
 
   const verdictColor = gap === null ? 'var(--muted)' : gap > 0 ? 'var(--accent2)' : 'var(--accent)';
   const verdictLabel = gap === null ? 'No actual price data' : gap > 0 ? 'Above should-cost' : 'Below should-cost';
@@ -57,7 +62,10 @@ export default function Brief() {
       </nav>
       {/* Header with print button */}
       <div className="ca-no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <div className="ca-h1">Negotiation Brief</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div className="ca-h1">Negotiation Brief</div>
+          <DemoDataNote />
+        </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}`)}>View Model</button>
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/pricing`)}>Pricing</button>
@@ -80,6 +88,7 @@ export default function Brief() {
             {destination_country && <div>Destination: {destination_country}</div>}
             <div>Period: {period_label}</div>
             <div>Generated: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+            <DemoDataNote />
           </div>
         </div>
       </div>
@@ -97,14 +106,14 @@ export default function Brief() {
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Should-Cost</div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: 'var(--accent)' }}>
-              {sym}{current_should_cost.toFixed(3)}
+              {money(current_should_cost)}
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>per {unit} at {period_label}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Actual Price</div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: 'var(--accent4)' }}>
-              {current_actual_price !== null ? `${sym}${current_actual_price.toFixed(3)}` : '\u2014'}
+              {current_actual_price !== null ? money(current_actual_price) : '\u2014'}
             </div>
           </div>
           <div>
@@ -113,7 +122,7 @@ export default function Brief() {
               {verdictLabel}
             </div>
             <div style={{ fontSize: 11, color: verdictColor }}>
-              {gap !== null ? `${gap > 0 ? '+' : ''}${sym}${gap.toFixed(3)} (${gap_pct > 0 ? '+' : ''}${gap_pct.toFixed(1)}%)` : ''}
+              {gap !== null ? `${signedMoney(gap)} (${gap_pct > 0 ? '+' : ''}${gap_pct.toFixed(1)}%)` : ''}
             </div>
           </div>
         </div>
@@ -169,9 +178,15 @@ export default function Brief() {
             to calculate your total financial exposure.
           </div>
         ) : (
-          <div className="ca-metric-val" style={{ color: total_impact > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
-            {total_impact > 0 ? '+' : ''}{sym}{total_impact?.toFixed(0) ?? '0'}
-          </div>
+          <>
+            <div className="ca-metric-val" style={{ color: total_impact > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
+              {fmtSignedMoney(total_impact ?? 0, currency, { decimals: 0 })}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.6 }}>
+              Each quarter's gap × that quarter's volume, summed over {period_label} ({evolution.length} quarters).
+              {' '}The exposure on the Dashboard and Monitor is a different figure: today's gap × all volume on record.
+            </div>
+          </>
         )}
       </div>
 
@@ -179,7 +194,7 @@ export default function Brief() {
       <div className="ca-card" style={{ marginBottom: 16 }}>
         <div className="ca-card-title">Price Evolution</div>
         <div className="ca-scroll-x">
-          <EvoChart periods={periodLabels} theoretical={theoretical} actual={actual} refCost={current_should_cost} />
+          <EvoChart periods={periodLabels} theoretical={theoretical} actual={actual} refCost={current_should_cost} currencySymbol={sym} />
         </div>
         <div style={{ display: 'flex', gap: 20, marginTop: 14, fontSize: 11 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -197,18 +212,22 @@ export default function Brief() {
           <div className="ca-card-title">Cost Decomposition</div>
           <div style={{ padding: '16px 0' }}>
             {(() => {
-              const maxCost = Math.max(...drivers.map(d => Math.abs(d.component_cost)), 0.001);
+              // Bar heights in pixels, scaled against the should-cost the total
+              // bar shows (as on the Negotiate brief). Percentage heights resolved
+              // against a content-height column and collapsed every bar to 2px.
+              const PLOT_H = 96;
+              const scaleMax = Math.max(Math.abs(current_should_cost) || 0, ...drivers.map(d => Math.abs(d.component_cost)), 0.001);
+              const barPx = (v) => Math.max(2, Math.round((Math.abs(v) / scaleMax) * PLOT_H));
               return (
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 140 }}>
                   {drivers.map((d, i) => {
-                    const pct = Math.abs(d.component_cost) / maxCost * 100;
                     return (
                       <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 40 }}>
                         <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 2, whiteSpace: 'nowrap' }}>
-                          {sym}{d.component_cost.toFixed(2)}
+                          {money(d.component_cost)}
                         </div>
                         <div style={{
-                          width: '60%', height: `${Math.max(pct, 2)}%`, minHeight: 2,
+                          width: '60%', height: barPx(d.component_cost),
                           background: 'var(--accent4)', borderRadius: '3px 3px 0 0', opacity: 0.85,
                         }} />
                         <div style={{ fontSize: 8, color: 'var(--text-secondary)', marginTop: 4, textAlign: 'center', lineHeight: 1.2 }}>
@@ -220,10 +239,10 @@ export default function Brief() {
                   {/* Total bar */}
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 40, borderLeft: '1px solid var(--border)', paddingLeft: 4 }}>
                     <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', marginBottom: 2 }}>
-                      {sym}{current_should_cost.toFixed(2)}
+                      {money(current_should_cost)}
                     </div>
                     <div style={{
-                      width: '60%', height: '100%', minHeight: 2,
+                      width: '60%', height: barPx(current_should_cost),
                       background: 'var(--accent)', borderRadius: '3px 3px 0 0', opacity: 0.7,
                     }} />
                     <div style={{ fontSize: 8, fontWeight: 700, color: 'var(--text-secondary)', marginTop: 4 }}>
@@ -262,7 +281,7 @@ export default function Brief() {
                   {d.index_change_pct > 0 ? '+' : ''}{d.index_change_pct.toFixed(1)}%
                 </td>
                 <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                  {sym}{d.contribution_to_gap.toFixed(3)}
+                  {signedMoney(d.contribution_to_gap)}
                 </td>
                 <td className="center">
                   <span style={{

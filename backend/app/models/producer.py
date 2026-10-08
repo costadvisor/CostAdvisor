@@ -42,6 +42,17 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
+# `producer_formulas.evidence_label`, from structured fields only, first match
+# wins: distributor · family_only · unverified · weak · not_counted ·
+# verified · not_audited.
+EVIDENCE_LABELS = (
+    "distributor", "family_only", "unverified", "weak", "not_counted", "verified",
+    "not_audited",
+)
+# `producer_formulas.origin_restriction`: the one marker, shown next to the
+# evidence label.
+ORIGIN_RESTRICTION = "sanctioned_origin"
+
 
 class Producer(Base):
     """A company that makes things. Platform-level, one row per real company."""
@@ -58,6 +69,12 @@ class Producer(Base):
     hq_country: Mapped[str | None] = mapped_column(String(80), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="loader")
+    # One of the drop's SUPPLIER_BUCKETS placeholders ("Chinese producers",
+    # "Regional distributors" …) — a group of companies, not a company. Kept
+    # as a row so product cards can still name it; excluded from directory
+    # rollups and competitor rankings.
+    is_bucket: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
@@ -136,6 +153,47 @@ class ProducerFormula(Base):
     tags: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # What the source string actually said, before alias resolution.
     raw_name: Mapped[str | None] = mapped_column(String(400), nullable=True)
+
+    # ── Maker evidence (one row per supplier row of the card) ────────────────
+    # Quotes, sources, shares and audit wording are deliberately not stored:
+    # what is not stored cannot leak through an API.
+    #
+    # producer | distributor.
+    role: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # VERIFIED / UNVERIFIED / INFERRED_FAMILY as authored. NULL means not yet
+    # audited, not unverified.
+    maker_evidence: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    # As authored. NULL means "not set", never false.
+    counted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Derived with the source's own floor rule (see EVIDENCE_LABELS below for
+    # the label). Always written by the loader.
+    counts_toward_floor: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false")
+    # A short code derived from structured fields only (EVIDENCE_LABELS).
+    evidence_label: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="not_audited", server_default="not_audited")
+    weak_reading: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # The corporate group; a group counts once.
+    corp_group: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # NOT_EVIDENCED / PARTIALLY_INTEGRATED as authored.
+    integration_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Kept as the fallback when integration_status is absent.
+    integrated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Tooltip text for the integration reading.
+    integration_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # One marker (ORIGIN_RESTRICTION) or NULL.
+    origin_restriction: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # The EU floor eligibility as authored (nullable: not set).
+    floor_eligible_eu: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # The row does not state its manufacturing region.
+    region_uncertain: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Manufacturing sites, normalised: plant, town, country, region, scope,
+    # status, and area only when stated. No quote, no source.
+    sites: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Position in the card's supplier list (the first one when several rows
+    # name the same producer). The makers panel keeps the authored order.
+    row_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0")
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="loader")
 
     created_at: Mapped[datetime] = mapped_column(

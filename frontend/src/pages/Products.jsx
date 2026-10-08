@@ -5,12 +5,13 @@ import { useConfirm, useAlert } from '../components/ConfirmDialog';
 import ProductFormModal from '../components/ProductFormModal';
 import exportCsv from '../utils/exportCsv';
 
+const UNPUBLISHED_LINE = 'Product line not yet published';
+
 export default function Products() {
   const { activeTeamId } = useAuth();
   const confirm = useConfirm();
   const showAlert = useAlert();
   const [products, setProducts] = useState([]);
-  const [families, setFamilies] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -21,12 +22,10 @@ export default function Products() {
     setLoading(true);
     Promise.all([
       api.get('/api/products', { params: { team_id: activeTeamId } }),
-      api.get('/api/chemical-families'),
       api.get('/api/formulas/', { params: { team_id: activeTeamId } }),
     ])
-      .then(([pRes, fRes, tRes]) => {
+      .then(([pRes, tRes]) => {
         setProducts(pRes.data);
-        setFamilies(fRes.data);
         setTemplates(tRes.data);
       })
       .catch(console.error)
@@ -62,10 +61,10 @@ export default function Products() {
     }
   };
 
-  const getFamilyName = (fid) => {
-    const f = families.find(f => f.id === fid);
-    return f ? f.name : null;
-  };
+  // The product's place in the supply taxonomy comes resolved on ProductOut:
+  // its catalogue product's line, else its cost model's, else a custom line.
+  // A family with no line means the line is not published yet.
+  const lineLabel = (p) => p.product_line?.name || (p.family ? UNPUBLISHED_LINE : null);
 
   return (
     <div className="ca-page ca-fade-in">
@@ -76,11 +75,12 @@ export default function Products() {
             <button
               className="ca-btn ca-btn-ghost"
               onClick={() => exportCsv('products.csv',
-                ['Name', 'Chemical Formula', 'Family', 'Unit', 'Active Content'],
+                ['Name', 'Chemical Formula', 'Family', 'Product line', 'Unit', 'Active Content'],
                 products.map(p => [
                   p.name,
                   p.formula || '',
-                  getFamilyName(p.chemical_family_id) || '',
+                  p.family?.name || '',
+                  lineLabel(p) || '',
                   p.unit,
                   p.active_content != null ? (p.active_content * 100).toFixed(0) + '%' : '',
                 ])
@@ -99,7 +99,6 @@ export default function Products() {
       <ProductFormModal
         isOpen={showForm}
         editing={editing}
-        families={families}
         templates={templates}
         activeTeamId={activeTeamId}
         onClose={resetForm}
@@ -120,6 +119,7 @@ export default function Products() {
                 <th>Name</th>
                 <th>Formula</th>
                 <th>Family</th>
+                <th>Product line</th>
                 <th>Catalog Formula</th>
                 <th className="center">Unit</th>
                 <th className="center">Active Content</th>
@@ -132,10 +132,13 @@ export default function Products() {
                   <td style={{ fontWeight: 600 }}>{p.name}</td>
                   <td style={{ color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace" }}>{p.formula || '\u2014'}</td>
                   <td>
-                    {getFamilyName(p.chemical_family_id)
-                      ? <span className="ca-tag">{getFamilyName(p.chemical_family_id)}</span>
+                    {p.family?.name
+                      ? <span className="ca-tag" style={{ whiteSpace: 'nowrap' }}>{p.family.name}</span>
                       : <span style={{ color: 'var(--muted)' }}>{'\u2014'}</span>
                     }
+                  </td>
+                  <td style={{ color: p.product_line ? 'var(--text-secondary)' : 'var(--muted)', fontSize: 12 }}>
+                    {lineLabel(p) || '\u2014'}
                   </td>
                   <td>
                     {p.formula_template_id ? (

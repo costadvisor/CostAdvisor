@@ -72,11 +72,8 @@ def run():
         supplier_id = row[0]
         print(f"  Supplier: {SUPPLIER_NAME} (id={supplier_id})")
 
-        # ── 2. Find chemical family ─────────────────────────────────────
-        row = conn.execute(text(
-            "SELECT id FROM chemical_families WHERE name = 'Activated Carbon'"
-        )).fetchone()
-        family_id = row[0] if row else None
+        # Products get no chemical family: families are the platform taxonomy,
+        # loaded from the content drop, and a seed must not add its own.
 
         # ── 3. Create products + cost models for each line item ─────────
         # Build a map of (product, type) -> cost_model_id
@@ -99,12 +96,12 @@ def run():
             else:
                 product_id = str(uuid.uuid4())
                 conn.execute(text(
-                    "INSERT INTO products (id, team_id, created_by, name, formula, unit, chemical_family_id, created_at, updated_at) "
-                    "VALUES (:id, :tid, :uid, :name, :formula, :unit, :fid, :now, :now)"
+                    "INSERT INTO products (id, team_id, created_by, name, formula, unit, created_at, updated_at) "
+                    "VALUES (:id, :tid, :uid, :name, :formula, :unit, :now, :now)"
                 ), {
                     "id": product_id, "tid": TEAM_ID, "uid": CREATED_BY,
                     "name": product_name, "formula": ptype, "unit": "t",
-                    "fid": family_id, "now": now,
+                    "now": now,
                 })
                 print(f"  Created product: {product_name} (id={product_id})")
 

@@ -1,0 +1,205 @@
+/* ──────────────────────────────────────────────────────────────────────
+ * Product page (Intelligence › Products › :pid) — prefix `ixd-`.
+ * Shell (header strip, tab row) and tab 1 "Market & Costs".
+ * Builds on styles/intel.css (`ix-`); theme tokens only, no fixed colours
+ * apart from the region palette the shared components already resolve.
+ * ──────────────────────────────────────────────────────────────────── */
+
+/* Greys for flat cost lines in the build-up chart (no public index, margin).
+   Dark themes need more of the muted tone to stand off the surface. */
+:root {
+  --ixd-flat-noindex: color-mix(in srgb, var(--muted) 75%, var(--surface));
+  --ixd-flat-margin: color-mix(in srgb, var(--muted) 45%, var(--surface));
+}
+[data-theme="light"],
+[data-theme="staminachem"] {
+  --ixd-flat-noindex: color-mix(in srgb, var(--muted) 55%, var(--surface));
+  --ixd-flat-margin: color-mix(in srgb, var(--muted) 28%, var(--surface));
+}
+
+/* ── Header strip ──────────────────────────────────────────────────── */
+/* The tab row carries the viewing-region selector on its right end, so the
+   sticky strip does not grow a row for it. */
+.ixd-tabbar {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+  min-width: 0;
+}
+.ixd-tabbar > .ix-tabs { flex-shrink: 0; }
+.ixd-regionbar { padding-bottom: 7px; min-width: 0; display: flex; justify-content: flex-end; }
+.ixd-regionbar .ix-region-chips { justify-content: flex-end; }
+.ixd-pid { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .2px; }
+.ixd-chip-link { text-decoration: none; cursor: pointer; }
+.ixd-chip-link:hover { border-color: var(--accent); color: var(--text); }
+.ixd-chip-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ixd-add-wrap { display: inline-flex; border-radius: 6px; cursor: not-allowed; }
+.ixd-add-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ixd-add-wrap .ca-btn[disabled] { pointer-events: none; opacity: .55; }
+.ixd-in-portfolio {
+  display: inline-flex; align-items: center; gap: 6px; text-decoration: none; white-space: nowrap;
+  border-color: var(--accent); color: var(--accent);
+}
+.ixd-in-portfolio:hover { background: var(--success-bg-soft); color: var(--accent); }
+.ixd-in-portfolio:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ixd-in-portfolio-tick { font-weight: 700; }
+
+/* ── Tab body ──────────────────────────────────────────────────────── */
+.ixd-banner { margin-bottom: 16px; }
+.ixd-banner-ico {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 16px; height: 16px; border-radius: 50%; margin-top: 1px;
+  border: 1px solid var(--accent4); color: var(--accent4);
+  font-size: 10px; font-weight: 700; font-style: italic; font-family: Georgia, serif;
+}
+.ixd-banner a { color: var(--accent4); font-weight: 600; text-decoration: none; }
+.ixd-banner a:hover { text-decoration: underline; }
+.ixd-body.is-refreshing { opacity: .6; transition: opacity .15s; }
+
+/* Muted line under a panel title (the mockup's grey subtitle). */
+.ixd-sub { font-size: 10.5px; color: var(--muted); margin: -4px 0 10px; line-height: 1.5; }
+.ixd-sub .ix-dot-sep { margin: 0 5px; opacity: .6; }
+
+/* ── Chart panel ───────────────────────────────────────────────────── */
+.ixd-chart-head { padding: 12px 16px 0; }
+.ixd-variantbar {
+  display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 16px; background: var(--surface2);
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.ixd-variantbar label { font-size: 10.5px; font-weight: 600; color: var(--text-secondary); }
+.ixd-variant-note {
+  padding: 8px 16px; font-size: 10.5px; line-height: 1.6; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border); background: var(--neutral-bg-soft);
+}
+.ixd-chart-body { padding: 12px 12px 6px 6px; }
+.ixd-flat-tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 9.5px; font-weight: 600; padding: 2px 7px; border-radius: 4px;
+  background: var(--warn-bg); color: var(--accent3); white-space: nowrap;
+}
+
+/* ── Components table ──────────────────────────────────────────────── */
+.ixd-comp th, .ixd-comp td { padding-left: 14px; padding-right: 14px; }
+.ixd-comp .ixd-line { font-weight: 600; color: var(--text); }
+.ixd-comp .ixd-line-sub { font-size: 10px; color: var(--accent4); margin-top: 2px; }
+.ixd-comp .ixd-line-sub.is-flat { color: var(--muted); }
+.ixd-comp .ixd-agency { color: var(--text-secondary); max-width: 190px; line-height: 1.4; }
+.ixd-comp .ixd-agency-sub { font-size: 9.5px; color: var(--muted); margin-top: 1px; }
+.ixd-comp .ixd-level { font-weight: 700; }
+.ixd-comp td.ixd-zero { color: var(--muted); font-weight: 600; }
+.ixd-comp tfoot td {
+  padding-top: 9px; padding-bottom: 9px; font-weight: 700; color: var(--text);
+  background: var(--success-bg-soft); border-top: 1px solid var(--border);
+}
+.ixd-comp tfoot td.ixd-total-w { color: var(--accent); }
+.ixd-comp tfoot .ixd-total-note {
+  font-size: 9px; font-weight: 500; color: var(--muted); letter-spacing: .3px; margin-top: 1px;
+}
+.ixd-cat {
+  display: inline-block; font-size: 9.5px; padding: 1px 7px; border-radius: 10px;
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text-secondary);
+  text-transform: lowercase; white-space: nowrap;
+}
+.ixd-wbar-track { width: 56px; }
+
+/* ── Market dynamics ───────────────────────────────────────────────── */
+.ixd-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.ixd-seg button {
+  font-family: inherit; font-size: 10.5px; padding: 4px 11px; border: none; cursor: pointer;
+  background: var(--surface); color: var(--text-secondary);
+}
+.ixd-seg button + button { border-left: 1px solid var(--border); }
+.ixd-seg button[aria-pressed="true"] { background: var(--text); color: var(--surface); font-weight: 600; }
+.ixd-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ixd-dyn-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.ixd-dyn-stat {
+  text-align: left; font-family: inherit; color: inherit;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; min-width: 0;
+}
+button.ixd-dyn-stat { cursor: pointer; }
+button.ixd-dyn-stat:hover { border-color: var(--border-light); }
+button.ixd-dyn-stat[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+button.ixd-dyn-stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ixd-dyn-label { font-size: 9px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.ixd-dyn-val { font-family: 'Syne', sans-serif; font-size: 19px; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.ixd-dyn-val small { font-family: inherit; font-size: 11px; font-weight: 600; margin-left: 5px; }
+.ixd-dyn-sub { font-size: 10px; color: var(--muted); margin-top: 4px; line-height: 1.45; }
+.ixd-dyn-driver { font-size: 11.5px; font-weight: 600; color: var(--text); line-height: 1.35; margin-top: 2px; }
+.ixd-dyn-move {
+  font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-top: 3px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.ixd-narr {
+  background: var(--surface2); border-radius: 8px; padding: 11px 13px; margin-bottom: 14px;
+  font-size: 11.5px; line-height: 1.7; color: var(--text-secondary);
+}
+.ixd-narr strong { color: var(--text); }
+.ixd-narr-label { font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.ixd-signals { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ixd-signal {
+  display: flex; align-items: baseline; gap: 10px;
+  border: 1px solid var(--border); border-radius: 6px; padding: 7px 11px;
+  font-size: 11px; color: var(--text-secondary); background: var(--neutral-bg-soft);
+}
+.ixd-signal-ico { width: 14px; text-align: center; font-weight: 700; flex-shrink: 0; }
+
+/* ── Outlook ───────────────────────────────────────────────────────── */
+.ixd-outlook p { margin: 0; }
+.ixd-outlook p + p { margin-top: 8px; }
+.ixd-outlook strong { color: var(--text); }
+
+/* ── Rail ──────────────────────────────────────────────────────────── */
+.ixd-verdict { margin-top: 12px; font-size: 11px; }
+.ixd-rail-section { margin-top: 16px; }
+.ixd-rail-section:first-child { margin-top: 0; }
+.ixd-rail-note { font-size: 10.5px; line-height: 1.6; color: var(--text-secondary); margin-top: 6px; }
+.ixd-rail-meta { font-size: 10px; color: var(--muted); margin-top: 4px; }
+.ixd-dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 12px; margin: 0; font-size: 11px; align-items: baseline; }
+.ixd-dl dt { color: var(--muted); font-size: 10px; letter-spacing: .3px; white-space: nowrap; }
+.ixd-dl dd { margin: 0; color: var(--text); min-width: 0; }
+.ixd-dl dd .ix-muted { font-size: 10px; }
+.ixd-grade-tip { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
+.ixd-grade-tip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+.ixd-vars { display: flex; flex-direction: column; }
+.ixd-var {
+  display: flex; align-items: center; gap: 10px; padding: 9px 16px;
+  border-bottom: 1px solid var(--row-divider); color: inherit; text-decoration: none;
+  background: none; border-left: none; border-right: none; border-top: none;
+  font-family: inherit; text-align: left; width: 100%;
+}
+.ixd-vars > :last-child { border-bottom: none; }
+.ixd-var.is-this { background: var(--success-bg-soft); box-shadow: inset 2px 0 0 var(--accent); }
+a.ixd-var:hover, button.ixd-var:hover { background: var(--row-stripe); }
+button.ixd-var { cursor: pointer; }
+a.ixd-var:focus-visible, button.ixd-var:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ixd-var-main { flex: 1; min-width: 0; }
+.ixd-var-name { font-size: 11.5px; font-weight: 600; color: var(--text); }
+.ixd-var-spec { font-size: 9.5px; color: var(--muted); margin-top: 2px; line-height: 1.45; }
+.ixd-var-active { font-size: 10px; color: var(--muted); white-space: nowrap; }
+
+/* ── Responsive ────────────────────────────────────────────────────── */
+@media (max-width: 1380px) {
+  .ixd-comp th, .ixd-comp td { padding-left: 10px; padding-right: 10px; }
+  .ixd-comp .ixd-agency { max-width: 150px; }
+}
+@media (max-width: 1100px) {
+  .ixd-tabbar { flex-wrap: wrap; }
+  .ixd-dyn-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── Supply status and redirect note (live-data build) ─────────────── */
+/* The status badge with its one-line meaning, under the header chips. */
+.ixd-status { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-top: 8px; }
+.ixd-status-text { font-size: 11.5px; color: var(--text-secondary, var(--muted)); }
+/* "PFC-H2O2-50 points to this product, so it opens here." */
+.ixd-redirect { margin-top: 8px; padding: 6px 10px; font-size: 11.5px; }
+.ixd-redirect .ixd-pid { font-size: 11px; font-weight: 700; }
+/* Warnings strip on the Market tab (pricing gap, margin status). */
+.ixd-warnings { display: grid; gap: 4px; margin-bottom: 14px; font-size: 12px; }
+.ixd-warning { display: flex; align-items: baseline; gap: 8px; }
+.ixd-warning-ico {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 15px; height: 15px; border-radius: 50%; font-size: 10px; font-weight: 800;
+  background: var(--accent3); color: var(--bg, #fff);
+}
+.ixd-vintage { white-space: normal; }

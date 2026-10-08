@@ -43,6 +43,12 @@ const GRADE_BADGE = {
 
 const GRADE_ORDER = ['high', 'medium', 'low', 'blocked', 'unrated'];
 
+// The supply taxonomy as the catalogue rows carry it: family › sub-family ›
+// product line. A card on no published line says so, never shows a key.
+const SUBFAMILY_LABEL = 'Sub-family';
+const UNPUBLISHED_LINE = 'Product line not yet published';
+const NO_FAMILY = 'No family';
+
 // Reason code → what a reviewer would actually go and do about it.
 const REASON_LABEL = {
   type_code_resolves_to_no_series: 'No price series behind',
@@ -355,31 +361,48 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
   const catalogRows = rows.filter(t => t.code);
   const otherRows = rows.filter(t => !t.code);
 
-  // family code → { code, name, subfamilies: Map(subName → rows[]) }, sorted
+  // family id → { key, name, lines: [{ key, label, sub, rows[] }] }, by name.
+  // Grouped by ids, not codes: the catalogue's families carry no code.
   const families = useMemo(() => {
     const q = query.trim().toLowerCase();
     const map = new Map();
     for (const t of catalogRows) {
       if (gradeFilter !== 'all' && (t.trust_summary?.worst_grade || 'unrated') !== gradeFilter) continue;
       if (q) {
-        const hay = `${t.name} ${t.code} ${t.family_name || ''} ${t.subfamily_name || ''}`.toLowerCase();
+        const hay = `${t.name} ${t.code} ${t.family?.name || ''} ${t.subfamily?.name || ''} ${t.product_line?.name || ''}`.toLowerCase();
         if (!hay.includes(q)) continue;
       }
-      const fcode = t.family_code || '—';
-      if (!map.has(fcode)) {
-        map.set(fcode, { code: fcode, name: t.family_name || 'Uncategorised', subs: new Map(), count: 0, review: 0 });
+      const fkey = String(t.family?.id ?? 'none');
+      if (!map.has(fkey)) {
+        map.set(fkey, { key: fkey, name: t.family?.name || NO_FAMILY, lines: new Map(), count: 0, review: 0 });
       }
-      const fam = map.get(fcode);
-      const sub = t.subfamily_name || '—';
-      if (!fam.subs.has(sub)) fam.subs.set(sub, []);
-      fam.subs.get(sub).push(t);
+      const fam = map.get(fkey);
+      const lkey = String(t.product_line?.id ?? 'none');
+      if (!fam.lines.has(lkey)) {
+        fam.lines.set(lkey, {
+          key: lkey,
+          label: t.product_line?.name || UNPUBLISHED_LINE,
+          sub: t.product_line ? (t.subfamily?.name || null) : null,
+          unpublished: !t.product_line,
+          rows: [],
+        });
+      }
+      fam.lines.get(lkey).rows.push(t);
       fam.count += 1;
       fam.review += t.trust_summary?.needs_review_count || 0;
     }
-    const list = [...map.values()].sort((a, b) => a.code.localeCompare(b.code));
+    const list = [...map.values()].sort((a, b) => {
+      if (a.name === NO_FAMILY) return 1;
+      if (b.name === NO_FAMILY) return -1;
+      return a.name.localeCompare(b.name);
+    });
     for (const fam of list) {
-      fam.subs = new Map([...fam.subs.entries()].sort((a, b) => a[0].localeCompare(b[0])));
-      for (const rowsInSub of fam.subs.values()) rowsInSub.sort((a, b) => a.name.localeCompare(b.name));
+      // Sub-family, then line; the "not yet published" bucket last.
+      fam.lines = [...fam.lines.values()].sort((a, b) => (a.unpublished - b.unpublished)
+        || (a.sub || '').localeCompare(b.sub || '') || a.label.localeCompare(b.label));
+      for (const ln of fam.lines) ln.rows.sort((a, b) => a.name.localeCompare(b.name));
+      // The "not yet published" bucket is not a line.
+      fam.lineCount = fam.lines.filter(ln => !ln.unpublished).length;
     }
     return list;
   }, [catalogRows, query, gradeFilter]);
@@ -387,7 +410,7 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
   const filtering = query.trim() !== '' || gradeFilter !== 'all';
   const shown = families.reduce((n, f) => n + f.count, 0);
   const reviewTotal = catalogRows.reduce((n, t) => n + (t.trust_summary?.needs_review_count || 0), 0);
-  const isOpen = (fam) => filtering || expanded.has(fam.code);
+  const isOpen = (fam) => filtering || expanded.has(fam.key);
   const allOpen = families.length > 0 && families.every(isOpen);
 
   const toggle = (code) => setExpanded(prev => {
@@ -399,10 +422,10 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
   const handleExport = () => {
     exportCsv(
       'formulas_default_catalog.csv',
-      ['Family', 'Subfamily', 'Formula', 'Code', 'Trust grade', 'Combos needing review', 'Coverage', 'Regions'],
-      families.flatMap(fam => [...fam.subs.entries()].flatMap(([sub, list]) =>
-        list.map(t => [
-          `${fam.code} ${fam.name}`, sub, t.name, t.code,
+      ['Family', SUBFAMILY_LABEL, 'Product line', 'Formula', 'Code', 'Trust grade', 'Combos needing review', 'Coverage', 'Regions'],
+      families.flatMap(fam => fam.lines.flatMap(ln =>
+        ln.rows.map(t => [
+          fam.name, ln.sub || '', ln.label, t.name, t.code,
           t.trust_summary?.worst_grade || '', t.trust_summary?.needs_review_count ?? 0,
           t.catalog_meta?.coverage_tier || '',
           t.catalog_meta?.region_count ?? '',
@@ -485,7 +508,7 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
           <input
             className="ca-input"
             style={{ maxWidth: 300, padding: '7px 10px', fontSize: 12 }}
-            placeholder="Search name, code, family…"
+            placeholder="Search name, code, family, line…"
             value={query}
             onChange={e => setQuery(e.target.value)}
             aria-label="Search default formulas"
@@ -510,7 +533,7 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
             <button
               className="ca-btn ca-btn-ghost ca-btn-sm"
               style={{ fontSize: 10, marginLeft: 'auto' }}
-              onClick={() => setExpanded(allOpen ? new Set() : new Set(families.map(f => f.code)))}
+              onClick={() => setExpanded(allOpen ? new Set() : new Set(families.map(f => f.key)))}
             >
               {allOpen ? 'Collapse all' : 'Expand all'}
             </button>
@@ -535,9 +558,9 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
       ) : (
         <div className="ca-card" style={{ padding: 0, overflow: 'hidden' }}>
           {families.map((fam, fi) => (
-            <div key={fam.code} style={{ borderTop: fi > 0 ? '1px solid var(--border)' : 'none' }}>
+            <div key={fam.key} style={{ borderTop: fi > 0 ? '1px solid var(--border)' : 'none' }}>
               <button
-                onClick={() => !filtering && toggle(fam.code)}
+                onClick={() => !filtering && toggle(fam.key)}
                 aria-expanded={isOpen(fam)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10, width: '100%',
@@ -553,12 +576,9 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
                   }}>
                   <path d="M3 1l4 4-4 4" fill="none" stroke="var(--text-secondary)" strokeWidth="1.5" />
                 </svg>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--muted)', width: 28, flexShrink: 0 }}>
-                  {fam.code}
-                </span>
                 <span style={{ fontSize: 13, fontWeight: 600 }}>{fam.name}</span>
                 <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-secondary)', fontFamily: "'JetBrains Mono', monospace", whiteSpace: 'nowrap' }}>
-                  {fam.subs.size} subfamilies · {fam.count} formulas
+                  {fam.lineCount} product line{fam.lineCount === 1 ? '' : 's'} · {fam.count} formulas
                   {fam.review > 0 && <span style={{ color: 'var(--accent3)' }}> · {fam.review} review</span>}
                 </span>
               </button>
@@ -566,8 +586,8 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
               {isOpen(fam) && (
                 <table className="ca-table" style={{ margin: 0 }}>
                   <tbody>
-                    {[...fam.subs.entries()].map(([sub, list]) => (
-                      <SubfamilyRows key={sub} sub={sub} list={list}
+                    {fam.lines.map(ln => (
+                      <LineRows key={ln.key} line={ln}
                         canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} onOpen={onOpen}
                         canFork={canFork} forkedOriginIds={forkedOriginIds} onFork={onFork} />
                     ))}
@@ -599,20 +619,24 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
   );
 }
 
-function SubfamilyRows({ sub, list, canEdit, onEdit, onDelete, onOpen, canFork = false, forkedOriginIds, onFork }) {
+function LineRows({ line, canEdit, onEdit, onDelete, onOpen, canFork = false, forkedOriginIds, onFork }) {
   const showActions = canEdit || canFork;
   return (
     <>
       <tr>
         <td colSpan={showActions ? 5 : 4} style={{
-          padding: '8px 16px 4px 44px', fontSize: 10, fontWeight: 600,
-          textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--muted)',
+          padding: '8px 16px 4px 44px', fontSize: 11, fontWeight: 600,
+          color: line.unpublished ? 'var(--muted)' : 'var(--text-secondary)',
+          fontStyle: line.unpublished ? 'italic' : 'normal',
           borderBottom: 'none', background: 'var(--neutral-bg-soft)',
         }}>
-          {sub}
+          {line.sub && (
+            <span style={{ fontWeight: 400, color: 'var(--muted)' }} title={SUBFAMILY_LABEL}>{line.sub} › </span>
+          )}
+          {line.label}
         </td>
       </tr>
-      {list.map(t => (
+      {line.rows.map(t => (
         <tr key={t.id}>
           <td style={{ paddingLeft: 44 }}>
             <NameButton template={t} onOpen={onOpen} />

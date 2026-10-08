@@ -37,7 +37,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from sqlalchemy import func, or_
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.constants.trust import (
@@ -51,6 +51,7 @@ from app.models.formula_template import (
 )
 from app.models.index_layer import TypeCode
 from app.models.user import User
+from app.services.catalog_visibility import platform_or_team_listed_clause
 
 # Catalog recipes legitimately run 99.9–110 because margin sits inside the 100%
 # total, so "closed" is a band rather than exactly 100. Outside it the weights
@@ -182,7 +183,65 @@ def fingerprint_for(lines: list[FormulaTemplateComponent]) -> str:
 
 # ── The derivation ───────────────────────────────────────────────────────────
 
+# ── Source warnings ──────────────────────────────────────────────────────────
+#
+# The content loader stores a record's `pricing_gap` {status, line, since} and
+# `margin_status` in its template's `catalog_meta` (design §2.3, decision 29).
+# Either one caps every combo of that template at `medium` and puts it in front
+# of a reviewer, with fixed wording: the record's own `why` is internal and is
+# never copied. `assess()` applies the cap itself, so every path that regrades
+# (the loader, `recompute_all`, the API) gives the same answer.
+REASON_PRICING_GAP = "source_flags_a_pricing_gap"
+REASON_MARGIN_STATUS = "source_flags_the_margin_for_re_estimation"
+SOURCE_WARNING_DETAIL = {
+    REASON_PRICING_GAP: "the source marks part of this recipe as not fully indexed",
+    REASON_MARGIN_STATUS: "the source marks this recipe's margin for re-estimation",
+}
+
+
+def source_warning_reasons(catalog_meta: dict | None) -> list[TrustReason]:
+    """The fixed reasons a template's stored source warnings add (none when
+    its `catalog_meta` flags nothing)."""
+    meta = catalog_meta if isinstance(catalog_meta, dict) else {}
+    reasons: list[TrustReason] = []
+    gap = meta.get("pricing_gap")
+    if isinstance(gap, dict):
+        line = gap.get("line")
+        reasons.append(TrustReason(reason=REASON_PRICING_GAP,
+                                   subjects=[line] if line else [],
+                                   detail=SOURCE_WARNING_DETAIL[REASON_PRICING_GAP]))
+    if meta.get("margin_status"):
+        reasons.append(TrustReason(reason=REASON_MARGIN_STATUS,
+                                   detail=SOURCE_WARNING_DETAIL[REASON_MARGIN_STATUS]))
+    return reasons
+
+
+def cap_for_source_warnings(assessment: TrustAssessment,
+                            caps: list[TrustReason]) -> TrustAssessment:
+    """At most `medium`, always in front of a reviewer, with the fixed reasons
+    added once (a reason already present is not repeated)."""
+    if not caps:
+        return assessment
+    if GRADE_SEVERITY.get(assessment.grade, 0) > GRADE_SEVERITY[GRADE_MEDIUM]:
+        assessment.grade = GRADE_MEDIUM
+    assessment.needs_review = True
+    present = {r.reason for r in assessment.reasons}
+    assessment.reasons = list(assessment.reasons) + [c for c in caps if c.reason not in present]
+    return assessment
+
+
 def assess(db: Session, coverage: FormulaRegionCoverage) -> TrustAssessment:
+    """Grade one combo from the resolution layer and its weight set, capped by
+    the template's source warnings."""
+    assessment = _assess_lines(db, coverage)
+    template = coverage.template
+    if template is None and coverage.template_id is not None:
+        template = db.get(FormulaTemplate, coverage.template_id)
+    caps = source_warning_reasons(template.catalog_meta if template is not None else None)
+    return cap_for_source_warnings(assessment, caps)
+
+
+def _assess_lines(db: Session, coverage: FormulaRegionCoverage) -> TrustAssessment:
     """Grade one combo from the resolution layer and its weight set."""
     lines = coverage_lines(db, coverage)
     if not lines:
@@ -464,8 +523,11 @@ def review_queue(
     q = (
         db.query(FormulaRegionCoverage, FormulaTemplate)
         .join(FormulaTemplate, FormulaTemplate.id == FormulaRegionCoverage.template_id)
-        .filter(or_(FormulaTemplate.team_id.is_(None),
-                    FormulaTemplate.team_id == team_id))
+        # Listed platform cards only (absorbed, pointer, duplicate and
+        # withdrawn cards are not in the library a reviewer works through),
+        # plus the team's own templates; never a withdrawn combo.
+        .filter(platform_or_team_listed_clause(team_id),
+                FormulaRegionCoverage.withdrawn_at.is_(None))
     )
     if needs_review is not None:
         q = q.filter(FormulaRegionCoverage.needs_review.is_(needs_review))

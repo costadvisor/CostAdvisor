@@ -24,6 +24,25 @@ const TIER_TITLE = {
 
 const mono = { fontFamily: "'JetBrains Mono', monospace" };
 
+const UNPUBLISHED_LINE = 'Product line not yet published';
+
+// Supply-status badge tones (the badge never carries a number).
+const STATUS_TONE = {
+  green: { bg: 'var(--success-bg)', color: 'var(--accent)' },
+  'green-amber': { bg: 'var(--success-bg)', color: 'var(--accent3)' },
+  amber: { bg: 'var(--warn-bg)', color: 'var(--accent3)' },
+  grey: { bg: 'var(--neutral-bg)', color: 'var(--muted)' },
+};
+
+/* Family › Sub-family › Product line. Null-safe: an unnamed sub-family is
+   skipped, and a card on no published line says so instead of showing a key. */
+function breadcrumb(t) {
+  if (!t.family && !t.product_line) return null;
+  const parts = [t.family?.name, t.product_line ? t.subfamily?.name : null,
+    t.product_line?.name || (t.team_id ? null : UNPUBLISHED_LINE)];
+  return parts.filter(Boolean).join(' › ');
+}
+
 function Stat({ label, children }) {
   return (
     <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '8px 12px', minWidth: 90 }}>
@@ -74,13 +93,16 @@ export default function FormulaDetailModal({ template, activeTeamId, canEdit, on
 
   const loadCoverage = useCallback(async (selectFirst) => {
     const res = await api.get(`/api/formulas/${template.id}/coverage`, { params: teamParam });
-    setCoverage(res.data);
+    // A withdrawn combo left the catalogue: it is not priced today, so it is
+    // not offered as a region here.
+    const live = res.data.filter(c => !c.withdrawn_at);
+    setCoverage(live);
     if (selectFirst) {
       // Europe is the catalog's most complete region — a sensible default view.
-      const codes = res.data.map(c => c.region);
+      const codes = live.map(c => c.region);
       setRegion(codes.includes('Europe') ? 'Europe' : (codes[0] || 'Europe'));
     }
-    return res.data;
+    return live;
   }, [template.id, activeTeamId]);
 
   useEffect(() => {
@@ -307,10 +329,16 @@ export default function FormulaDetailModal({ template, activeTeamId, canEdit, on
                   {confStyle.label}
                 </span>
               )}
+              {template.status?.label && (
+                <span className="ca-badge" title={template.status.description || undefined}
+                  style={{ ...(STATUS_TONE[template.status.tone] || STATUS_TONE.grey), fontWeight: 600 }}>
+                  {template.status.label}
+                </span>
+              )}
             </div>
-            {(template.family_name || template.subfamily_name) && (
+            {breadcrumb(template) && (
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
-                {[template.family_name, template.subfamily_name].filter(Boolean).join(' → ')}
+                {breadcrumb(template)}
               </div>
             )}
           </div>

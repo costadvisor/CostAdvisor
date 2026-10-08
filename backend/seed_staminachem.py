@@ -2,6 +2,16 @@
 Seed script: Staminachem demo data
 Creates 5 products, 2 suppliers each, cost models with formula components,
 actual prices and volumes across 2023-2025 to showcase gap analysis.
+
+Also the user-facing "Load example data" button (POST
+/api/teams/{id}/load-example-data), so it must work on any database.
+
+Commodity indexes are resolved **by name**, never by id: on a fresh database
+the ids are assigned in load order, and a hard-coded id would write demo values
+into whatever series got it, a licensed content series included. Every name
+must be a reference index (`app/seed.py`, seed_all.py stage 1) that no content
+load owns; otherwise the run refuses before writing anything
+(`MissingReferenceData`).
 """
 import uuid
 from datetime import datetime, timezone
@@ -13,7 +23,7 @@ now = datetime.now(timezone.utc).isoformat()
 TEAM_ID = "6ee41dc2-bd26-4a50-8589-f601c54a335d"   # Jil Varghese's Team
 CREATED_BY = "13099867-d73e-400b-8f76-b557ad5c05e5" # jil@staminachem.com
 
-# ─── 1. Index data (fill Caustic Soda — id=2 has no values yet) ──────────────
+# ─── 1. Index data (fill Caustic Soda, which has no values yet) ─────────────
 # Caustic Soda (NaOH) quarterly market prices $/mt — European spot
 CAUSTIC_SODA_VALUES = [
     ("Europe", 2022, 1, 490.0), ("Europe", 2022, 2, 510.0),
@@ -26,7 +36,7 @@ CAUSTIC_SODA_VALUES = [
     ("Europe", 2025, 3, 290.0), ("Europe", 2025, 4, 280.0),
 ]
 
-# Sulfuric Acid (id=3) quarterly values $/mt
+# Sulfuric Acid quarterly values $/mt
 SULFURIC_ACID_VALUES = [
     ("Europe", 2022, 1, 195.0), ("Europe", 2022, 2, 210.0),
     ("Europe", 2022, 3, 200.0), ("Europe", 2022, 4, 185.0),
@@ -38,7 +48,7 @@ SULFURIC_ACID_VALUES = [
     ("Europe", 2025, 3, 138.0), ("Europe", 2025, 4, 132.0),
 ]
 
-# Hydrochloric Acid (id=4) quarterly values $/mt
+# Hydrochloric Acid quarterly values $/mt
 HCL_VALUES = [
     ("Europe", 2022, 1, 290.0), ("Europe", 2022, 2, 320.0),
     ("Europe", 2022, 3, 305.0), ("Europe", 2022, 4, 275.0),
@@ -50,10 +60,18 @@ HCL_VALUES = [
     ("Europe", 2025, 3, 198.0), ("Europe", 2025, 4, 190.0),
 ]
 
+# Reference index names (app/seed.py INDEXES_DATA).
+CAUSTIC_SODA = "Caustic Soda"
+SULFURIC_ACID = "Sulfuric Acid"
+HYDROCHLORIC_ACID = "Hydrochloric Acid"
+ENERGY = "Energy & Utilities"
+CHLORINE = "Chlorine"
+AMMONIA = "Ammonia"
+
 INDEX_BACKFILLS = [
-    (2, CAUSTIC_SODA_VALUES),
-    (3, SULFURIC_ACID_VALUES),
-    (4, HCL_VALUES),
+    (CAUSTIC_SODA, CAUSTIC_SODA_VALUES),
+    (SULFURIC_ACID, SULFURIC_ACID_VALUES),
+    (HYDROCHLORIC_ACID, HCL_VALUES),
 ]
 
 # ─── 2. Suppliers ─────────────────────────────────────────────────────────────
@@ -67,9 +85,7 @@ SUPPLIERS = [
 
 # ─── 3. Products + Cost Models ────────────────────────────────────────────────
 # Each entry: product + list of (supplier_name, base_price, base_year, base_quarter,
-#             components[(label, commodity_id, weight)])
-# commodity_ids: 2=Caustic Soda, 3=Sulfuric Acid, 4=Hydrochloric Acid,
-#                35=Energy & Utilities, 36=Chlorine, 37=Ammonia, 32=Brent Crude Oil
+#             components[(label, commodity_name, weight)]); None = a fixed line.
 
 COST_MODELS = [
     {
@@ -84,8 +100,8 @@ COST_MODELS = [
                 "base_price": 450.0,
                 "base_year": 2023, "base_quarter": 1,
                 "components": [
-                    ("Raw NaOH",  2,  0.60),
-                    ("Energy",    35, 0.20),
+                    ("Raw NaOH",  CAUSTIC_SODA,  0.60),
+                    ("Energy",    ENERGY, 0.20),
                     ("Fixed",     None, 0.20),
                 ],
             },
@@ -94,8 +110,8 @@ COST_MODELS = [
                 "base_price": 445.0,
                 "base_year": 2023, "base_quarter": 1,
                 "components": [
-                    ("Raw NaOH",  2,  0.60),
-                    ("Energy",    35, 0.20),
+                    ("Raw NaOH",  CAUSTIC_SODA,  0.60),
+                    ("Energy",    ENERGY, 0.20),
                     ("Fixed",     None, 0.20),
                 ],
             },
@@ -113,8 +129,8 @@ COST_MODELS = [
                 "base_price": 280.0,
                 "base_year": 2023, "base_quarter": 1,
                 "components": [
-                    ("Chlorine",     36, 0.50),
-                    ("Caustic Soda", 2,  0.30),
+                    ("Chlorine",     CHLORINE, 0.50),
+                    ("Caustic Soda", CAUSTIC_SODA,  0.30),
                     ("Fixed",        None, 0.20),
                 ],
             },
@@ -123,8 +139,8 @@ COST_MODELS = [
                 "base_price": 285.0,
                 "base_year": 2023, "base_quarter": 1,
                 "components": [
-                    ("Chlorine",     36, 0.50),
-                    ("Caustic Soda", 2,  0.30),
+                    ("Chlorine",     CHLORINE, 0.50),
+                    ("Caustic Soda", CAUSTIC_SODA,  0.30),
                     ("Fixed",        None, 0.20),
                 ],
             },
@@ -142,8 +158,8 @@ COST_MODELS = [
                 "base_price": 195.0,
                 "base_year": 2023, "base_quarter": 1,
                 "components": [
-                    ("Sulfur/Acid",  3,  0.55),
-                    ("Energy",       35, 0.25),
+                    ("Sulfur/Acid",  SULFURIC_ACID,  0.55),
+                    ("Energy",       ENERGY, 0.25),
                     ("Fixed",        None, 0.20),
                 ],
             },
@@ -152,8 +168,8 @@ COST_MODELS = [
                 "base_price": 188.0,
                 "base_year": 2023, "base_quarter": 1,
                 "components": [
-                    ("Sulfur/Acid",  3,  0.55),
-                    ("Energy",       35, 0.25),
+                    ("Sulfur/Acid",  SULFURIC_ACID,  0.55),
+                    ("Energy",       ENERGY, 0.25),
                     ("Fixed",        None, 0.20),
                 ],
             },
@@ -171,8 +187,8 @@ COST_MODELS = [
                 "base_price": 320.0,
                 "base_year": 2023, "base_quarter": 1,
                 "components": [
-                    ("Ammonia",  37, 0.65),
-                    ("Energy",   35, 0.15),
+                    ("Ammonia",  AMMONIA, 0.65),
+                    ("Energy",   ENERGY, 0.15),
                     ("Fixed",    None, 0.20),
                 ],
             },
@@ -181,8 +197,8 @@ COST_MODELS = [
                 "base_price": 315.0,
                 "base_year": 2023, "base_quarter": 1,
                 "components": [
-                    ("Ammonia",  37, 0.65),
-                    ("Energy",   35, 0.15),
+                    ("Ammonia",  AMMONIA, 0.65),
+                    ("Energy",   ENERGY, 0.15),
                     ("Fixed",    None, 0.20),
                 ],
             },
@@ -200,8 +216,8 @@ COST_MODELS = [
                 "base_price": 265.0,
                 "base_year": 2023, "base_quarter": 1,
                 "components": [
-                    ("HCl Raw",  4,  0.60),
-                    ("Energy",   35, 0.20),
+                    ("HCl Raw",  HYDROCHLORIC_ACID,  0.60),
+                    ("Energy",   ENERGY, 0.20),
                     ("Fixed",    None, 0.20),
                 ],
             },
@@ -210,8 +226,8 @@ COST_MODELS = [
                 "base_price": 258.0,
                 "base_year": 2023, "base_quarter": 1,
                 "components": [
-                    ("HCl Raw",  4,  0.60),
-                    ("Energy",   35, 0.20),
+                    ("HCl Raw",  HYDROCHLORIC_ACID,  0.60),
+                    ("Energy",   ENERGY, 0.20),
                     ("Fixed",    None, 0.20),
                 ],
             },
@@ -257,15 +273,59 @@ ACTUAL_VOLUMES = {
 }
 
 
+class MissingReferenceData(RuntimeError):
+    """A commodity index the demo needs is missing, or is a content series."""
+
+
+def commodity_names() -> list[str]:
+    """Every commodity index name the demo reads or writes."""
+    names = {name for name, _values in INDEX_BACKFILLS}
+    for cm in COST_MODELS:
+        for sup in cm["suppliers"]:
+            names |= {name for _label, name, _w in sup["components"] if name}
+    return sorted(names)
+
+
+def resolve_commodities(conn) -> dict[str, int]:
+    """name -> commodity_indexes.id for every name the demo uses.
+
+    Refuses (MissingReferenceData) when one is missing, or belongs to a
+    content series (`commodity_key` set): demo values must never land on a
+    licensed series.
+    """
+    wanted = commodity_names()
+    rows = conn.execute(text(
+        "SELECT id, name, commodity_key FROM commodity_indexes WHERE name = ANY(:names)"
+    ), {"names": wanted}).fetchall()
+    found = {r[1]: r for r in rows}
+    missing = [n for n in wanted if n not in found]
+    content = [n for n in wanted if n in found and found[n][2] is not None]
+    if missing or content:
+        problems = []
+        if missing:
+            problems.append(f"missing: {', '.join(missing)}")
+        if content:
+            problems.append(f"owned by the content load: {', '.join(content)}")
+        raise MissingReferenceData(
+            "The example data needs the reference commodity indexes ("
+            + "; ".join(problems)
+            + "). Run `python seed_all.py --stages 1` first.")
+    return {n: found[n][0] for n in wanted}
+
+
 def run(team_id: str = TEAM_ID, created_by: str = CREATED_BY):
     with engine.begin() as conn:
         # Bypass RLS for seed scripts (same pattern as Celery tasks)
         conn.execute(text("SELECT set_config('app.bypass_rls', 'on', true)"))
         conn.execute(text("SELECT set_config('app.current_team_id', :tid, true)"), {"tid": team_id})
 
+        # Before any write: a refusal leaves the database untouched.
+        commodity_ids = resolve_commodities(conn)
+
         # ── 1. Backfill index values ─────────────────────────────────────
         print("=== Backfilling index values ===")
-        for commodity_id, values in INDEX_BACKFILLS:
+        for commodity_name, values in INDEX_BACKFILLS:
+            commodity_id = commodity_ids[commodity_name]
             inserted = 0
             for region, year, quarter, value in values:
                 conn.execute(text(
@@ -274,17 +334,10 @@ def run(team_id: str = TEAM_ID, created_by: str = CREATED_BY):
                     "ON CONFLICT (commodity_id, region, year, quarter) DO UPDATE SET value = :value"
                 ), {"cid": commodity_id, "region": region, "year": year, "quarter": quarter, "value": value})
                 inserted += 1
-            print(f"  commodity_id={commodity_id}: upserted {inserted} values")
+            print(f"  {commodity_name} (id={commodity_id}): upserted {inserted} values")
 
-        # ── 2. Chemical family ───────────────────────────────────────────
-        row = conn.execute(text("SELECT id FROM chemical_families WHERE name = 'Industrial Chemicals'")).fetchone()
-        if row:
-            family_id = row[0]
-        else:
-            family_id = conn.execute(text(
-                "INSERT INTO chemical_families (name) VALUES ('Industrial Chemicals') RETURNING id"
-            )).scalar()
-        print(f"  Chemical family: Industrial Chemicals (id={family_id})")
+        # Products get no chemical family: families are the platform taxonomy,
+        # loaded from the content drop, and a seed must not add its own.
 
         # ── 3. Suppliers ─────────────────────────────────────────────────
         print("=== Creating suppliers ===")
@@ -317,12 +370,12 @@ def run(team_id: str = TEAM_ID, created_by: str = CREATED_BY):
             else:
                 pid = str(uuid.uuid4())
                 conn.execute(text(
-                    "INSERT INTO products (id, team_id, created_by, name, formula, unit, chemical_family_id, created_at, updated_at) "
-                    "VALUES (:id, :tid, :uid, :name, :formula, :unit, :fid, :now, :now)"
+                    "INSERT INTO products (id, team_id, created_by, name, formula, unit, created_at, updated_at) "
+                    "VALUES (:id, :tid, :uid, :name, :formula, :unit, :now, :now)"
                 ), {
                     "id": pid, "tid": team_id, "uid": created_by,
                     "name": cm["product"], "formula": cm["product"],
-                    "unit": cm["unit"], "fid": family_id, "now": now,
+                    "unit": cm["unit"], "now": now,
                 })
                 product_ids[cm["product"]] = pid
                 print(f"  Created: {cm['product']} (id={pid})")
@@ -363,7 +416,8 @@ def run(team_id: str = TEAM_ID, created_by: str = CREATED_BY):
                         "by": sup["base_year"], "bq": sup["base_quarter"], "now": now,
                     }).scalar()
 
-                    for label, commodity_id, weight in sup["components"]:
+                    for label, commodity_name, weight in sup["components"]:
+                        commodity_id = commodity_ids[commodity_name] if commodity_name else None
                         conn.execute(text(
                             "INSERT INTO formula_components (formula_version_id, label, commodity_id, weight) "
                             "VALUES (:fvid, :label, :cid, :weight)"

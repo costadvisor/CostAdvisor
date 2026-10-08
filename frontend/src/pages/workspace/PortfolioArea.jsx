@@ -6,6 +6,7 @@ import exportCsv from '../../utils/exportCsv';
 import { GroupHeader } from './wsCharts';
 import ProductFormModal from '../../components/ProductFormModal';
 import { useConfirm, useAlert } from '../../components/ConfirmDialog';
+import DemoDataNote from '../../components/DemoDataNote';
 
 /* ──────────────────────────────────────────────────────────────────────
  * Portfolio — the product as the central object. REAL data: every product
@@ -74,7 +75,6 @@ export default function PortfolioArea() {
 
   const [costModels, setCostModels] = useState([]);
   const [products, setProducts] = useState([]);
-  const [families, setFamilies] = useState([]);
   const [templates, setTemplates] = useState([]);   // catalog formula templates, for the add-product modal
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -130,13 +130,11 @@ export default function PortfolioArea() {
     Promise.all([
       api.get('/api/cost-models', { params: { team_id: activeTeamId } }),
       api.get('/api/products', { params: { team_id: activeTeamId } }),
-      api.get('/api/chemical-families'),
       api.get('/api/formulas/', { params: { team_id: activeTeamId } }),
     ])
-      .then(([cmRes, pRes, fRes, tRes]) => {
+      .then(([cmRes, pRes, tRes]) => {
         setCostModels(cmRes.data);
         setProducts(pRes.data);
-        setFamilies(fRes.data);
         setTemplates(tRes.data);
       })
       .catch(err => setError(formatApiError(err)))
@@ -145,13 +143,14 @@ export default function PortfolioArea() {
 
   useEffect(fetchData, [activeTeamId]);
 
-  const familyName = (fid) => families.find(f => f.id === fid)?.name || null;
+  // A product's family comes resolved on ProductOut (from its catalogue
+  // product, its cost model's template, or its custom line).
   const productById = useMemo(() => Object.fromEntries(products.map(p => [p.id, p])), [products]);
 
   // Rows: one per cost model, plus a Draft row per product with no cost model.
   const rows = useMemo(() => {
     const cmRows = costModels.map(cm => {
-      const fid = productById[cm.product_id]?.chemical_family_id ?? null;
+      const fam = productById[cm.product_id]?.family || null;
       return {
         kind: 'cm',
         key: cm.id,
@@ -162,8 +161,8 @@ export default function PortfolioArea() {
         supplier: cm.supplier_name || null,
         shipFrom: cm.region || null,
         shipTo: cm.destination_country || cm.destination_region || null,
-        familyId: fid,
-        familyLabel: familyName(fid) || 'No family',
+        familyId: fam?.id ?? null,
+        familyLabel: fam?.name || 'No family',
         status: 'complete',
         fv: cm.formula_versions?.[0] || null,
       };
@@ -178,13 +177,13 @@ export default function PortfolioArea() {
       supplier: null,
       shipFrom: null,
       shipTo: null,
-      familyId: p.chemical_family_id ?? null,
-      familyLabel: familyName(p.chemical_family_id) || 'No family',
+      familyId: p.family?.id ?? null,
+      familyLabel: p.family?.name || 'No family',
       status: 'draft',
       fv: null,
     }));
     return [...cmRows, ...draftRows];
-  }, [costModels, products, families, productById]);
+  }, [costModels, products, productById]);
 
   // Fire live should-cost per cost model (progressive fill).
   const cmIdsKey = costModels.map(cm => cm.id).join(',');
@@ -235,8 +234,8 @@ export default function PortfolioArea() {
   const toggleGroup = (key) => setClosed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
   // Only families the team actually owns products in, with counts. Derived from
-  // `rows` rather than /api/chemical-families so the list can't be 22 entries long
-  // for a 3-product portfolio.
+  // `rows` rather than the full platform family list, so the list can't be 25
+  // entries long for a 3-product portfolio.
   const presentFamilies = useMemo(() => {
     const counts = new Map();
     rows.forEach(r => {
@@ -316,7 +315,10 @@ export default function PortfolioArea() {
           wrapped below — putting only the (much narrower) heading on that row
           instead is what actually keeps the buttons beside it. */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div className="ca-h1" style={{ marginBottom: 0 }}>Product portfolio</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div className="ca-h1" style={{ marginBottom: 0 }}>Product portfolio</div>
+          <DemoDataNote />
+        </div>
         {/* marginLeft: 'auto' hugs the right edge even if this ever wraps onto its
             own line — same fix already used for "Group by" in this page's own
             filter bar below. */}
@@ -337,7 +339,6 @@ export default function PortfolioArea() {
       <ProductFormModal
         isOpen={showAddProduct}
         editing={null}
-        families={families}
         templates={templates}
         activeTeamId={activeTeamId}
         onClose={() => setShowAddProduct(false)}
@@ -363,7 +364,7 @@ export default function PortfolioArea() {
           {/* Filter bar — a select for families, chips only where the option set is
               small. This used to render one chip per platform family: 23 chips
               across 3 rows to filter 3 products, 21 of them matching nothing,
-              because the list came from /api/chemical-families rather than from
+              because the list came from every platform family rather than from
               the products actually present. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '14px 0', flexWrap: 'wrap' }}>
             <input

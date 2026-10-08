@@ -3,10 +3,12 @@
 Covers:
 - The score formula itself (pure function, hand-computed regression pin).
 - Sufficient product-grain history persists a real score/grade/inputs.
-- Insufficient history (no subfamily to pool into) -> insufficient_data,
+- Insufficient history (no product line to pool into) -> insufficient_data,
   never a fabricated low score.
-- Subfamily pooling: two individually-short products pooled together cross
-  the threshold; a third, individually-sufficient sibling keeps its own row.
+- Product-line pooling: two individually-short products on one effective line
+  (a manual line, and a catalogue template's line) pooled together cross the
+  threshold; a third, individually-sufficient sibling keeps its own row.
+- A bucket producer ("various makers") never canonicalises two supplier rows.
 - Recompute upserts in place (same row identity, no duplicates).
 - The `resolution: "raw_supplier_name"` flag is always present (no producer/
   alias canonicalisation entity exists in this repo).
@@ -21,9 +23,10 @@ from sqlalchemy import text
 from app.database import bypass_rls_var
 from app.models.chemical_family import ChemicalFamily
 from app.models.cost_model import CostModel, FormulaComponent, FormulaVersion
+from app.models.formula_template import FormulaTemplate
 from app.models.price_data import ActualPrice
 from app.models.product import Product
-from app.models.subfamily import Subfamily
+from app.models.product_line import ProductLine
 from app.models.supplier import Supplier
 from app.models.supplier_trust import SupplierTrustScore
 from app.models.team import TeamMembership
@@ -34,8 +37,10 @@ from app.services.supplier_trust import (
 )
 
 
-def _mk_product(db, team_id, created_by, name, subfamily_id=None) -> Product:
-    p = Product(team_id=team_id, created_by=created_by, name=name, unit="kg", subfamily_id=subfamily_id)
+def _mk_product(db, team_id, created_by, name, product_line_id=None,
+                formula_template_id=None) -> Product:
+    p = Product(team_id=team_id, created_by=created_by, name=name, unit="kg",
+                product_line_id=product_line_id, formula_template_id=formula_template_id)
     db.add(p)
     db.commit()
     return p
@@ -77,7 +82,8 @@ def _add_prices(db, cost_model_id, uploaded_by, prices: list[float], start_year=
     db.commit()
 
 
-def _cleanup(db, cost_model_ids=(), product_ids=(), supplier_ids=(), subfamily_ids=(), family_ids=()):
+def _cleanup(db, cost_model_ids=(), product_ids=(), supplier_ids=(), line_ids=(), family_ids=(),
+             template_ids=()):
     bypass_rls_var.set(True)
     for cmid in cost_model_ids:
         db.execute(text("DELETE FROM cost_models WHERE id = :id"), {"id": str(cmid)})
@@ -86,8 +92,10 @@ def _cleanup(db, cost_model_ids=(), product_ids=(), supplier_ids=(), subfamily_i
         db.execute(text("DELETE FROM suppliers WHERE id = :id"), {"id": sid})
     for pid in product_ids:
         db.execute(text("DELETE FROM products WHERE id = :id"), {"id": str(pid)})
-    for sfid in subfamily_ids:
-        db.execute(text("DELETE FROM subfamilies WHERE id = :id"), {"id": sfid})
+    for tid in template_ids:
+        db.execute(text("DELETE FROM formula_templates WHERE id = :id"), {"id": str(tid)})
+    for lid in line_ids:
+        db.execute(text("DELETE FROM product_lines WHERE id = :id"), {"id": lid})
     for fid in family_ids:
         db.execute(text("DELETE FROM chemical_families WHERE id = :id"), {"id": fid})
     db.commit()
@@ -136,7 +144,7 @@ def test_sufficient_history_persists_real_score(db, tenant_a, client_as):
         _cleanup(db, [cm.id], [product.id], [supplier.id])
 
 
-def test_insufficient_history_no_subfamily(db, tenant_a, client_as):
+def test_insufficient_history_no_line(db, tenant_a, client_as):
     product = _mk_product(db, tenant_a["team_id"], tenant_a["user_id"], "P-thin")
     supplier = _mk_supplier(db, tenant_a["team_id"], "Thin Data Co")
     cm = _mk_flat_cost_model(db, tenant_a["team_id"], tenant_a["user_id"], product.id, supplier.id)
@@ -154,18 +162,30 @@ def test_insufficient_history_no_subfamily(db, tenant_a, client_as):
         _cleanup(db, [cm.id], [product.id], [supplier.id])
 
 
-def test_subfamily_pooling_and_sufficient_sibling_kept_separate(db, tenant_a, client_as):
-    family = ChemicalFamily(name=f"Fam-{uuid.uuid4().hex[:8]}")
+def test_line_pooling_and_sufficient_sibling_kept_separate(db, tenant_a, client_as):
+    """Pooling is on the product's **effective** line: one thin product has a
+    manual line, the other reaches the same line through its catalogue
+    template, and they pool."""
+    suffix = uuid.uuid4().hex[:8]
+    family = ChemicalFamily(name=f"Fam-{suffix}")
     db.add(family)
     db.flush()
-    sub = Subfamily(family_id=family.id, name=f"Sub-{uuid.uuid4().hex[:8]}")
-    db.add(sub)
+    line = ProductLine(family_id=family.id, platform=f"PLAT-ST-{suffix}",
+                       line_key=f"{family.name}|||Line-{suffix}", name=f"Line-{suffix}")
+    db.add(line)
+    db.flush()
+    tpl = FormulaTemplate(team_id=None, created_by=tenant_a["user_id"], name=f"Tpl-{suffix}",
+                          code=f"TST-{suffix}", family_id=family.id, product_line_id=line.id)
+    db.add(tpl)
     db.commit()
 
     supplier = _mk_supplier(db, tenant_a["team_id"], "Pooled Supplier")
-    p_thin_1 = _mk_product(db, tenant_a["team_id"], tenant_a["user_id"], "Thin1", subfamily_id=sub.id)
-    p_thin_2 = _mk_product(db, tenant_a["team_id"], tenant_a["user_id"], "Thin2", subfamily_id=sub.id)
-    p_rich = _mk_product(db, tenant_a["team_id"], tenant_a["user_id"], "Rich", subfamily_id=sub.id)
+    p_thin_1 = _mk_product(db, tenant_a["team_id"], tenant_a["user_id"], "Thin1",
+                           product_line_id=line.id)
+    p_thin_2 = _mk_product(db, tenant_a["team_id"], tenant_a["user_id"], "Thin2",
+                           formula_template_id=tpl.id)
+    p_rich = _mk_product(db, tenant_a["team_id"], tenant_a["user_id"], "Rich",
+                         product_line_id=line.id)
 
     cm1 = _mk_flat_cost_model(db, tenant_a["team_id"], tenant_a["user_id"], p_thin_1.id, supplier.id)
     _add_prices(db, cm1.id, tenant_a["user_id"], [105, 110])  # 2 quarters
@@ -180,11 +200,12 @@ def test_subfamily_pooling_and_sufficient_sibling_kept_separate(db, tenant_a, cl
                    params={"team_id": str(tenant_a["team_id"])})
         assert r.status_code == 200, r.text
         rows = r.json()
-        subfamily_rows = [row for row in rows if row["grain"] == "subfamily"]
-        assert len(subfamily_rows) == 1
-        assert subfamily_rows[0]["subfamily_id"] == sub.id
-        assert subfamily_rows[0]["insufficient_data"] is False
-        assert subfamily_rows[0]["inputs"]["n_quarters"] == 4
+        line_rows = [row for row in rows if row["grain"] == "product_line"]
+        assert len(line_rows) == 1
+        assert line_rows[0]["product_line_id"] == line.id
+        assert line_rows[0]["product_line_name"] == line.name
+        assert line_rows[0]["insufficient_data"] is False
+        assert line_rows[0]["inputs"]["n_quarters"] == 4
 
         product_rows = {row["product_id"]: row for row in rows if row["grain"] == "product"}
         assert str(p_rich.id) in product_rows
@@ -194,7 +215,7 @@ def test_subfamily_pooling_and_sufficient_sibling_kept_separate(db, tenant_a, cl
         assert str(p_thin_2.id) not in product_rows
     finally:
         _cleanup(db, [cm1.id, cm2.id, cm3.id], [p_thin_1.id, p_thin_2.id, p_rich.id],
-                 [supplier.id], [sub.id], [family.id])
+                 [supplier.id], [line.id], [family.id], [tpl.id])
 
 
 def test_recompute_upserts_in_place(db, tenant_a, client_as):
@@ -413,4 +434,22 @@ def test_canonicalisation_never_crosses_a_team(db, tenant_a, tenant_b):
         assert map_a.get(s_a.id) == map_b.get(s_b.id) == pr.id
     finally:
         _cleanup(db, supplier_ids=[s_a.id, s_b.id])
+        _drop_producer(db, pr.id)
+
+
+def test_a_bucket_producer_never_canonicalises(db, tenant_a):
+    """A bucket ("various makers") names a group of unnamed companies, not one
+    company: two supplier rows that both resolve to it are not one supplier,
+    so neither enters the map and neither is pooled with the other."""
+    second = f"Various makers-{uuid.uuid4().hex[:6]}"
+    pr = _producer(db, f"Bucket-{uuid.uuid4().hex[:6]}", second)
+    pr.is_bucket = True
+    db.commit()
+    s1 = _mk_supplier(db, tenant_a["team_id"], pr.name)
+    s2 = _mk_supplier(db, tenant_a["team_id"], second)
+    try:
+        producer_map = team_producer_map(db, tenant_a["team_id"])
+        assert s1.id not in producer_map and s2.id not in producer_map
+    finally:
+        _cleanup(db, supplier_ids=[s1.id, s2.id])
         _drop_producer(db, pr.id)

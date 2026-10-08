@@ -19,13 +19,12 @@ class Product(Base):
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
     )
-    chemical_family_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("chemical_families.id"), nullable=True
-    )
-    # Optional finer-grained taxonomy link: family -> subfamily -> product. Nullable
-    # because existing products only carry a family and not every product is subfiled.
-    subfamily_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("subfamilies.id", ondelete="SET NULL"), nullable=True
+    # The product line of a custom product (one with no linked template). A
+    # catalogue-linked product takes its line, sub-family and family from its
+    # template instead (services/effective_lines.py), so this stays NULL there.
+    product_line_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("product_lines.id", ondelete="SET NULL"),
+        nullable=True, index=True,
     )
     # The catalog formula this product is priced by (Scrum 58): cost models for
     # a linked product auto-load the template at their region. NULL = not
@@ -49,8 +48,7 @@ class Product(Base):
 
     # Relationships
     team = relationship("Team", back_populates="products")
-    chemical_family = relationship("ChemicalFamily", back_populates="products")
-    subfamily = relationship("Subfamily", back_populates="products")
+    product_line = relationship("ProductLine")
     cost_models = relationship(
         "CostModel", back_populates="product", cascade="all, delete-orphan"
     )

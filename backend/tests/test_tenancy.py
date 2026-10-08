@@ -35,7 +35,7 @@ def test_cross_tenant_product_get(client_as, tenant_b, a_product):
 def test_cross_tenant_product_put(client_as, tenant_b, a_product):
     r = client_as(tenant_b).put(
         f"/api/products/{a_product.id}",
-        json={"name": "hijack", "formula": None, "chemical_family_id": None},
+        json={"name": "hijack", "formula": None, "product_line_id": None},
     )
     assert r.status_code in ISOLATION_CODES, r.text
 

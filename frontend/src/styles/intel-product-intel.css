@@ -1,0 +1,236 @@
+/* Product page — tab 2 "Product Intelligence" (prefix `ixi-`).
+ * Theme tokens only; the region / gemstone palettes come through intel.css
+ * variables (see IntelUtil.themeColor). Imported from ProductIntelTab.jsx. */
+
+.ixi-root { min-width: 0; }
+.ixi-muted { color: var(--muted); }
+.ixi-small { font-size: 11px; }
+.ixi-strong { font-weight: 600; color: var(--text); }
+.ixi-mono { font-family: 'JetBrains Mono', 'SF Mono', monospace; font-size: 10.5px; }
+.ixi-nowrap { white-space: nowrap; }
+.ixi-empty-line { margin: 0; font-size: 11.5px; color: var(--muted); }
+.ixi-note-text { line-height: 1.55; }
+.ixi-has-tip { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
+.ixi-has-tip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.ixi-split { align-items: stretch; }
+
+/* ── Identity card ─────────────────────────────────────────────────── */
+.ixi-identity {
+  display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 0;
+}
+.ixi-id-main { padding: 16px 18px 16px; min-width: 0; }
+.ixi-id-name {
+  font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.2px;
+  line-height: 1.25; color: var(--text); margin: 0 0 10px; overflow-wrap: anywhere;
+}
+.ixi-id-pills { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.ixi-chip-wrap { white-space: normal; }
+.ixi-id-grade { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.ixi-id-label {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase;
+  color: var(--card-eyebrow); margin-bottom: 4px;
+}
+.ixi-id-grade-text { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-secondary); max-width: 90ch; }
+.ixi-id-grade-meta {
+  display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 5px;
+  font-size: 10.5px; color: var(--muted);
+}
+.ixi-id-row { margin-top: 12px; display: flex; flex-direction: column; gap: 3px; }
+.ixi-id-members { font-size: 11.5px; line-height: 1.7; }
+.ixi-id-members a { color: var(--accent4); text-decoration: none; }
+.ixi-id-members a:hover { text-decoration: underline; }
+
+.ixi-linebox {
+  border-left: 1px solid var(--border); background: var(--surface2);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 14px 16px; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+}
+.ixi-linebox-label {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase;
+  color: var(--card-eyebrow); margin: 10px 0 3px;
+}
+.ixi-linebox-label:first-child { margin-top: 0; }
+.ixi-linebox-name {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 13px; font-weight: 700; line-height: 1.35; color: var(--text);
+}
+.ixi-linebox a { color: var(--accent4); text-decoration: none; font-weight: 600; }
+.ixi-linebox a:hover { text-decoration: underline; }
+.ixi-linebox a:focus-visible { outline: 2px solid var(--accent4); outline-offset: 2px; border-radius: 2px; }
+.ixi-linebox-name a { font-weight: 700; }
+.ixi-linebox-facts {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px;
+  margin: 5px 0 0; font-size: 11px;
+}
+.ixi-linebox-facts dt { color: var(--muted); }
+.ixi-linebox-facts dd { margin: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+.ixi-linebox-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.ixi-linebox-list li { display: flex; flex-direction: column; gap: 1px; }
+.ixi-linebox-sub { font-size: 10.5px; color: var(--muted); }
+.ixi-linebox-hint { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+.ixi-app-more { margin-top: 5px; font-size: 10.5px; }
+
+/* ── Functionalities / applications ────────────────────────────────── */
+.ixi-fn-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.ixi-fn-pill {
+  display: inline-block; font-size: 10.5px; font-weight: 600; letter-spacing: .2px;
+  padding: 4px 12px; border-radius: 12px; background: var(--accent); color: var(--on-accent);
+}
+.ixi-func-list { list-style: none; margin: 0; padding: 0; }
+.ixi-func-item {
+  display: flex; align-items: flex-start; gap: 9px; padding: 8px 0;
+  border-bottom: 1px solid var(--row-divider);
+}
+.ixi-func-item:last-child { border-bottom: none; padding-bottom: 0; }
+.ixi-func-item:first-child { padding-top: 0; }
+.ixi-func-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+.ixi-func-name { font-size: 12px; font-weight: 700; color: var(--text); }
+.ixi-func-desc { font-size: 11.5px; color: var(--text-secondary); margin-top: 2px; line-height: 1.55; }
+
+.ixi-apps { display: flex; flex-direction: column; gap: 11px; }
+.ixi-app-industry {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase;
+  color: var(--card-eyebrow); margin-bottom: 5px;
+}
+.ixi-app-items { display: flex; flex-wrap: wrap; gap: 5px; }
+.ixi-app-tag { font-size: 10.5px; padding: 3px 9px; color: var(--text); }
+.ixi-app-spec {
+  margin-top: 6px; font-size: 10.5px; line-height: 1.5; color: var(--text-secondary);
+  background: var(--warn-bg); border-left: 2px solid var(--accent3); border-radius: 0 4px 4px 0; padding: 4px 8px;
+}
+
+/* ── Where this product is bought ──────────────────────────────────── */
+.ixi-where { columns: 3 300px; column-gap: 22px; }
+.ixi-where-group { break-inside: avoid; margin: 0 0 14px; }
+.ixi-where-industry {
+  margin: 0 0 5px; padding-bottom: 4px; border-bottom: 1px solid var(--border);
+  font-size: 10px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase; color: var(--text);
+}
+.ixi-where-industry a { color: var(--text); text-decoration: none; }
+.ixi-where-industry a:hover { color: var(--accent); text-decoration: underline; }
+.ixi-where-industry a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.ixi-where-list { list-style: none; margin: 0; padding: 0; }
+.ixi-where-row {
+  display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 8px; align-items: start;
+  padding: 4px 0; font-size: 11.5px;
+}
+.ixi-where-code { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); padding-top: 1px; }
+.ixi-where-name { display: flex; flex-direction: column; min-width: 0; }
+.ixi-where-cat { color: var(--text); font-weight: 600; line-height: 1.35; }
+.ixi-where-fn { font-size: 10.5px; color: var(--muted); }
+.ixi-where-fn a { color: var(--accent4); text-decoration: none; }
+.ixi-where-shared { cursor: help; }
+.ixi-where-more { margin-top: 2px; font-size: 11px; }
+
+/* ── Note items (drivers, substitution) ────────────────────────────── */
+.ixi-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ixi-item {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 13px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface2);
+}
+.ixi-item-ico { font-size: 15px; line-height: 1.3; flex-shrink: 0; }
+.ixi-item-main { min-width: 0; }
+.ixi-item-title { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ixi-item-body { font-size: 11.5px; line-height: 1.6; color: var(--text-secondary); }
+.ixi-risk { font-weight: 600; }
+
+/* ── Current events ────────────────────────────────────────────────── */
+.ixi-events p { margin: 0; font-size: 12px; line-height: 1.7; color: var(--text-secondary); max-width: 130ch; }
+.ixi-events strong { color: var(--text); }
+.ixi-events.is-clamped p {
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ixi-more { margin-top: 6px; font-size: 11px; }
+
+/* ── Synthesis + cost chain ────────────────────────────────────────── */
+.ixi-chain-body { padding-bottom: 12px; }
+.ixi-chain { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 0; }
+.ixi-node {
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 11px; text-align: center;
+  min-width: 84px; max-width: 240px; background: var(--surface2);
+}
+.ixi-node.feed { background: var(--info-bg); border-color: var(--accent4); }
+.ixi-node.indexed { background: var(--success-bg); border-color: var(--accent); }
+.ixi-node.unindexed { background: var(--warn-bg); border-color: var(--accent3); }
+.ixi-node.product { background: var(--text); border-color: var(--text); color: var(--bg); }
+.ixi-node-name { font-size: 11px; font-weight: 700; line-height: 1.25; color: inherit; }
+.ixi-node:not(.product) .ixi-node-name { color: var(--text); }
+.ixi-node-sub { font-size: 9.5px; color: var(--muted); margin-top: 2px; }
+.ixi-node.product .ixi-node-sub { color: inherit; opacity: .7; }
+.ixi-plus { padding: 0 7px; font-size: 13px; color: var(--muted); }
+.ixi-arrow { display: flex; flex-direction: column; align-items: center; padding: 0 10px; gap: 1px; max-width: 170px; }
+.ixi-arrow-glyph { font-size: 14px; color: var(--muted); line-height: 1; }
+.ixi-arrow-label { font-size: 9.5px; color: var(--muted); text-align: center; line-height: 1.3; }
+.ixi-synth-text { margin: 12px 0 0; font-size: 12.5px; line-height: 1.7; color: var(--text); max-width: 130ch; }
+.ixi-chain-note { margin: 10px 0 0; font-size: 11px; line-height: 1.65; color: var(--muted); }
+.ixi-subhead {
+  margin: 16px -16px 12px; padding: 12px 16px 0; border-top: 1px solid var(--border);
+  font-family: 'Syne', sans-serif; font-size: 10.5px; font-weight: 700; letter-spacing: 1.1px;
+  text-transform: uppercase; color: var(--text-secondary);
+}
+.ixi-legend { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; margin-left: 10px; vertical-align: middle; }
+.ixi-legend-item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.ixi-swatch { width: 10px; height: 10px; border-radius: 3px; border: 1px solid; display: inline-block; }
+.ixi-swatch.indexed { background: var(--success-bg); border-color: var(--accent); }
+.ixi-swatch.unindexed { background: var(--warn-bg); border-color: var(--accent3); }
+
+/* ── Makers ────────────────────────────────────────────────────────── */
+.ix-table.ixi-sup-table td { vertical-align: top; }
+.ixi-sup-cell { min-width: 170px; }
+.ixi-sup-main { font-weight: 700; color: var(--text); }
+.ixi-sup-name { color: var(--text); }
+.ixi-sup-link { color: var(--accent4); text-decoration: none; font-weight: 700; }
+.ixi-sup-link.sm { font-weight: 600; font-size: 10.5px; }
+.ixi-sup-link:hover { text-decoration: underline; }
+.ixi-sup-link:focus-visible { outline: 2px solid var(--accent4); outline-offset: 2px; border-radius: 2px; }
+.ixi-sup-profiles { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+.ixi-sup-generic { font-size: 10px; color: var(--muted); margin-top: 2px; font-style: italic; cursor: help; }
+.ixi-sup-regions { min-width: 104px; }
+.ixi-sup-cell { width: 300px; max-width: 340px; }
+/* Tags as authored, under the company name. */
+.ixi-sup-tags { margin-top: 4px; }
+.ixi-sup-tags .ix-tag { white-space: normal; margin: 0 4px 3px 0; line-height: 1.45; }
+.ixi-sup-evidence { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 130px; }
+.ixi-sup-origin { font-size: 10px; line-height: 1.35; color: var(--accent3-ink, var(--accent3)); max-width: 190px; }
+.ixi-sup-dist td { background: var(--neutral-bg-soft, transparent); }
+.ixi-sites-btn { font-size: 10.5px; padding: 0; white-space: nowrap; }
+.ix-table.ixi-sup-table tr.ixi-sites-row td { padding-top: 0; border-top: 0; }
+.ixi-sites { list-style: none; margin: 0 0 4px; padding: 8px 12px; border-radius: 6px; background: var(--neutral-bg-soft, var(--surface2)); display: grid; gap: 4px; }
+.ixi-site { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: var(--text); }
+.ixi-site-meta { color: var(--muted); font-size: 10.5px; }
+
+/* ── Compliance ────────────────────────────────────────────────────── */
+.ixi-comp-list { list-style: none; margin: 0; padding: 0; }
+.ixi-comp-row {
+  display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 14px; align-items: start;
+  padding: 9px 0; border-bottom: 1px solid var(--row-divider);
+}
+.ixi-comp-row:first-child { padding-top: 0; }
+.ixi-comp-row:last-child { border-bottom: none; padding-bottom: 0; }
+.ixi-comp-row.is-bare { display: block; }
+.ixi-flag {
+  justify-self: start; font-size: 9.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+  line-height: 1.45; padding: 3px 8px; border-radius: 4px;
+}
+.ixi-flag.warn { background: var(--warn-bg); color: var(--accent3); }
+.ixi-flag.ok { background: var(--success-bg); color: var(--accent); }
+.ixi-flag.info { background: var(--info-bg); color: var(--accent4); }
+.ixi-comp-name { font-size: 12px; font-weight: 700; color: var(--text); }
+.ixi-comp-desc { font-size: 11.5px; line-height: 1.55; color: var(--text-secondary); margin-top: 2px; }
+
+/* ── Index sources ─────────────────────────────────────────────────── */
+.ix-table.ixi-src-table td { vertical-align: top; }
+.ixi-src-map { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ixi-src-tag { color: var(--text-secondary); }
+.ixi-src-key { color: var(--accent); font-weight: 600; }
+.ixi-src-note { color: var(--text-secondary); font-size: 11px; max-width: 360px; line-height: 1.5; }
+
+/* ── Responsive ────────────────────────────────────────────────────── */
+@media (max-width: 1380px) {
+  .ixi-identity { grid-template-columns: minmax(0, 1fr) 300px; }
+}
+@media (max-width: 1000px) {
+  .ixi-identity { grid-template-columns: minmax(0, 1fr); }
+  .ixi-linebox { border-left: none; border-top: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius); }
+  .ixi-comp-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+}

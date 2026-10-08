@@ -32,7 +32,7 @@ export default function SheetRoundTripPanel({
   blurb = 'Export a slice, edit prices offline, reimport to see exactly what changed before applying anything.',
   exportFilename = 'formula_coverage_prices.xlsx',
   // Passed by a caller with its own filters; when absent the built-in
-  // subfamily / needs-review form below is used.
+  // product-line / needs-review form below is used.
   renderFilters,
   filterParams: filterParamsProp,
   rowKeyLabel = (k) => `${k.code} · ${k.region}`,
@@ -41,7 +41,7 @@ export default function SheetRoundTripPanel({
   const { addToast } = useToast();
   const fileInputRef = useRef(null);
 
-  const [subfamilyId, setSubfamilyId] = useState('');
+  const [productLineId, setProductLineId] = useState('');
   const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -49,11 +49,13 @@ export default function SheetRoundTripPanel({
   const [run, setRun] = useState(null);
   const [pastRuns, setPastRuns] = useState([]);
 
-  const subfamilyOptions = useMemo(() => {
+  // The product lines the catalogue rows sit on, labelled "Family / Line".
+  // The export filters on `product_line_id` server side.
+  const lineOptions = useMemo(() => {
     const map = new Map();
     for (const t of catalogRows) {
-      if (t.subfamily_id != null) {
-        map.set(t.subfamily_id, `${t.family_name || 'Uncategorised'} / ${t.subfamily_name || '—'}`);
+      if (t.product_line?.id != null) {
+        map.set(t.product_line.id, `${t.family?.name || 'No family'} / ${t.product_line.name}`);
       }
     }
     return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
@@ -62,7 +64,7 @@ export default function SheetRoundTripPanel({
   const filterParams = () => {
     if (filterParamsProp) return filterParamsProp();
     const p = {};
-    if (subfamilyId) p.subfamily_id = subfamilyId;
+    if (productLineId) p.product_line_id = productLineId;
     if (needsReviewOnly) p.needs_review = true;
     return p;
   };
@@ -152,9 +154,10 @@ export default function SheetRoundTripPanel({
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
         {renderFilters ? renderFilters() : (
           <>
-            <select className="ca-select" style={{ fontSize: 11 }} value={subfamilyId} onChange={e => setSubfamilyId(e.target.value)}>
-              <option value="">All subfamilies</option>
-              {subfamilyOptions.map(([id, label]) => (
+            <select className="ca-select" style={{ fontSize: 11, maxWidth: 360 }} aria-label="Product line"
+              value={productLineId} onChange={e => setProductLineId(e.target.value)}>
+              <option value="">All product lines</option>
+              {lineOptions.map(([id, label]) => (
                 <option key={id} value={id}>{label}</option>
               ))}
             </select>

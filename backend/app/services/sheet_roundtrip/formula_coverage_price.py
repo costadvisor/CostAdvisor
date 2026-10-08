@@ -1,23 +1,30 @@
 """FormulaRegionCoverage base-price payload spec (Scrum 27b).
 
-The one registered sheet-roundtrip payload: catalog combo pricing
-(base_price/currency/margin_pct/base_year/base_quarter), scoped by family/
-subfamily/needs_review — the ticket's own example scenario ("export the
-unreviewed blocks for one subfamily") maps directly onto this filter shape.
+Catalog combo pricing (base_price/currency/margin_pct/base_year/base_quarter),
+scoped by family / product line / needs_review — the ticket's own example
+scenario ("export the unreviewed combos for one product line") maps directly
+onto this filter shape.
+
+The export covers **listed** platform templates only (design §2.3,
+`catalog_visibility.listed_clause`), and only their live combos: a pointer,
+duplicate, absorbed or withdrawn card, and a combo the source has withdrawn,
+are not in the sheet.
 
 Validation mirrors services/file_parser.py's parse_coverage_price_upload
 exactly (currency 3-letter uppercase, base_price non-negative, base_quarter
 1-4) so the two entry points agree on what a valid value looks like.
 """
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.models.formula_template import FormulaRegionCoverage, FormulaTemplate
+from app.services.catalog_visibility import listed_clause
 from app.services.sheet_roundtrip.base import SheetColumnSpec, SheetPayloadSpec
 
 
 class FormulaCoveragePriceFilter(BaseModel):
-    subfamily_id: int | None = None
+    family_id: int | None = None
+    product_line_id: int | None = None
     needs_review: bool | None = None
 
 
@@ -85,15 +92,23 @@ class FormulaCoveragePriceSpec(SheetPayloadSpec):
     ]
 
     def query_rows(self, db: Session, filter_spec: FormulaCoveragePriceFilter) -> list[dict]:
+        # The rows are read through an alias: `listed_clause()` holds an EXISTS
+        # over `formula_region_coverage`, which would otherwise correlate to
+        # the outer table and lose its FROM.
+        cov_row = aliased(FormulaRegionCoverage)
         q = (
-            db.query(FormulaRegionCoverage)
-            .join(FormulaTemplate, FormulaRegionCoverage.template_id == FormulaTemplate.id)
-            .filter(FormulaTemplate.team_id.is_(None))  # platform catalog only
+            db.query(cov_row)
+            .join(FormulaTemplate, cov_row.template_id == FormulaTemplate.id)
+            .filter(FormulaTemplate.team_id.is_(None),  # platform catalog only
+                    listed_clause(),
+                    cov_row.withdrawn_at.is_(None))
         )
-        if filter_spec.subfamily_id is not None:
-            q = q.filter(FormulaTemplate.subfamily_id == filter_spec.subfamily_id)
+        if filter_spec.family_id is not None:
+            q = q.filter(FormulaTemplate.family_id == filter_spec.family_id)
+        if filter_spec.product_line_id is not None:
+            q = q.filter(FormulaTemplate.product_line_id == filter_spec.product_line_id)
         if filter_spec.needs_review is not None:
-            q = q.filter(FormulaRegionCoverage.needs_review == filter_spec.needs_review)
+            q = q.filter(cov_row.needs_review == filter_spec.needs_review)
 
         rows = []
         for cov in q.all():

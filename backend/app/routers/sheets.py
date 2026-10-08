@@ -33,8 +33,8 @@ def _resolve_spec(payload_key: str):
 def _bind_filter(spec, request: Request):
     """Build the payload's OWN filter object from the query string.
 
-    This used to be a hardcoded `subfamily_id`/`needs_review` pair — the fields
-    of the first registered payload — passed straight into
+    This used to be a hardcoded pair of filter fields — those of the first
+    registered payload — passed straight into
     `spec.filter_schema(...)`. The comment here even predicted the failure ("a
     second payload with different filter fields would extend this list"), and
     when `dimension_decision` arrived it did not: Pydantic drops unknown kwargs
@@ -67,7 +67,7 @@ def export_sheet(
     """Export a filtered slice as a styled workbook.
 
     Filter params vary by payload and are read from the query string:
-    `formula_coverage_price` accepts `subfamily_id`/`needs_review`;
+    `formula_coverage_price` accepts `family_id`/`product_line_id`/`needs_review`;
     `dimension_decision` accepts `kind`/`min_occurrences`.
     """
     spec = _resolve_spec(payload_key)

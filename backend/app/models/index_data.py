@@ -14,14 +14,16 @@ class CommodityIndex(Base):
     __tablename__ = "commodity_indexes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    # Widened from String(64) for the September drop, whose series names are
+    # derived from keys and disambiguated on collision.
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     unit: Mapped[str | None] = mapped_column(String(32))
     currency: Mapped[str | None] = mapped_column(String(3))
-    category: Mapped[str | None] = mapped_column(String(64))
-    # The publishing agency. Widened from String(64) in DB-5: the drop's
-    # agency strings run to 72 chars, several being a sentence rather than a
-    # name ("ICIS (directional commentary only — subscription required...)").
-    provider: Mapped[str | None] = mapped_column(String(255))     # e.g. ECB, EIA, Eurostat, FRED, World Bank
+    category: Mapped[str | None] = mapped_column(String(255))
+    # The publishing agency. Widened from String(64) in DB-5 (72-char agency
+    # strings), and to Text for the September drop, whose INDEX_SOURCE_META
+    # agency strings run to 290 characters — a sentence, not a name.
+    provider: Mapped[str | None] = mapped_column(Text)     # e.g. ECB, EIA, Eurostat, FRED, World Bank
     # Widened from String(16) for the same reason — the drop states compound
     # cadences like "Quarterly (NA/EU) · Annual (CN/IN/MEA/LA/APAC)" (45 ch).
     frequency: Mapped[str | None] = mapped_column(String(64))     # e.g. Daily, Weekly, Monthly, Quarterly
@@ -77,24 +79,13 @@ class CommodityIndex(Base):
     # index_values, Scrum 57), so the code is validated at the API layer.
     composite_region: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
-    # ── Taxonomy link (Scrum 17 follow-up) ──────────────────────────────────
-    # Best-effort, derived from real recipe usage (FormulaTemplateComponent ->
-    # FormulaTemplate.family_id/subfamily_id) by the mapping pass — never set
-    # for a commodity no template references. NOT a substitute for the
-    # free-text `category` column above, which stays as the fallback for rows
-    # this can't (yet) place.
-    family_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("chemical_families.id", ondelete="SET NULL"), nullable=True
-    )
-    subfamily_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("subfamilies.id", ondelete="SET NULL"), nullable=True
-    )
+    # No taxonomy link: a series is not filed under a product family. (The
+    # earlier family/sub-family columns were dropped in tax2a1b2c3d4e; nothing
+    # consumed them.)
 
     # Relationships
     values = relationship("IndexValue", back_populates="commodity", lazy="dynamic")
     proxy_for = relationship("CommodityIndex", remote_side=[id])
-    family = relationship("ChemicalFamily", foreign_keys=[family_id])
-    subfamily = relationship("Subfamily", foreign_keys=[subfamily_id])
 
 
 class IndexValue(Base):

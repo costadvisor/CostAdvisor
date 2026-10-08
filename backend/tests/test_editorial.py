@@ -19,24 +19,27 @@ Every acceptance criterion, as a test:
    platform writes;
 8. the card returns every block type for a subject in one request, and the query
    count for one card **does not grow** with the number of block types present;
-9. a fixture drawn from real drop records — a template-less key, a json-bodied
-   type, a wildcard-region block, an index-slug block — round-trips unchanged.
+9. bodies the content loader stored — json-bodied types, a wildcard-region
+   text, an index-slug block — round-trip unchanged through the API;
+10. the API serves a platform `formula` block only when its type is public, and
+    no block of a retired type (`suppliers`, `supply`, `demand`), on every read
+    path; a `product_line` subject resolves by its line key.
 """
 from __future__ import annotations
 
-import json
-import pathlib
 import uuid
 
 import pytest
 from sqlalchemy import event, text
 
 from app.database import SessionLocal, bypass_rls_var, current_user_id_var
+from app.models.chemical_family import ChemicalFamily
 from app.models.editorial import (
     BLOCK_TYPES, PROVENANCE_BADGES, PROVENANCE_HUMAN_APPROVED, PROVENANCE_STATES,
-    EditorialBlock, EditorialBlockVersion, subfamily_subject_code,
+    PUBLIC_FORMULA_BLOCK_TYPES, RETIRED_BLOCK_TYPES, EditorialBlock, EditorialBlockVersion,
 )
 from app.models.index_data import CommodityIndex
+from app.models.product_line import ProductLine
 from app.models.rbac import (
     Permission, Plan, PlanPermission, Role, RolePermission, TeamMemberRole,
     UserPlatformRole,
@@ -44,16 +47,9 @@ from app.models.rbac import (
 from app.models.team import TeamMembership
 from app.services.editorial import read_card
 
-DROP_RAW = (pathlib.Path(__file__).resolve().parents[2]
-            / "sample_idea" / "costadvisor-data" / "raw")
-
-needs_drop = pytest.mark.skipif(
-    not DROP_RAW.exists(), reason="costadvisor-data drop not present in this checkout"
-)
-
-# A key that deliberately has no `formula_templates` row — 53 of 423
-# `CURATED_CONTENT` keys are in this state, so it is the normal case, not an edge.
-ORPHAN_CODE = "GRP-F22-LAR"
+# A made-up key that is no PID: it has no `formula_templates` row and no
+# platform blocks. Every real key loads as a template or as platform blocks.
+ORPHAN_CODE = "GRP-TEST-ORPHAN"
 
 
 def _cleanup(db, *, block_ids=(), commodity_ids=()):
@@ -91,12 +87,52 @@ def test_the_four_provenance_states_exist_and_only_approval_clears_the_caveat():
     assert cleared == [PROVENANCE_HUMAN_APPROVED]
 
 
-def test_the_subfamily_subject_key_is_a_single_pipe():
-    """Pinned here because the ticket named `|||`, which appears **zero** times
-    anywhere in the drop — `SUBFAMILY_FUNCTIONALITY_OVERRIDE` keys all 33 of its
-    entries as `Family|Subfamily`."""
-    assert subfamily_subject_code("Oleochemicals", "Glycerine") == "Oleochemicals|Glycerine"
-    assert "|||" not in subfamily_subject_code("A", "B")
+@pytest.fixture
+def made_up_line(db):
+    """A hand-made family and product line (made-up names), with one former key."""
+    suffix = uuid.uuid4().hex[:8]
+    fam = ChemicalFamily(name=f"Fam-{suffix}")
+    db.add(fam)
+    db.flush()
+    line = ProductLine(family_id=fam.id, platform=f"PLAT-TEST-{suffix}",
+                       line_key=f"Fam-{suffix}|||Line-{suffix}", name=f"Line-{suffix}",
+                       former_keys=[f"Fam-{suffix}|||Old-{suffix}"])
+    db.add(line)
+    db.commit()
+    yield {"family": fam, "line": line, "former": f"Fam-{suffix}|||Old-{suffix}"}
+    db.rollback()
+    bypass_rls_var.set(True)
+    db.execute(text("DELETE FROM product_lines WHERE id = :i"), {"i": line.id})
+    db.execute(text("DELETE FROM chemical_families WHERE id = :i"), {"i": fam.id})
+    db.commit()
+
+
+def test_a_product_line_subject_resolves_by_its_line_key(db, tenant_a, client_as, made_up_line):
+    """A `product_line` subject is keyed by `Family|||Line`. The current key
+    resolves the line and its family; a former key the line still claims
+    resolves to the same line; an unknown key keeps the block with no join."""
+    c = client_as(tenant_a)
+    line, fam = made_up_line["line"], made_up_line["family"]
+    ids = []
+    try:
+        for code, block_type in ((line.line_key, "functionalities"),
+                                 (made_up_line["former"], "applications"),
+                                 (f"{fam.name}|||No-such-line", "compliance")):
+            r = _post(c, tenant_a, subject_type="product_line", subject_code=code,
+                      block_type=block_type)
+            assert r.status_code == 201, r.text
+            ids.append(r.json()["id"])
+        current, former, unknown = (c.get(
+            f"/api/editorial/blocks/{i}?team_id={tenant_a['team_id']}").json() for i in ids)
+        assert (current["product_line_id"], current["family_id"]) == (line.id, fam.id)
+        assert (former["product_line_id"], former["family_id"]) == (line.id, fam.id)
+        assert unknown["product_line_id"] is None and unknown["family_id"] is None
+        # The `:path` converter keeps the `|||` key whole on the card read.
+        card = c.get(f"/api/editorial/cards/product_line/{line.line_key}"
+                     f"?team_id={tenant_a['team_id']}").json()
+        assert set(card["blocks"]) == {"functionalities"}
+    finally:
+        _cleanup(db, block_ids=ids)
 
 
 # ── 2. Template-less subjects survive the whole round trip ──────────────────
@@ -487,12 +523,13 @@ def test_the_card_returns_every_block_type_in_one_request(db, tenant_a, client_a
     code = f"CARD-{uuid.uuid4().hex[:8]}"
     ids = []
     try:
-        for bt in ("supplier_note", "compliance", "supply", "demand"):
+        for bt in ("supplier_note", "compliance", "applications", "macro_drivers"):
             ids.append(_post(c, tenant_a, subject_code=code, block_type=bt,
                              body_text=f"{bt} text").json()["id"])
         card = c.get(
             f"/api/editorial/cards/formula/{code}?team_id={tenant_a['team_id']}").json()
-        assert set(card["blocks"]) == {"supplier_note", "compliance", "supply", "demand"}
+        assert set(card["blocks"]) == {"supplier_note", "compliance", "applications",
+                                       "macro_drivers"}
         # Two calls by design — the derived numbers are SCRUM-75's endpoint, and
         # naming it keeps a consumer from thinking the card lost half its content.
         assert card["derived_payload_endpoint"]
@@ -552,94 +589,61 @@ def test_a_team_fork_shadows_the_platform_block_on_the_card(
         _cleanup(db, block_ids=[fork["id"]])
 
 
-# ── 9. Real drop records round-trip ────────────────────────────────────────
+# ── 9. Loaded content round-trips ──────────────────────────────────────────
 
-@needs_drop
-def test_real_drop_records_round_trip_unchanged(db, tenant_a, client_as):
-    """Four shapes a naive schema silently drops, taken verbatim from the drop:
-    a template-less key, a json-bodied structured type, a wildcard-region block,
-    and an index-slug block."""
-    cc = json.loads((DROP_RAW / "CURATED_CONTENT.json").read_text(encoding="utf-8"))
-    sdc = json.loads((DROP_RAW / "SUPPLY_DEMAND_COMPLIANCE.json").read_text(encoding="utf-8"))
-    ceo = json.loads((DROP_RAW / "CURRENT_EVENTS_OUTLOOK.json").read_text(encoding="utf-8"))
-    narr = json.loads((DROP_RAW / "INDEX_NARRATIVES.json").read_text(encoding="utf-8"))
-
-    # A GRP-* group pseudo-key: a roll-up, not a formula, so no template row.
-    orphan_key = next(k for k in cc if k.startswith("GRP-"))
-    orphan_note = cc[orphan_key]["supplierNote"]
-    # A structured type whose elements are objects, with the known polymorphism:
-    # `compliance` is 367 dicts and 31 bare strings across the payload.
-    sd_key = next(k for k in sdc if sdc[k].get("supply"))
-    supply = sdc[sd_key]["supply"]
-    # The wildcard region.
-    ceo_key = next(iter(ceo))
-    ceo_text = ceo[ceo_key]["*"]
-    # An index slug that resolves to a loaded series.
-    slug = next(iter(narr))
-    narrative = narr[slug]
+def test_loaded_bodies_round_trip_unchanged(db, tenant_a, client_as, content_loaded):
+    """Shapes a naive schema silently drops, taken from what the content loader
+    stored (no drop text in this file): json-bodied types whose elements are
+    objects, a wildcard-region text block, and an index-slug block that
+    resolves its series. Each is re-authored as a team block on a made-up key
+    (or the series' own slug) and must come back byte for byte."""
+    def platform_body(block_type: str, subject_type: str = "formula"):
+        row = (
+            db.query(EditorialBlock, EditorialBlockVersion)
+            .join(EditorialBlockVersion,
+                  EditorialBlockVersion.id == EditorialBlock.current_version_id)
+            .filter(EditorialBlock.team_id.is_(None),
+                    EditorialBlock.subject_type == subject_type,
+                    EditorialBlock.block_type == block_type)
+            .order_by(EditorialBlock.subject_code)
+            .first()
+        )
+        assert row is not None, f"the load has no platform {block_type} block"
+        return row
 
     c = client_as(tenant_a)
     ids = []
     try:
-        r1 = _post(c, tenant_a, subject_code=orphan_key, block_type="supplier_note",
-                   body_text=orphan_note)
-        assert r1.status_code == 201, r1.text
-        ids.append(r1.json()["id"])
-        assert r1.json()["template_id"] is None
-        assert r1.json()["body_text"] == orphan_note
+        for block_type in ("compliance", "synthesis_route", "macro_drivers"):
+            _block, version = platform_body(block_type)
+            assert version.body_format == "json"
+            r = _post(c, tenant_a, block_type=block_type, body_format="json",
+                      body_json=version.body_json)
+            assert r.status_code == 201, r.text
+            ids.append(r.json()["id"])
+            assert r.json()["template_id"] is None
+            assert r.json()["body_json"] == version.body_json
 
-        r2 = _post(c, tenant_a, subject_code=sd_key, block_type="supply",
-                   body_format="json", body_json=supply)
-        assert r2.status_code == 201, r2.text
-        ids.append(r2.json()["id"])
-        # Byte-for-byte, including the short `l`/`v`/`c`/`t` element keys and the
-        # colour hexes — a typed loader that normalised them would lose them.
-        assert r2.json()["body_json"] == supply
+        _block, version = platform_body("current_events")
+        r = _post(c, tenant_a, block_type="current_events", region=None,
+                  body_text=version.body_text)
+        assert r.status_code == 201, r.text
+        ids.append(r.json()["id"])
+        assert r.json()["region"] is None
+        assert r.json()["body_text"] == version.body_text
 
-        r3 = _post(c, tenant_a, subject_code=ceo_key, block_type="current_events",
-                   region=None, body_text=ceo_text)
-        assert r3.status_code == 201, r3.text
-        ids.append(r3.json()["id"])
-        assert r3.json()["region"] is None
-        assert r3.json()["body_text"] == ceo_text
-
-        r4 = _post(c, tenant_a, subject_type="index", subject_code=slug,
-                   block_type="index_narrative", body_format="json",
-                   body_json=narrative)
-        assert r4.status_code == 201, r4.text
-        ids.append(r4.json()["id"])
-        assert r4.json()["body_json"] == narrative
-        # All 27 INDEX_NARRATIVES keys resolve to a loaded series, so the
-        # convenience join should be populated here.
-        assert r4.json()["commodity_id"] is not None
+        block, version = platform_body("index_narrative", subject_type="index")
+        r = _post(c, tenant_a, subject_type="index", subject_code=block.subject_code,
+                  block_type="index_narrative", body_format="json",
+                  body_json=version.body_json)
+        assert r.status_code == 201, r.text
+        ids.append(r.json()["id"])
+        assert r.json()["body_json"] == version.body_json
+        # A loaded series: the convenience join resolves to it.
+        assert block.commodity_id is not None
+        assert r.json()["commodity_id"] == block.commodity_id
     finally:
         _cleanup(db, block_ids=ids)
-
-
-@needs_drop
-def test_the_substitution_overlap_is_a_duplicate_not_a_conflict():
-    """A finding that changes what a loader has to do, pinned so a later drop
-    that breaks it is noticed.
-
-    `macroDrivers` and `substitution` appear in both `CURATED_CONTENT` and
-    `FUTURE_OUTLOOK`, which reads like a precedence problem. It is not:
-    `macroDrivers` overlaps on **zero** keys, and every one of the 100
-    overlapping `substitution` keys carries **identical** content. So the loader
-    needs a dedupe, not an arbitration rule — and the unique index on
-    (subject, block_type, region) is what enforces it.
-    """
-    cc = json.loads((DROP_RAW / "CURATED_CONTENT.json").read_text(encoding="utf-8"))
-    fo = json.loads((DROP_RAW / "FUTURE_OUTLOOK.json").read_text(encoding="utf-8"))
-
-    def keys_with(src, field):
-        return {k for k, v in src.items() if isinstance(v, dict) and v.get(field)}
-
-    assert keys_with(cc, "macroDrivers") & keys_with(fo, "macroDrivers") == set()
-
-    overlap = keys_with(cc, "substitution") & keys_with(fo, "substitution")
-    assert overlap, "expected substitution to appear in both files"
-    differing = [k for k in overlap if cc[k]["substitution"] != fo[k]["substitution"]]
-    assert differing == [], f"{len(differing)} keys now disagree: {differing[:5]}"
 
 
 def test_one_block_per_subject_type_and_region(db, tenant_a, client_as):
@@ -662,16 +666,74 @@ def test_one_block_per_subject_type_and_region(db, tenant_a, client_as):
         _cleanup(db, block_ids=[first.json()["id"]])
 
 
-def test_the_block_type_vocabulary_covers_every_drop_source():
-    """The vocabulary is read off the drop, not invented — so this asserts the
-    fields the six editorial files actually carry are all representable."""
-    expected = {
-        "functionalities", "applications", "suppliers", "supplier_note",
-        "compliance", "macro_drivers", "substitution", "supply", "demand",
-        "synthesis_route", "current_events", "negotiation_note",
-        "index_narrative", "index_source_meta",
-    }
-    assert expected <= set(BLOCK_TYPES)
+def test_the_block_type_vocabulary_covers_every_loaded_type():
+    """Every type the content loader writes is in the vocabulary, the public
+    formula set is exactly the loader's formula types, and the retired types
+    are out of the vocabulary."""
+    from app.services.content_drop import content
+
+    loaded = {t for t, _fmt in content.FORMULA_BLOCKS + content.INDEX_BLOCKS}
+    assert loaded <= set(BLOCK_TYPES)
+    assert set(PUBLIC_FORMULA_BLOCK_TYPES) == {t for t, _fmt in content.FORMULA_BLOCKS}
+    assert set(RETIRED_BLOCK_TYPES) == set(content.RETIRED_BLOCK_TYPES)
+    assert not set(RETIRED_BLOCK_TYPES) & set(BLOCK_TYPES)
+
+
+# ── 10. What the API serves ─────────────────────────────────────────────────
+
+def test_a_retired_block_type_cannot_be_authored(db, tenant_a, client_as):
+    c = client_as(tenant_a)
+    for block_type in RETIRED_BLOCK_TYPES:
+        r = _post(c, tenant_a, block_type=block_type)
+        assert r.status_code == 422, (block_type, r.text)
+
+
+def test_only_public_types_are_served_for_platform_formula_blocks(
+        db, tenant_a, user_factory, client_as):
+    """The second lock behind the loader (design §4.2). Rows are inserted
+    directly, as an older load or a hand edit would leave them: a platform
+    formula block of a retired type, a platform formula block of a type that is
+    not public for formulas, and a team block of a retired type. None is served
+    by any read path; a public platform block on the same subject is."""
+    admin = user_factory(is_super_admin=True)
+    code = f"CARD-{uuid.uuid4().hex[:8]}"
+
+    def insert(block_type: str, team_id=None) -> uuid.UUID:
+        block = EditorialBlock(team_id=team_id, subject_type="formula", subject_code=code,
+                               block_type=block_type, body_format="text",
+                               provenance="imported")
+        db.add(block)
+        db.flush()
+        version = EditorialBlockVersion(block_id=block.id, version_no=1, body_format="text",
+                                        body_text=f"{block_type} text", provenance="imported")
+        db.add(version)
+        db.flush()
+        block.current_version_id = version.id
+        db.commit()
+        return block.id
+
+    bypass_rls_var.set(True)
+    hidden = [insert("suppliers"), insert("index_narrative"),
+              insert("demand", team_id=tenant_a["team_id"])]
+    shown = insert("supplier_note")
+    try:
+        c = client_as(tenant_a)
+        team = f"team_id={tenant_a['team_id']}"
+        for bid in hidden:
+            for url in (f"/api/editorial/blocks/{bid}", f"/api/editorial/blocks/{bid}/versions",
+                        f"/api/editorial/blocks/{bid}/versions/1"):
+                r = c.get(f"{url}?{team}")
+                assert r.status_code == 404, (url, r.status_code)
+            # Not even a platform editor can act on one through the API.
+            r = client_as(admin).delete(f"/api/editorial/blocks/{bid}?team_id={admin['team_id']}")
+            assert r.status_code == 404, r.text
+        listed = {b["id"] for b in c.get(f"/api/editorial/blocks?{team}&subject_code={code}").json()}
+        assert listed == {str(shown)}
+        card = c.get(f"/api/editorial/cards/formula/{code}?{team}").json()
+        assert set(card["blocks"]) == {"supplier_note"}
+        assert c.get(f"/api/editorial/blocks/{shown}?{team}").status_code == 200
+    finally:
+        _cleanup(db, block_ids=hidden + [shown])
 
 
 def test_the_approvals_queue_filters_by_provenance(db, tenant_a, client_as):
@@ -689,7 +751,10 @@ def test_the_approvals_queue_filters_by_provenance(db, tenant_a, client_as):
             assert r.status_code == 201, r.text
             made.append(r.json()["id"])
 
-        base = f"/api/editorial/blocks?team_id={tenant_a['team_id']}"
+        # Scoped to the test's own subject: the loaded library holds thousands
+        # of platform blocks, which sort ahead of it in an unscoped page.
+        base = (f"/api/editorial/blocks?team_id={tenant_a['team_id']}"
+                f"&subject_code={ORPHAN_CODE}")
         mine = lambda rows: [b for b in rows if b["id"] in made]  # noqa: E731
 
         unsigned = mine(c.get(f"{base}&provenance=imported&provenance=ai_draft").json())
@@ -751,7 +816,7 @@ def test_a_platform_write_is_not_filed_under_the_callers_team(
 
         # A TEAM block still files under its own team — the fix routes on the
         # block's tier, it does not simply stop recording a team.
-        r2 = _post(client_as(tenant_a), tenant_a, block_type="supply", platform=False)
+        r2 = _post(client_as(tenant_a), tenant_a, block_type="applications", platform=False)
         assert r2.status_code == 201, r2.text
         made.append(r2.json()["id"])
         team_rows = db.query(AuditLog).filter(

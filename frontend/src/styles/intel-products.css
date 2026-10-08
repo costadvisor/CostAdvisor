@@ -1,0 +1,112 @@
+/* Intelligence › Products catalogue (prefix `ixp-`).
+ * Builds on the shared ix- layout (styles/intel.css): only what the catalogue
+ * adds lives here. Theme tokens only; the region palette comes via --rg.
+ *
+ * ORDER: main.jsx imports styles.css and intel.css before App (and so before
+ * this file), so a rule here wins over a shared ix- rule of equal specificity. */
+
+/* ── Sidebar ───────────────────────────────────────────────────────── */
+.ixp-sb-label {
+  padding: 4px 16px 4px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 1.2px;
+  text-transform: uppercase; color: var(--card-eyebrow);
+}
+.ixp-sb-note {
+  padding: 2px 16px 6px 37px;
+  font-size: 10px; line-height: 1.45; color: var(--muted);
+}
+.ixp-region-opt { display: inline-flex; align-items: center; gap: 7px; }
+
+/* ── Header ────────────────────────────────────────────────────────── */
+.ixp-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+/* A count with a tooltip that says what it counts. */
+.ixp-tip { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
+
+.ixp-active {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: -8px 0 18px;
+}
+.ixp-chip { cursor: pointer; font-family: inherit; max-width: 100%; }
+.ixp-chip:hover { border-color: var(--accent); }
+.ixp-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ixp-chip strong { overflow: hidden; text-overflow: ellipsis; }
+.ixp-chip-k { color: var(--muted); }
+.ixp-chip-x { margin-left: 2px; font-size: 13px; line-height: 1; color: var(--muted); }
+.ixp-chip:hover .ixp-chip-x { color: var(--accent2); }
+.ixp-clear-link { font-size: 10.5px; margin-left: 4px; }
+.ixp-inline-error { margin-bottom: 14px; font-size: 11px; }
+
+/* ── Groups and grid ───────────────────────────────────────────────── */
+.ixp-group-name { margin: 0; }
+.ix-group-head .ixp-group-name { line-height: 1.3; }
+
+/* One zero-height card box in the real grid: its content width sizes every
+ * sparkline, so no card needs its own observer. */
+.ixp-probe { height: 0; overflow: hidden; visibility: hidden; margin: 0; }
+.ixp-probe > .ix-card { padding-top: 0; padding-bottom: 0; }
+
+/* A refetch keeps the old cards on screen; dim them only if it is slow. */
+.ixp-refreshing .ix-group { opacity: .55; transition: opacity .15s ease .18s; }
+
+/* ── Card ──────────────────────────────────────────────────────────── */
+.ixp-card .ix-card-eyebrow { padding-top: 1px; }
+.ixp-card .ix-card-name { font-size: 15.5px; }
+.ixp-card .ixp-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 9px; }
+.ixp-group {
+  display: inline-flex; align-items: center;
+  font-size: 8.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 4px; line-height: 1.5;
+  color: var(--accent4); background: var(--info-bg); border: 1px solid var(--border);
+}
+.ixp-card .ixp-spark { height: 36px; margin: 0 0 6px; }
+.ixp-rdots { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 9px; }
+.ixp-rdot.ix-rchip.sm {
+  min-width: 17px; height: 17px; padding: 0 2px;
+  font-size: 7px; letter-spacing: 0; border-radius: 3px;
+}
+.ixp-rdot.off { opacity: .8; }
+.ixp-anchors {
+  min-width: 0; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ixp-card .ix-card-foot-cta { white-space: nowrap; }
+.ixp-card:hover .ix-card-foot-cta { color: var(--accent); }
+
+/* A family not rendered yet (ProgressiveGroups): about its real height, so the
+ * scrollbar and a restored scroll position are right before it fills in. */
+.ixp-placeholder {
+  border: 1px dashed var(--border); border-radius: var(--radius);
+  background: var(--neutral-bg-soft, var(--surface2));
+}
+.ixp-sb-pad { padding: 6px 16px 10px; }
+/* The supplier note sits between two filter groups; keep the group rule. */
+.ixp-sb-note + .ix-fgroup { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 8px; }
+.ixp-fsub {
+  padding: 6px 16px 3px; font-size: 9px; font-weight: 700; letter-spacing: .8px;
+  text-transform: uppercase; color: var(--muted);
+}
+
+/* Density: the mockup fits five cards a row at 1440 (192px sidebar, 230px
+ * cards). A slightly narrower sidebar and card minimum do the same here;
+ * at 1280 the grid falls back to four. */
+.ixp-page { --ix-sb-w: 214px; }
+.ixp-grid { grid-template-columns: repeat(auto-fill, minmax(212px, 1fr)); }
+@media (max-width: 1380px) {
+  .ixp-page { --ix-sb-w: 208px; }
+}
+
+/* ── Supply status (live-data build) ───────────────────────────────── */
+/* The status badge row under the card name: a badge, never a number. */
+.ixp-card .ixp-status { display: flex; margin: -3px 0 8px; min-height: 18px; }
+/* A card whose product line is not published: the eyebrow says so, quietly. */
+.ixp-card.ixp-unplaced .ix-card-eyebrow { font-style: italic; text-transform: none; letter-spacing: 0; }
+/* Status filter options: a dot in the badge's tone, then the label. */
+.ixp-status-opt { display: inline-flex; align-items: center; gap: 7px; }
+.ixp-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
+.ixp-status-dot.tone-green { background: var(--accent); }
+.ixp-status-dot.tone-green-amber { background: linear-gradient(90deg, var(--accent) 50%, var(--accent3) 50%); }
+.ixp-status-dot.tone-amber { background: var(--accent3); }
+.ixp-status-dot.tone-grey { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+.ixp-status-link { font-size: 10.5px; }
+/* "945 shown · Show all statuses (1,750)" in the page header. */
+.ixp-view-link { font-size: inherit; padding: 0; }

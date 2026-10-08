@@ -224,12 +224,16 @@ body, #root {
 .ca-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .ca-btn:disabled:hover { transform: none; opacity: 0.45; }
 .ca-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.ca-btn-primary { background: var(--accent); color: var(--on-accent); }
-.ca-btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
+/* `--accent-fill` / `--*-ink` are contrast twins a theme may declare (only
+   StaminaChem does): a deeper accent for a filled button under white text,
+   and deeper accents for small text. Every other theme falls back to its
+   plain accent, so nothing changes there. */
+.ca-btn-primary { background: var(--accent-fill, var(--accent)); color: var(--on-accent); }
+.ca-btn-primary:hover { opacity: 0.88; transform: translateY(-1px); background: var(--accent-fill-hover, var(--accent-fill, var(--accent))); }
 .ca-btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
-.ca-btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
-.ca-btn-danger { background: transparent; border: 1px solid var(--accent2); color: var(--accent2); font-size: 10px; padding: 4px 10px; }
-.ca-btn-danger:hover { background: var(--accent2); color: var(--on-danger); }
+.ca-btn-ghost:hover { border-color: var(--accent); color: var(--accent-ink, var(--accent)); }
+.ca-btn-danger { background: transparent; border: 1px solid var(--accent2); color: var(--accent2-ink, var(--accent2)); font-size: 10px; padding: 4px 10px; }
+.ca-btn-danger:hover { background: var(--accent2-ink, var(--accent2)); color: var(--on-danger); }
 .ca-btn-sm { font-size: 10px; padding: 6px 14px; }
 
 /* Inline link-styled button. Used 15 times across 6 files but never defined, so
@@ -241,13 +245,13 @@ body, #root {
   padding: 0;
   font-family: inherit;
   font-size: inherit;
-  color: var(--accent4);
+  color: var(--accent4-ink, var(--accent4));
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
   transition: color .15s;
 }
-.ca-btn-link:hover { color: var(--accent); }
+.ca-btn-link:hover { color: var(--accent-ink, var(--accent)); }
 .ca-btn-link:focus-visible { outline: 2px solid var(--accent4); outline-offset: 2px; border-radius: 2px; }
 
 /* Dropdown menu — the app's first shared menu primitive. Every other dropdown
@@ -663,6 +667,17 @@ input[type=range] { padding: 0; cursor: pointer; accent-color: var(--accent); }
 
   --on-accent: #ffffff;
   --on-danger: #ffffff;
+
+  /* Contrast twins (WCAG AA, 4.5:1). The brand teal carries white text at
+     only 2.9:1, so filled buttons use a deeper teal (5.2:1), and the accents
+     used as small text (badges, links, labels) have deeper inks that reach
+     4.5:1 on white and on their own tints. */
+  --accent-fill: #007A71;
+  --accent-fill-hover: #006B63; /* stays 4.5:1 under the 0.88 hover opacity */
+  --accent-ink: #00756B;
+  --accent2-ink: #bb3434;
+  --accent3-ink: #8a5a00;
+  --accent4-ink: #1a6e90;
 
   --success-bg: rgba(0,169,157,.10);
   --success-bg-soft: rgba(0,169,157,.04);

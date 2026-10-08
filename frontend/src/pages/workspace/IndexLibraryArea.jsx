@@ -690,7 +690,9 @@ export default function IndexLibraryArea() {
             chart, statistics and portfolio impact.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+        {/* Wraps (right-aligned) instead of refusing to shrink: a super-admin's
+            nine buttons are ~1260px, wider than the page at a 1280 viewport. */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
           {canManagePairs && (
             <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={handleSync} disabled={syncing}
               title="Scrape latest ECB/Frankfurter FX rates and backfill quarterly platform data">

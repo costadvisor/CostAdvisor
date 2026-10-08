@@ -3,29 +3,62 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.chemical_family import ChemicalFamily
 from app.models.formula_template import FormulaTemplate
+from app.models.product_line import ProductLine
+from app.models.subfamily import Subfamily
 from app.models.user import User
 from app.models.product import Product
 from app.routers.auth import get_current_user
-from app.schemas.product import ProductCreate, ProductUpdate, ProductOut
+from app.schemas.product import ProductCreate, ProductUpdate, ProductOut, TaxonomyRef
 from app.services.audit import log_event
+from app.services.effective_lines import effective_lines
 from app.services.permissions import require_permission
 
 router = APIRouter()
 
 
 def _enrich(db: Session, products: list[Product]) -> list[ProductOut]:
-    """Attach the linked catalog formula's code/name (batch, no N+1)."""
+    """Attach the linked catalog formula's code/name and the product's place in
+    the supply taxonomy (batch, no N+1).
+
+    The taxonomy comes from `effective_lines()` (design §2.8), never from
+    columns on the product: a catalogue product sits where its template sits.
+    Call it before the request commits; it reads the product rows.
+    """
     template_ids = [p.formula_template_id for p in products if p.formula_template_id]
     tmap = {
         t.id: (t.code, t.name)
         for t in db.query(FormulaTemplate).filter(FormulaTemplate.id.in_(template_ids)).all()
     } if template_ids else {}
+
+    eff = effective_lines(db, [p.id for p in products])
+    line_ids = {e.product_line_id for e in eff.values() if e.product_line_id is not None}
+    sub_ids = {e.subfamily_id for e in eff.values() if e.subfamily_id is not None}
+    family_ids = {e.family_id for e in eff.values() if e.family_id is not None}
+    line_names = dict(db.query(ProductLine.id, ProductLine.name)
+                      .filter(ProductLine.id.in_(line_ids)).all()) if line_ids else {}
+    sub_names = dict(db.query(Subfamily.id, Subfamily.name)
+                     .filter(Subfamily.id.in_(sub_ids)).all()) if sub_ids else {}
+    family_names = dict(db.query(ChemicalFamily.id, ChemicalFamily.name)
+                        .filter(ChemicalFamily.id.in_(family_ids)).all()) if family_ids else {}
+
     out = []
     for p in products:
         o = ProductOut.model_validate(p)
         if p.formula_template_id in tmap:
             o.formula_template_code, o.formula_template_name = tmap[p.formula_template_id]
+        e = eff.get(p.id)
+        if e is not None:
+            if e.family_id is not None:
+                o.family = TaxonomyRef(id=e.family_id, name=family_names.get(e.family_id))
+            # An unnamed sub-family keeps its id; its name stays null.
+            if e.subfamily_id is not None:
+                o.subfamily = TaxonomyRef(id=e.subfamily_id, name=sub_names.get(e.subfamily_id))
+            if e.product_line_id is not None:
+                o.product_line = TaxonomyRef(id=e.product_line_id,
+                                             name=line_names.get(e.product_line_id))
+            o.taxonomy_source = e.source if e.source != "none" else None
         out.append(o)
     return out
 
@@ -35,6 +68,31 @@ def _validate_template_link(db: Session, team_id: uuid.UUID, template_id: uuid.U
     t = db.query(FormulaTemplate).filter(FormulaTemplate.id == template_id).first()
     if not t or (t.team_id is not None and t.team_id != team_id):
         raise HTTPException(status_code=400, detail="Unknown formula template")
+
+
+def _validate_line(db: Session, line_id: int) -> None:
+    """A manual line must be a current (not retired) product line."""
+    ok = db.query(ProductLine.id).filter(ProductLine.id == line_id,
+                                         ProductLine.retired_at.is_(None)).first()
+    if ok is None:
+        raise HTTPException(status_code=400, detail="Unknown product line")
+
+
+def _template_gives_line(db: Session, template_id: uuid.UUID | None) -> bool:
+    """The linked template (or, for a team fork, its origin) sits on a line."""
+    if template_id is None:
+        return False
+    t = db.query(FormulaTemplate.product_line_id, FormulaTemplate.origin_id).filter(
+        FormulaTemplate.id == template_id).first()
+    if t is None:
+        return False
+    if t.product_line_id is not None:
+        return True
+    if t.origin_id is None:
+        return False
+    origin = db.query(FormulaTemplate.product_line_id).filter(
+        FormulaTemplate.id == t.origin_id).first()
+    return origin is not None and origin.product_line_id is not None
 
 
 @router.get("/", response_model=list[ProductOut])
@@ -57,6 +115,13 @@ def create_product(
     require_permission(db, current_user, team_id, "products.edit")
     if data.formula_template_id:
         _validate_template_link(db, team_id, data.formula_template_id)
+    line_id = data.product_line_id
+    if line_id is not None:
+        _validate_line(db, line_id)
+        # The manual line is for custom products only: a template that gives
+        # a line wins, so the stored one would only drift from it.
+        if _template_gives_line(db, data.formula_template_id):
+            line_id = None
     product = Product(
         team_id=team_id,
         created_by=current_user.id,
@@ -64,8 +129,7 @@ def create_product(
         formula=data.formula,
         active_content=data.active_content,
         unit=data.unit,
-        chemical_family_id=data.chemical_family_id,
-        subfamily_id=data.subfamily_id,
+        product_line_id=line_id,
         formula_template_id=data.formula_template_id,
         custom_attributes=data.custom_attributes,
     )
@@ -75,12 +139,14 @@ def create_product(
     db.flush()
     log_event(db, team_id, current_user.id, "create", "product", str(product.id),
               new_value={"name": data.name, "formula": data.formula, "unit": data.unit})
-    # Expunge before commit so the post-commit session expiry doesn't wipe the
-    # in-memory values. A post-commit db.refresh() would open a new transaction
-    # whose RLS context (app.current_user_id) may not be set, causing a 500.
+    # The response is built before commit, in the request's transaction. A
+    # post-commit read would open a new transaction whose RLS context
+    # (app.current_user_id) may not be set; expunging keeps the in-memory
+    # values from being expired by the commit.
+    out = _enrich(db, [product])[0]
     db.expunge(product)
     db.commit()
-    return _enrich(db, [product])[0]
+    return out
 
 
 @router.get("/{product_id}", response_model=ProductOut)
@@ -109,7 +175,7 @@ def update_product(
     require_permission(db, current_user, product.team_id, "products.edit")
 
     prev = {"name": product.name, "formula": product.formula, "unit": product.unit}
-    for field in ["name", "formula", "active_content", "unit", "chemical_family_id", "subfamily_id", "custom_attributes"]:
+    for field in ["name", "formula", "active_content", "unit", "custom_attributes"]:
         val = getattr(data, field, None)
         if val is not None:
             setattr(product, field, val)
@@ -118,13 +184,22 @@ def update_product(
         if data.formula_template_id:
             _validate_template_link(db, product.team_id, data.formula_template_id)
         product.formula_template_id = data.formula_template_id
+    # Same rule for the manual line.
+    if "product_line_id" in data.model_fields_set:
+        if data.product_line_id is not None:
+            _validate_line(db, data.product_line_id)
+        product.product_line_id = data.product_line_id
+    # A linked template that gives a line wins over a manual one.
+    if product.product_line_id is not None and _template_gives_line(db, product.formula_template_id):
+        product.product_line_id = None
 
     log_event(db, product.team_id, current_user.id, "update", "product", str(product.id),
               previous_value=prev, new_value={"name": product.name, "formula": product.formula, "unit": product.unit})
     db.flush()
+    out = _enrich(db, [product])[0]
     db.expunge(product)
     db.commit()
-    return _enrich(db, [product])[0]
+    return out
 
 
 @router.delete("/{product_id}")

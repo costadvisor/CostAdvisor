@@ -1,6 +1,8 @@
 """
 Core costing engine: should-cost, evolution, squeeze/desqueeze, and brief calculations.
 """
+import functools
+
 from sqlalchemy.orm import Session
 
 from app.models.cost_model import CostModel
@@ -8,8 +10,9 @@ from app.models.price_data import ActualPrice
 from app.models.actual_volume import ActualVolume
 from app.services.data_resolver import (
     get_single_index_value, get_single_index_value_detailed, get_forward_index_value,
+    index_lookup_cache, request_memoised,
 )
-from app.services.formula_resolver import get_effective_lines
+from app.services.formula_resolver import get_effective_lines as _resolve_effective_lines
 from app.services.volume_projector import project_volumes
 from app.services.narrative import generate_narrative
 from app.services.fx_converter import convert_price
@@ -135,6 +138,35 @@ def safe_eval_expr(expression: str, context: dict) -> float:
 
 
 # ── Period helpers ─────────────────────────────────────────────
+
+def _index_memo_scope(fn):
+    """Caching hook: run a read-only calculation inside the request-scoped
+    index-lookup memo (`data_resolver.index_lookup_cache`). A call made inside
+    an outer scope (a portfolio endpoint) shares that scope's memo; a call made
+    on its own gets a memo for its own duration only. The results are the same
+    either way — the memo only answers repeated identical lookups."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with index_lookup_cache():
+            return fn(*args, **kwargs)
+    return wrapper
+
+
+def get_effective_lines(db: Session, fv, cost_model: CostModel):
+    """`formula_resolver.get_effective_lines`, answered from the request memo
+    inside an `index_lookup_cache()` block (an evolution asks for the same
+    version's lines once per period). Keyed on everything the resolution reads;
+    a version or model not yet flushed (no id) is never memoised. Each caller
+    gets its own list; the lines themselves are read-only data."""
+    if fv is None or getattr(fv, "id", None) is None or getattr(cost_model, "id", None) is None:
+        return _resolve_effective_lines(db, fv, cost_model)
+    lines, reason = request_memoised(
+        ("effective_lines", db, fv.id, fv.link_mode, fv.source_coverage_id,
+         cost_model.id, cost_model.region),
+        lambda: _resolve_effective_lines(db, fv, cost_model),
+    )
+    return list(lines), reason
+
 
 MONTH_NAMES = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -289,11 +321,14 @@ def _output_unit(model_unit: str, display_unit: str | None) -> str:
 def _effective_base_price(db: Session, cost_model_id, fv) -> float:
     """Return the actual price for the formula's base period if one exists,
     otherwise fall back to the manually-entered base_price on the formula version."""
-    actual = db.query(ActualPrice.price).filter(
-        ActualPrice.cost_model_id == cost_model_id,
-        ActualPrice.year == fv.base_year,
-        ActualPrice.quarter == fv.base_quarter,
-    ).scalar()
+    actual = request_memoised(
+        ("base_period_actual", db, cost_model_id, fv.base_year, fv.base_quarter),
+        lambda: db.query(ActualPrice.price).filter(
+            ActualPrice.cost_model_id == cost_model_id,
+            ActualPrice.year == fv.base_year,
+            ActualPrice.quarter == fv.base_quarter,
+        ).scalar(),
+    )
     if actual is not None:
         return float(actual)
     return float(fv.base_price)
@@ -358,6 +393,7 @@ def _normalize_to(
     )
 
 
+@_index_memo_scope
 def calculate_should_cost(
     db: Session,
     cost_model: CostModel,
@@ -430,6 +466,7 @@ def calculate_should_cost(
 
 # ── Evolution ──────────────────────────────────────────────────
 
+@_index_memo_scope
 def calculate_evolution(
     db: Session,
     cost_model: CostModel,
@@ -821,11 +858,20 @@ def calculate_brief(
     # already bakes in an assumed acceptable margin, so it's a ceiling of
     # "fair," not a walk-away number. Converted the same way `theoretical`
     # is (same FX/unit pipeline), at the same final period.
+    # "Before margin" means both margins: the version's own (`_apply_margin`
+    # is not applied to the indexed cost) and the recipe's margin line. A
+    # catalogue recipe carries the supplier margin as a fixed line inside its
+    # weights (and the version then has margin 0), so without taking that line
+    # out the floor would simply equal the should-cost.
     current_floor = None
     if last_period and last_indexed_cost_raw is not None:
         floor_y, floor_q = periods[-1][0], periods[-1][1]
+        recipe_margin = _recipe_margin_cost(
+            db, fv, cost_model, region, ref_year, ref_quarter, floor_y, floor_q, base_price
+        )
         current_floor = round(_apply_unit(
-            _apply_fx(db, last_indexed_cost_raw, model_ccy, out_ccy, floor_y, floor_q, team_id=cost_model.team_id),
+            _apply_fx(db, last_indexed_cost_raw - recipe_margin, model_ccy, out_ccy,
+                      floor_y, floor_q, team_id=cost_model.team_id),
             model_unit, out_unit,
         ), 4)
 
@@ -1073,6 +1119,63 @@ def _compute_indexed_cost(
     return indexed_cost
 
 
+# The catalogue's cost category for a supplier-margin line
+# (`formula_template_components.cost_category`).
+MARGIN_CATEGORY = "margin"
+
+
+def _is_own_margin_line(line) -> bool:
+    """A margin line of this recipe itself: the supplier's own margin.
+
+    A margin line met deeper down (inside a chained input template, depth > 0,
+    or inside a nested cost model) is an upstream supplier's margin. For this
+    supplier it is a cost, so it stays in the floor.
+    """
+    return (getattr(line, "cost_category", None) == MARGIN_CATEGORY
+            and not line.depth
+            and line.via_cost_model_id is None)
+
+
+def _recipe_margin_cost(
+    db: Session,
+    fv,
+    cost_model: CostModel,
+    region: str,
+    ref_year: int,
+    ref_quarter: int,
+    target_year: int,
+    target_quarter: int,
+    base_price: float,
+) -> float:
+    """The part of `_compute_indexed_cost` that is the recipe's own margin line(s).
+
+    Same comp_base x weight x ratio arithmetic, restricted to the lines
+    `_is_own_margin_line` accepts, so `indexed cost - this` is the recipe's
+    cost before margin. 0.0 when the recipe has no margin line (a hand-built
+    model) or is an advanced expression (no discrete lines to tell apart).
+    """
+    formula_type = getattr(fv, 'formula_type', 'simple') or 'simple'
+    if formula_type == 'advanced':
+        return 0.0
+    comp_base = _component_base(base_price, fv.margin_type, fv.margin_value)
+    lines, _fallback_reason = get_effective_lines(db, fv, cost_model)
+    total = 0.0
+    for line in lines:
+        if not _is_own_margin_line(line):
+            continue
+        ratio = 1.0
+        if line.commodity_id:
+            ref_val = get_single_index_value(
+                db, cost_model.team_id, line.commodity_id, region, ref_year, ref_quarter
+            )
+            cur_val = get_single_index_value(
+                db, cost_model.team_id, line.commodity_id, region, target_year, target_quarter
+            )
+            ratio = (cur_val / ref_val) if (ref_val and cur_val) else 1.0
+        total += comp_base * float(line.weight) * ratio
+    return total
+
+
 def _period_label(year: int, quarter: int) -> str:
     return f"Q{quarter}-{str(year)[-2:]}"
 
@@ -1176,6 +1279,7 @@ def _compute_indexed_cost_detailed(
     return indexed_cost, components, data_gaps
 
 
+@_index_memo_scope
 def calculate_should_cost_breakdown(
     db: Session,
     cost_model: CostModel,

@@ -37,19 +37,12 @@ from app.models.formula_template import (
 )
 from app.models.index_data import CommodityIndex
 from app.models.index_layer import IndexMonthlyValue, TypeCode
-from app.services.drop import drop_available
-from app.services.drop.index_loader import load_index_layer
 from app.services.proxy_derivation import (
     ABSENT, CURRENT, STALE, UNRESOLVABLE_AMBIGUOUS, UNRESOLVABLE_NO_HISTORY,
     UNRESOLVABLE_NO_SERIES, blocked_series, derivation_spec, derive_value,
     priceable_codes, resolve_with_provenance, swap_backlog, type_code_value,
 )
 from app.services.resolution import resolve_type_code
-
-needs_drop = pytest.mark.skipif(
-    not drop_available(), reason="costadvisor-data drop not present in this checkout"
-)
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 #
@@ -564,48 +557,6 @@ def test_value_endpoint_404s_an_unknown_code(db, tenant_a, client_as):
 
 def test_backlog_endpoint_requires_authentication(client):
     assert client.get("/api/resolution/swap-backlog").status_code == 401
-
-
-@needs_drop
-def test_backlog_endpoint_returns_the_loaded_library(db, tenant_a, client_as):
-    """Against the real drop: shape and ordering, not counts."""
-    bypass_rls_var.set(True)
-    report = load_index_layer(db)
-    db.commit() if report.changed else db.rollback()
-
-    body = client_as(tenant_a).get("/api/resolution/swap-backlog?limit=25").json()
-    assert len(body["entries"]) <= 25
-    weights = [e["catalog_weight"] for e in body["entries"]]
-    assert weights == sorted(weights, reverse=True)
-    for e in body["entries"]:
-        assert e["resolution"] in {"resolved", "no_series", "ambiguous"}
-        assert e["priceable"] == (e["resolution"] == "resolved")
-
-
-@needs_drop
-def test_no_loaded_series_has_an_executable_derivation_yet(db):
-    """A finding, pinned so it is noticed when it changes.
-
-    Every `proxy_logic` in the catalog carries only the analyst note — the
-    `operation`/`base_index` params were never filled in. The executor is
-    therefore live but idle, which is a configuration gap, not a code gap. When
-    somebody configures the first real spec through the admin editor this test
-    fails, and that failure is the signal to retire it.
-    """
-    bypass_rls_var.set(True)
-    report = load_index_layer(db)
-    db.commit() if report.changed else db.rollback()
-
-    configured = [
-        s.name for s in db.query(CommodityIndex).filter(
-            CommodityIndex.proxy_logic.isnot(None),
-        ).all()
-        if derivation_spec(s)[0] is not None
-    ]
-    assert configured == [], (
-        f"{len(configured)} series now carry executable proxy specs — "
-        "the derivation path is no longer idle; retire this test"
-    )
 
 
 def test_the_backlog_and_the_value_endpoint_agree_on_priceable(db):

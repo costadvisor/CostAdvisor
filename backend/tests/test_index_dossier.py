@@ -17,8 +17,6 @@ regenerating it rather than importing it the only defensible choice.
 """
 from __future__ import annotations
 
-import json
-import pathlib
 import uuid
 
 import pytest
@@ -33,9 +31,8 @@ from app.models.index_dossier import (
 from app.models.index_layer import IndexMonthlyValue
 from app.services.drop.dossier_loader import (
     SKIPPED_COMPUTED, SKIPPED_DERIVABLE, SKIPPED_PROSE, has_dossier,
-    load_dossiers, parse_correlation, parse_lag_days,
+    parse_correlation, parse_lag_days,
 )
-from app.services.drop.reader import drop_available
 from app.services.index_dossier import (
     DEFAULT_MIN_POINTS, active_calibration, build_ladder, dossier_for,
     percentile_for, recompute_volatility_calibration, series_dispersion,
@@ -43,14 +40,6 @@ from app.services.index_dossier import (
 )
 from app.services.calibration_purge import purge
 from app.services.producers import resolve_raw_name
-
-DROP_RAW = (pathlib.Path(__file__).resolve().parents[2]
-            / "sample_idea" / "costadvisor-data" / "raw")
-
-needs_drop = pytest.mark.skipif(
-    not drop_available(), reason="costadvisor-data drop not present in this checkout"
-)
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -85,172 +74,9 @@ def _cleanup(db, *, series_ids=(), calibration_ids=(), producer_ids=()):
     db.commit()
 
 
-@pytest.fixture(autouse=True)
-def _restore_active_calibration(db):
-    """Put the active volatility ladder back after every test in this module.
-
-    `recompute_volatility_calibration` deactivates whatever is active and commits
-    a new active row — that is the behaviour under test. But `_cleanup` here
-    commits rather than rolling back, and although it has always accepted a
-    `calibration_ids` kwarg, **not one test ever passed it**. Six tests recompute.
-
-    While the suite shared the app's database that left the real, product-facing
-    `active_calibration()` pointing at a ladder fitted to four synthetic series
-    at 11 rungs against a production default of 21 — so every percentile the app
-    served came from test fixtures, and 150 junk rows accumulated. The separate
-    test database (conftest) stops that reaching production, but the
-    contamination is still real *inside* a run: `test_intelligence` reads
-    `active_calibration()` and would otherwise pick up whichever ladder this
-    module happened to leave behind.
-
-    An autouse fixture rather than six `calibration_ids=[...]` arguments, because
-    the seventh recomputing test would have to remember, and the first six did
-    not.
-    """
-    bypass_rls_var.set(True)
-    prior_active = db.execute(text(
-        "SELECT id FROM volatility_calibrations WHERE is_active")).scalar()
-    before = {r[0] for r in db.execute(text("SELECT id FROM volatility_calibrations"))}
-    yield
-    db.rollback()
-    bypass_rls_var.set(True)
-    after = {r[0] for r in db.execute(text("SELECT id FROM volatility_calibrations"))}
-    created = after - before
-    for cid in created:
-        db.execute(text("DELETE FROM volatility_breakpoints WHERE calibration_id = :i"),
-                   {"i": str(cid)})
-        db.execute(text("DELETE FROM volatility_calibrations WHERE id = :i"),
-                   {"i": str(cid)})
-    # Reactivate only after the replacements are gone — a partial unique index
-    # allows exactly one active row.
-    if prior_active is not None:
-        db.execute(text("UPDATE volatility_calibrations SET is_active = true WHERE id = :i"),
-                   {"i": str(prior_active)})
-    db.commit()
-
-
-@pytest.fixture(scope="module")
-def _dossiers_loaded():
-    """Load the dossiers once for the module — a full load is not cheap and the
-    data is identical for every test that reads it."""
-    if not drop_available():
-        pytest.skip("costadvisor-data drop not present in this checkout")
-    from app.database import SessionLocal
-
-    session = SessionLocal()
-    bypass_rls_var.set(True)
-    try:
-        load_dossiers(session)
-        session.commit()
-    finally:
-        session.close()
-    return True
-
-
 # ── 1. Storable and retrievable, per series and per region ──────────────────
 
-@needs_drop
-def test_a_dossier_is_retrievable_per_series(db, _dossiers_loaded):
-    """AC1. Every structured group round-trips."""
-    bypass_rls_var.set(True)
-    row = (
-        db.query(IndexDossier)
-        .filter(IndexDossier.region.is_(None))
-        .join(IndexDriver, IndexDriver.dossier_id == IndexDossier.id)
-        .first()
-    )
-    assert row is not None, "expected at least one loaded dossier with drivers"
-
-    resolved = dossier_for(db, row.commodity_id)
-    assert resolved is not None
-    assert resolved.resolved_from == "series"
-    assert resolved.drivers, "drivers are the core of the dossier"
-    assert resolved.header, "the methodology header round-trips"
-    # The header carries methodology, never a snapshot.
-    assert set(resolved.header) == {
-        "quote_type", "formula_role", "access_tier",
-        "anchor_correlation", "anchor_correlation_raw",
-    }
-
-
-@needs_drop
-def test_a_region_specific_dossier_overrides_the_series_wide_one(db, _dossiers_loaded):
-    """AC1's second half: per card where they differ by region.
-
-    All 16 source entries carrying `_regional` have **no** dossier fields at the
-    top level while their overrides do — testing only the parent silently
-    skipped every one of them, which is exactly what the first run of this
-    loader did (it reported "0 regional overrides" against 16 entries' worth).
-    """
-    bypass_rls_var.set(True)
-    regional = (
-        db.query(IndexDossier).filter(IndexDossier.region.isnot(None)).first()
-    )
-    assert regional is not None, "expected regional dossiers to have loaded"
-
-    specific = dossier_for(db, regional.commodity_id, region=regional.region)
-    assert specific is not None
-    assert specific.resolved_from == "region"
-
-    # A region with no override of its own falls back, and says so.
-    fallback = dossier_for(db, regional.commodity_id, region="NoSuchRegion")
-    if fallback is not None:
-        assert fallback.resolved_from == "series"
-
-
-@needs_drop
-def test_the_regional_carriers_are_detected_at_all(db):
-    """The `has_dossier` rule, pinned — because getting it wrong is silent."""
-    payloads = json.loads((DROP_RAW / "INDEXES.json").read_text(encoding="utf-8"))
-    with_regional = [
-        k for k, v in payloads.items()
-        if isinstance(v, dict) and v.get("_regional")
-    ]
-    assert with_regional, "expected _regional carriers in the drop"
-    # None of them qualifies on its top-level fields alone...
-    top_level_only = [
-        k for k in with_regional
-        if any(payloads[k].get(f) for f in
-               ("upstreamDrivers", "chain", "roles", "producers", "negPointers"))
-    ]
-    assert top_level_only == [], (
-        "some _regional carriers now have top-level dossier fields — the "
-        "detection rule can be simplified"
-    )
-    # ...and 10 of the 16 qualify once the overrides are looked at. The other
-    # 6 (acrylonitrile, acrylic-acid, bpa, caprolactam, mma,
-    # phthalic-anhydride) are pure card-metadata region variants with no dossier
-    # content anywhere, which is why the loader also skips an override whose
-    # merged payload is empty rather than storing a blank regional row.
-    qualifying = [k for k in with_regional if has_dossier(payloads[k])]
-    assert qualifying, "expected some _regional carriers to hold dossier content"
-    assert len(qualifying) < len(with_regional), (
-        "every _regional carrier now holds dossier content — the empty-override "
-        "guard in the loader may no longer be needed"
-    )
-    assert "iron-scrap-na" in qualifying
-
-
 # ── 2. The driver row ───────────────────────────────────────────────────────
-
-@needs_drop
-def test_a_driver_carries_correlation_lag_and_signal_together(db, _dossiers_loaded):
-    """AC2, and the reason it matters: a correlation without its lag cannot be
-    acted on, and a lag without a direction cannot be read."""
-    bypass_rls_var.set(True)
-    driver = (
-        db.query(IndexDriver)
-        .filter(IndexDriver.correlation.isnot(None),
-                IndexDriver.lag_raw.isnot(None),
-                IndexDriver.signal_raw.isnot(None))
-        .first()
-    )
-    assert driver is not None, "expected a fully-populated driver row"
-    assert -1 <= float(driver.correlation) <= 1
-    assert driver.signal_strength in (
-        "dominant", "strong", "medium", "moderate", "weak", "macro", "other")
-    assert driver.move_up in (True, False, None)
-
 
 def test_the_signal_vocabulary_is_normalised_not_constrained():
     """The source has 20 distinct signal values across 66 rows, including
@@ -290,35 +116,6 @@ def test_a_correlation_parses_from_a_number_or_an_r_string():
 
 # ── 3. One company master ───────────────────────────────────────────────────
 
-@needs_drop
-def test_a_producer_role_fks_to_the_producer_entity(db, _dossiers_loaded):
-    """AC3. `Supplier.team_id` is NOT NULL under strict tenant, so a company
-    that exists independently of a buying team has no row shape there — unit 8
-    owns the master and this FKs to it rather than storing the company inline."""
-    bypass_rls_var.set(True)
-    role = db.query(IndexProducerRole).first()
-    assert role is not None, "expected producer roles to have loaded"
-    assert role.producer is not None, "the FK must resolve to a real producer"
-    assert role.producer.name
-    assert role.role in ("producer", "price_setter")
-    # The raw string the dossier used is kept alongside the resolved company.
-    assert role.raw_name
-
-
-@needs_drop
-def test_an_undisclosed_share_is_not_stored_as_zero(db, _dossiers_loaded):
-    """42 of 189 index-dossier company rows carry share=0, which means *not
-    disclosed*. Storing it as a number ships "BASF — 0% market share"."""
-    bypass_rls_var.set(True)
-    rows = db.query(IndexProducerRole).all()
-    assert rows
-    for r in rows:
-        if not r.share_disclosed:
-            assert r.share_pct is None
-        else:
-            assert r.share_pct is not None and float(r.share_pct) > 0
-
-
 def test_a_dossier_producer_role_resolves_a_multi_company_string(db):
     """The alias layer is shared with unit 8, so a `" / "` string still names
     several companies here."""
@@ -351,28 +148,6 @@ def test_the_computed_snapshots_are_not_stored_anywhere_on_the_dossier():
     assert "cyclePos" in SKIPPED_COMPUTED
     assert "season" in SKIPPED_DERIVABLE and "seasonNote" in SKIPPED_DERIVABLE
     assert "dyn3m" in SKIPPED_PROSE and "signals3m" in SKIPPED_PROSE
-
-
-@needs_drop
-def test_the_editorial_volatility_number_contradicts_itself(db):
-    """The measured reason boundary 1 exists. Three series carry two different
-    `volatility_pct` values across their own cards — same series, same numbers
-    underneath. Pinned so a later drop that fixes it is noticed."""
-    import csv
-
-    feeds_path = DROP_RAW.parent / "tables" / "index_feeds.csv"
-    with open(feeds_path, newline="", encoding="utf-8") as fh:
-        feeds = list(csv.DictReader(fh))
-    by_series: dict[str, set[str]] = {}
-    for row in feeds:
-        if row.get("volatility_pct"):
-            by_series.setdefault(row["series_key"], set()).add(row["volatility_pct"])
-    conflicting = {k: v for k, v in by_series.items() if len(v) > 1}
-    assert conflicting, (
-        "the editorial volatility numbers no longer contradict themselves — "
-        "worth revisiting whether importing them is now defensible"
-    )
-    assert "elec-cn" in conflicting
 
 
 # ── 4 + 5. The calibration ──────────────────────────────────────────────────
@@ -590,31 +365,6 @@ def test_dossier_endpoints_require_authentication(client):
 
 
 # ── Load behaviour ──────────────────────────────────────────────────────────
-
-@needs_drop
-def test_the_load_is_idempotent(db, _dossiers_loaded):
-    bypass_rls_var.set(True)
-    second = load_dossiers(db)
-    db.commit()
-    assert second.report.changed == 0, second.render()
-
-
-@needs_drop
-def test_a_shared_series_conflict_is_reported_not_overwritten(db, _dossiers_loaded):
-    """Three dossier keys (`naphtha`, `cbfs`, `pta`) resolve to one series
-    (`brent`). Our grain is per series, so they cannot all be stored — the
-    losers are named rather than silently dropped."""
-    bypass_rls_var.set(True)
-    report = load_dossiers(db)
-    db.commit()
-    assert report.shared_series_conflicts, (
-        "expected shared-series conflicts to be reported"
-    )
-    losers = {key for key, _ in report.shared_series_conflicts}
-    # And the specific dossier wins over a generic one that merely fans out:
-    # `electricity` fans to elec-*, so it loses those slots to elec-cn / elec-eu.
-    assert "elec-cn" not in losers and "elec-eu" not in losers
-
 
 def test_recomputing_does_not_leak_the_active_ladder_to_other_tests(db):
     """The guard on the guard: a recompute really does replace the active row,

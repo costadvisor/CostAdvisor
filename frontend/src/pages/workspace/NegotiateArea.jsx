@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { DriftBar } from './wsCharts';
+import DemoDataNote from '../../components/DemoDataNote';
+import { dominantCurrency, fmtMoney, fmtSignedMoney, EXPOSURE_NOTE } from '../../utils/currency';
 
 /* ──────────────────────────────────────────────────────────────────────
  * Negotiate — landing lets a buyer pick which product to prep a call for,
@@ -17,9 +19,6 @@ import { DriftBar } from './wsCharts';
  * "new negotiation smarts" depth is explicitly Wave 3 — removed in favour
  * of the real flow.
  * ──────────────────────────────────────────────────────────────────── */
-
-const curSym = (c) => (c === 'EUR' ? '€' : c === 'USD' ? '$' : c === 'GBP' ? '£' : c ? `${c} ` : '');
-const fmtMoney = (v) => (v == null ? '—' : Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : v.toFixed(3));
 
 const STATUS = {
   alert: { label: 'Above should-cost', color: 'var(--accent2)', bg: 'var(--danger-bg)', rank: 0 },
@@ -53,9 +52,7 @@ export default function NegotiateArea() {
         if (cancelled) return null;
         setCostModels(cmRes.data);
         setProducts(pRes.data);
-        const counts = {};
-        cmRes.data.forEach(cm => { if (cm.currency) counts[cm.currency] = (counts[cm.currency] || 0) + 1; });
-        const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'USD';
+        const dominant = dominantCurrency(cmRes.data) || 'USD';
         setReportCur(dominant);
         return api.get('/api/portfolio/summary', { params: { team_id: activeTeamId, reporting_currency: dominant } });
       })
@@ -108,13 +105,18 @@ export default function NegotiateArea() {
 
   const maxAbsGap = Math.max(25, ...rows.map(r => Math.abs(r.gapPct || 0)));
   const negotiable = rows.filter(r => r.kind === 'cm');
-  const totalExposure = rows.reduce((s, r) => s + (r.exposure || 0), 0);
+  // The server's total converts each model's exposure into the reporting
+  // currency (the same figure Monitor shows); the row sum is the fallback.
+  const totalExposure = summary?.kpis?.total_exposure ?? rows.reduce((s, r) => s + (r.exposure || 0), 0);
   const biggest = negotiable[0] || null;
 
   return (
     <div className="ca-page ca-fade-in">
-      <div className="ca-h1">Negotiate</div>
-      <p className="ca-subtitle">Every step before this one exists so you can walk into a supplier call with evidence, not a gut feeling. Pick a product — its live should-cost, gap and brief are ready to argue from.</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div className="ca-h1">Negotiate</div>
+        <DemoDataNote />
+      </div>
+      <p className="ca-subtitle">Products sorted by status, then by money at stake. Open one to see its live should-cost, the gap to the last price paid, and a negotiation brief.</p>
 
       {loading ? (
         <div style={{ padding: 20, color: 'var(--muted)' }}>Loading…</div>
@@ -132,11 +134,12 @@ export default function NegotiateArea() {
               <div className="ca-metric-lbl">Ready to negotiate</div>
               <div className="ca-metric-val">{negotiable.length} / {rows.length}</div>
             </div>
-            <div className="ca-metric">
+            <div className="ca-metric" title={EXPOSURE_NOTE}>
               <div className="ca-metric-lbl">Total exposure</div>
               <div className="ca-metric-val" style={{ color: totalExposure > 0 ? 'var(--accent2)' : undefined }}>
-                {curSym(reportCur)}{Math.round(totalExposure).toLocaleString()}
+                {fmtMoney(totalExposure, reportCur, { decimals: 0 })}
               </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>Sum of today's gap × all volume on record, in {reportCur}</div>
             </div>
             <div className="ca-metric">
               <div className="ca-metric-lbl">Biggest opportunity</div>
@@ -170,7 +173,6 @@ export default function NegotiateArea() {
                   )}
                   {filtered.map(r => {
                     const st = STATUS[r.status];
-                    const cs = curSym(r.currency);
                     return (
                       <tr key={r.kind === 'cm' ? r.costModelId : `p-${r.productId}`}
                         style={{ cursor: r.kind === 'cm' ? 'pointer' : 'default' }}
@@ -181,13 +183,13 @@ export default function NegotiateArea() {
                           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.supplier || 'No supplier'}{r.region ? ` · ${r.region}` : ''}</div>
                         </td>
                         <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.shouldCost != null ? 'var(--accent)' : 'var(--muted)' }}>
-                          {r.shouldCost != null ? `${cs}${fmtMoney(r.shouldCost)}` : '—'}
+                          {r.shouldCost != null ? fmtMoney(r.shouldCost, r.currency) : '—'}
                         </td>
                         <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.actual != null ? 'var(--accent4)' : 'var(--muted)' }}>
-                          {r.actual != null ? `${cs}${fmtMoney(r.actual)}` : '—'}
+                          {r.actual != null ? fmtMoney(r.actual, r.currency) : '—'}
                         </td>
                         <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.gap > 0 ? 'var(--accent2)' : r.gap < 0 ? 'var(--accent)' : 'var(--muted)' }}>
-                          {r.gap != null ? `${r.gap > 0 ? '+' : ''}${cs}${fmtMoney(Math.abs(r.gap))}` : '—'}
+                          {r.gap != null ? fmtSignedMoney(r.gap, r.currency) : '—'}
                           {r.gapPct != null && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{r.gapPct > 0 ? '+' : ''}{r.gapPct.toFixed(1)}%</div>}
                         </td>
                         <td>{r.gapPct != null ? <DriftBar value={Math.abs(r.gapPct)} max={maxAbsGap} color={st.color} /> : null}</td>

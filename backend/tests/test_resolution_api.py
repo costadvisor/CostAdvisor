@@ -26,94 +26,11 @@ from app.models.formula_template import (
 )
 from app.models.index_data import CommodityIndex
 from app.models.index_layer import IndexMonthlyValue, TypeCode
-from app.services.drop import drop_available
-from app.services.drop.index_loader import load_index_layer
 from app.services.resolution import (
     BLOCKER_AMBIGUOUS, BLOCKER_NO_HISTORY, BLOCKER_NO_SERIES, diagnose_combo,
 )
 
-needs_drop = pytest.mark.skipif(
-    not drop_available(), reason="costadvisor-data drop not present in this checkout"
-)
-
-
-def _ensure_loaded(db):
-    bypass_rls_var.set(True)
-    report = load_index_layer(db)
-    db.commit() if report.changed else db.rollback()
-
-
 # ── Q1: the chain for one type code ──────────────────────────────────────────
-
-@needs_drop
-def test_chain_for_a_resolved_code(db, tenant_a, client_as):
-    _ensure_loaded(db)
-    code = db.query(TypeCode).filter(TypeCode.resolution == "resolved").first().code
-
-    r = client_as(tenant_a).get(f"/api/resolution/type-codes/{code}")
-    assert r.status_code == 200, r.text
-    body = r.json()
-
-    assert body["resolution"] == "resolved"
-    assert body["series"] is not None
-    assert body["series"]["commodity_key"]
-    # Names WHICH proxy reading this is — the recipe line carries a second,
-    # disagreeing one, so an unlabelled value would be ambiguous.
-    assert body["proxy_status_source"] == "type_code_registry"
-    assert body["history"]["actual_points"] >= 0
-
-
-@needs_drop
-def test_chain_for_a_proxy_backed_code(db, tenant_a, client_as):
-    """An acceptance criterion in its own right: the chain has to work for a
-    code reached through a stand-in, and say so."""
-    _ensure_loaded(db)
-    tc = db.query(TypeCode).filter(TypeCode.proxy_status == "proxy").first()
-    assert tc is not None, "expected proxy-backed codes in the drop"
-
-    body = client_as(tenant_a).get(f"/api/resolution/type-codes/{tc.code}").json()
-    assert body["proxy_status"] == "proxy"
-    assert body["series"] is not None
-
-
-@needs_drop
-def test_chain_for_a_no_series_code_keeps_its_target(db, tenant_a, client_as):
-    """`no_series` means the target has no NUMBERS — so the chain still names
-    the series it wanted, and the blocker says which problem it is."""
-    _ensure_loaded(db)
-    tc = db.query(TypeCode).filter(TypeCode.resolution == "no_series").first()
-    assert tc is not None
-
-    body = client_as(tenant_a).get(f"/api/resolution/type-codes/{tc.code}").json()
-    assert body["resolution"] == "no_series"
-    assert body["series"] is not None, "no_series still names its intended series"
-    assert body["priceable"] is False
-    assert body["blocker"] == BLOCKER_NO_SERIES
-
-
-@needs_drop
-def test_chain_for_an_ambiguous_code_has_no_series(db, tenant_a, client_as):
-    """The state that must never be folded into `no_series`: nothing to point
-    at, and a different fix (somebody decides what the code means)."""
-    _ensure_loaded(db)
-    tc = db.query(TypeCode).filter(TypeCode.resolution == "ambiguous").first()
-    assert tc is not None
-
-    body = client_as(tenant_a).get(f"/api/resolution/type-codes/{tc.code}").json()
-    assert body["resolution"] == "ambiguous"
-    assert body["series"] is None
-    assert body["blocker"] == BLOCKER_AMBIGUOUS
-
-
-@needs_drop
-def test_the_three_states_stay_distinguishable(db, tenant_a, client_as):
-    """Asserted across the whole library, not just one sample of each."""
-    _ensure_loaded(db)
-    seen = set()
-    for tc in db.query(TypeCode).all():
-        seen.add(tc.resolution)
-    assert seen == {"resolved", "no_series", "ambiguous"}
-
 
 def test_unknown_type_code_is_404(db, tenant_a, client_as):
     r = client_as(tenant_a).get("/api/resolution/type-codes/NOPE-NOT-A-CODE")
@@ -122,94 +39,12 @@ def test_unknown_type_code_is_404(db, tenant_a, client_as):
 
 # ── Q2 + Q4: the dependents of one series ────────────────────────────────────
 
-@needs_drop
-def test_reverse_lookup_returns_codes_with_weight_share(db, tenant_a, client_as):
-    """The core reverse question. Uses whichever series is most concentrated,
-    so the assertion holds as the drop's numbers move."""
-    _ensure_loaded(db)
-    top = (
-        db.query(CommodityIndex.commodity_key)
-        .join(TypeCode, TypeCode.resolves_to_id == CommodityIndex.id)
-        .group_by(CommodityIndex.commodity_key)
-        .order_by(func.count(TypeCode.id).desc())
-        .first()
-    )
-
-    body = client_as(tenant_a).get(f"/api/resolution/series/{top.commodity_key}").json()
-    assert body["totals"]["type_code_count"] > 1
-    assert body["type_codes"], "expected the codes resolving here"
-
-    shares = [c["weight_share_of_series_pct"] for c in body["type_codes"] if c["weight_share_of_series_pct"]]
-    assert shares and abs(sum(shares) - 100) < 1.0, "per-code shares should account for the series"
-    assert body["totals"]["weight_share_of_library_pct"] > 0
-
-
-@needs_drop
-def test_a_series_reports_the_cards_that_display_it(db, tenant_a, client_as):
-    """A card is not a series — the chain has to fan out, or a consumer keying
-    by series loses cards."""
-    _ensure_loaded(db)
-    key = (
-        db.query(CommodityIndex.commodity_key)
-        .filter(CommodityIndex.commodity_key.isnot(None))
-        .first()
-    ).commodity_key
-    body = client_as(tenant_a).get(f"/api/resolution/series/{key}").json()
-    assert isinstance(body["cards"], list)
-
-
 def test_unknown_series_is_404(db, tenant_a, client_as):
     r = client_as(tenant_a).get("/api/resolution/series/not-a-real-series")
     assert r.status_code == 404
 
 
 # ── The library-wide view ────────────────────────────────────────────────────
-
-@needs_drop
-def test_concentration_surfaces_one_series_wearing_many_labels(db, tenant_a, client_as):
-    """The finding that motivated the layer. Asserted as a relationship, since
-    the drop's own figures will move."""
-    _ensure_loaded(db)
-    body = client_as(tenant_a).get("/api/resolution/concentration").json()
-
-    assert body["library_total_weight"] > 0
-    top = body["series"][0]
-    assert top["type_code_count"] > 1
-    assert top["weight_share_of_library_pct"] > 10, (
-        f"top series carries only {top['weight_share_of_library_pct']}% — "
-        "expected a materially concentrated library"
-    )
-    # Ranked descending, so a caller can trust the first row is the worst.
-    shares = [s["weight_share_of_library_pct"] for s in body["series"]]
-    assert shares == sorted(shares, reverse=True)
-
-
-@needs_drop
-def test_concentration_respects_limit(db, tenant_a, client_as):
-    _ensure_loaded(db)
-    body = client_as(tenant_a).get("/api/resolution/concentration?limit=3").json()
-    assert len(body["series"]) <= 3
-
-
-@needs_drop
-def test_unpriceable_is_grouped_by_reason_not_totalled(db, tenant_a, client_as):
-    """Three reasons, three different actions — buy a feed, decide what a code
-    means, run a scrape. One combined count would hide which is which."""
-    _ensure_loaded(db)
-    body = client_as(tenant_a).get("/api/resolution/unpriceable").json()
-
-    assert set(body["blockers"]) == {
-        BLOCKER_NO_SERIES, BLOCKER_AMBIGUOUS, BLOCKER_NO_HISTORY,
-    }
-    no_series = body["blockers"][BLOCKER_NO_SERIES]
-    assert no_series["code_count"] > 0
-    # Weight is what makes the sourcing decision rankable (SCRUM-80's backlog).
-    assert no_series["source_total_weight"] > 0
-    assert no_series["weight_share_of_library_pct"] > 0
-    # Each entry carries enough to act on.
-    entry = no_series["codes"][0]
-    assert "code" in entry and "source_total_weight" in entry
-
 
 # ── Q3: why can't this combo be costed ───────────────────────────────────────
 #

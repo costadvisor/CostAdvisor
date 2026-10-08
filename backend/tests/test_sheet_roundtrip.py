@@ -11,8 +11,10 @@ import uuid
 import openpyxl
 import pytest
 
+from datetime import datetime, timezone
+
 from app.models.chemical_family import ChemicalFamily
-from app.models.subfamily import Subfamily
+from app.models.product_line import ProductLine
 from app.models.formula_template import FormulaTemplate, FormulaRegionCoverage
 from app.models.sheet_import_run import SheetImportRun
 
@@ -25,18 +27,24 @@ def coverage_setup(db, tenant_a):
     family = ChemicalFamily(name=f"Fam-{suffix}")
     db.add(family)
     db.flush()
-    sub_a = Subfamily(family_id=family.id, name=f"SubA-{suffix}")
-    sub_b = Subfamily(family_id=family.id, name=f"SubB-{suffix}")
-    db.add_all([sub_a, sub_b])
+    line_a = ProductLine(family_id=family.id, platform=f"PLAT-SA-{suffix}",
+                         line_key=f"{family.name}|||LineA-{suffix}", name=f"LineA-{suffix}")
+    line_b = ProductLine(family_id=family.id, platform=f"PLAT-SB-{suffix}",
+                         line_key=f"{family.name}|||LineB-{suffix}", name=f"LineB-{suffix}")
+    db.add_all([line_a, line_b])
     db.flush()
 
-    t1 = FormulaTemplate(team_id=None, created_by=tenant_a["user_id"], name=f"T1-{suffix}",
-                          code=f"T1-{suffix}", subfamily_id=sub_a.id)
-    t2 = FormulaTemplate(team_id=None, created_by=tenant_a["user_id"], name=f"T2-{suffix}",
-                          code=f"T2-{suffix}", subfamily_id=sub_a.id)
-    t3 = FormulaTemplate(team_id=None, created_by=tenant_a["user_id"], name=f"T3-{suffix}",
-                          code=f"T3-{suffix}", subfamily_id=sub_b.id)
-    db.add_all([t1, t2, t3])
+    def template(n, line):
+        return FormulaTemplate(team_id=None, created_by=tenant_a["user_id"], name=f"T{n}-{suffix}",
+                               code=f"T{n}-{suffix}", family_id=family.id,
+                               product_line_id=line.id)
+
+    t1, t2, t3 = template(1, line_a), template(2, line_a), template(3, line_b)
+    # On line A but never in the sheet: a pointer card (not listed), and a
+    # product whose only combo the source has withdrawn.
+    t4, t5 = template(4, line_a), template(5, line_a)
+    t4.card_kind = "pointer"
+    db.add_all([t1, t2, t3, t4, t5])
     db.flush()
 
     c1 = FormulaRegionCoverage(template_id=t1.id, region="Europe", base_price=100, currency="USD",
@@ -48,15 +56,21 @@ def coverage_setup(db, tenant_a):
     c3 = FormulaRegionCoverage(template_id=t3.id, region="Europe", base_price=300, currency="USD",
                                 margin_pct=8, base_year=2024, base_quarter=1,
                                 needs_review=False, data_confidence="CONF-HIGH")
-    db.add_all([c1, c2, c3])
+    c4 = FormulaRegionCoverage(template_id=t4.id, region="Europe", base_price=400, currency="USD",
+                                needs_review=False)
+    c5 = FormulaRegionCoverage(template_id=t5.id, region="Europe", base_price=500, currency="USD",
+                                needs_review=False, withdrawn_at=datetime.now(timezone.utc))
+    db.add_all([c1, c2, c3, c4, c5])
     db.commit()
 
-    yield {"family": family, "sub_a": sub_a, "sub_b": sub_b, "t1": t1, "t2": t2, "t3": t3}
+    yield {"family": family, "line_a": line_a, "line_b": line_b,
+           "t1": t1, "t2": t2, "t3": t3, "t4": t4, "t5": t5}
 
+    ids = [t.id for t in (t1, t2, t3, t4, t5)]
     for m in (FormulaRegionCoverage,):
-        db.query(m).filter(m.template_id.in_([t1.id, t2.id, t3.id])).delete(synchronize_session=False)
-    db.query(FormulaTemplate).filter(FormulaTemplate.id.in_([t1.id, t2.id, t3.id])).delete(synchronize_session=False)
-    db.query(Subfamily).filter(Subfamily.id.in_([sub_a.id, sub_b.id])).delete(synchronize_session=False)
+        db.query(m).filter(m.template_id.in_(ids)).delete(synchronize_session=False)
+    db.query(FormulaTemplate).filter(FormulaTemplate.id.in_(ids)).delete(synchronize_session=False)
+    db.query(ProductLine).filter(ProductLine.id.in_([line_a.id, line_b.id])).delete(synchronize_session=False)
     db.query(ChemicalFamily).filter(ChemicalFamily.id == family.id).delete(synchronize_session=False)
     db.commit()
 
@@ -75,10 +89,10 @@ def admin(user_factory, db):
     db.commit()
 
 
-def _export(client, subfamily_id=None, needs_review=None):
-    params = {}
-    if subfamily_id is not None:
-        params["subfamily_id"] = subfamily_id
+def _export(client, product_line_id=None, needs_review=None, **extra):
+    params = dict(extra)
+    if product_line_id is not None:
+        params["product_line_id"] = product_line_id
     if needs_review is not None:
         params["needs_review"] = needs_review
     r = client.get("/api/sheets/formula_coverage_price/export", params=params)
@@ -103,10 +117,10 @@ def _save(wb) -> bytes:
     return buf.getvalue()
 
 
-def _import(client, content: bytes, subfamily_id=None, needs_review=None):
+def _import(client, content: bytes, product_line_id=None, needs_review=None):
     params = {}
-    if subfamily_id is not None:
-        params["subfamily_id"] = subfamily_id
+    if product_line_id is not None:
+        params["product_line_id"] = product_line_id
     if needs_review is not None:
         params["needs_review"] = needs_review
     r = client.post(
@@ -119,25 +133,56 @@ def _import(client, content: bytes, subfamily_id=None, needs_review=None):
 
 # ── AC1 ──────────────────────────────────────────────────────────────────
 
-def test_export_filters_by_subfamily_and_needs_review(client_as, admin, coverage_setup):
+def _codes(content: bytes) -> list:
+    ws = _load(content).active
+    code_col = _find_col(ws, "Formula Code")
+    return [row[code_col - 1].value for row in ws.iter_rows(min_row=2)]
+
+
+def test_export_filters_by_product_line_and_needs_review(client_as, admin, coverage_setup):
     c = client_as(admin)
-    content = _export(c, subfamily_id=coverage_setup["sub_a"].id)
+    content = _export(c, product_line_id=coverage_setup["line_a"].id)
     wb = _load(content)
     ws = wb.active
     code_col = _find_col(ws, "Formula Code")
     codes = {row[code_col - 1].value for row in ws.iter_rows(min_row=2)}
     assert codes == {coverage_setup["t1"].code, coverage_setup["t2"].code}
 
-    content2 = _export(c, subfamily_id=coverage_setup["sub_a"].id, needs_review=True)
+    content2 = _export(c, product_line_id=coverage_setup["line_a"].id, needs_review=True)
     wb2 = _load(content2)
     ws2 = wb2.active
     codes2 = {row[code_col - 1].value for row in ws2.iter_rows(min_row=2)}
     assert codes2 == {coverage_setup["t2"].code}
 
 
+def test_the_line_and_family_filters_narrow_the_export(client_as, admin, coverage_setup):
+    """Pydantic drops an unknown field silently, so a filter the spec does not
+    declare would export the whole catalogue: each filter must actually narrow."""
+    c = client_as(admin)
+    s = coverage_setup
+    everything = _codes(_export(c))
+    line_a = _codes(_export(c, product_line_id=s["line_a"].id))
+    line_b = _codes(_export(c, product_line_id=s["line_b"].id))
+    family = _codes(_export(c, family_id=s["family"].id))
+    assert sorted(line_a) == sorted([s["t1"].code, s["t2"].code])
+    assert line_b == [s["t3"].code]
+    assert sorted(family) == sorted(line_a + line_b)
+    assert set(family) < set(everything)
+
+
+def test_the_export_holds_listed_cards_and_live_combos_only(client_as, admin, coverage_setup):
+    """A pointer card is not listed, and a withdrawn combo is no longer priced
+    by the source: neither is in the sheet, filtered or not."""
+    c = client_as(admin)
+    s = coverage_setup
+    for codes in (_codes(_export(c)), _codes(_export(c, family_id=s["family"].id))):
+        assert s["t4"].code not in codes
+        assert s["t5"].code not in codes
+
+
 def test_export_locks_readonly_and_key_columns_not_editable_columns(client_as, admin, coverage_setup):
     c = client_as(admin)
-    content = _export(c, subfamily_id=coverage_setup["sub_a"].id)
+    content = _export(c, product_line_id=coverage_setup["line_a"].id)
     wb = _load(content)
     ws = wb.active
     assert ws.protection.sheet is True
@@ -153,7 +198,7 @@ def test_export_locks_readonly_and_key_columns_not_editable_columns(client_as, a
 
 def test_export_requires_formulas_edit_permission(client_as, tenant_a, coverage_setup):
     r = client_as(tenant_a).get("/api/sheets/formula_coverage_price/export",
-                                 params={"subfamily_id": coverage_setup["sub_a"].id})
+                                 params={"product_line_id": coverage_setup["line_a"].id})
     assert r.status_code == 403
 
 
@@ -161,8 +206,8 @@ def test_export_requires_formulas_edit_permission(client_as, tenant_a, coverage_
 
 def test_reimport_unmodified_export_is_empty(client_as, admin, coverage_setup):
     c = client_as(admin)
-    content = _export(c, subfamily_id=coverage_setup["sub_a"].id)
-    r = _import(c, content, subfamily_id=coverage_setup["sub_a"].id)
+    content = _export(c, product_line_id=coverage_setup["line_a"].id)
+    r = _import(c, content, product_line_id=coverage_setup["line_a"].id)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["status"] == "empty"
@@ -173,7 +218,7 @@ def test_reimport_unmodified_export_is_empty(client_as, admin, coverage_setup):
 
 def test_reimport_edited_sheet_produces_named_diff_and_import_never_mutates(client_as, admin, coverage_setup, db):
     c = client_as(admin)
-    content = _export(c, subfamily_id=coverage_setup["sub_a"].id)
+    content = _export(c, product_line_id=coverage_setup["line_a"].id)
     wb = _load(content)
     ws = wb.active
     price_col = _find_col(ws, "Base Price")
@@ -184,7 +229,7 @@ def test_reimport_edited_sheet_produces_named_diff_and_import_never_mutates(clie
         if row[code_col - 1].value == t1_code:
             row[price_col - 1].value = 150
 
-    r = _import(c, _save(wb), subfamily_id=coverage_setup["sub_a"].id)
+    r = _import(c, _save(wb), product_line_id=coverage_setup["line_a"].id)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["status"] == "diffed"
@@ -217,7 +262,7 @@ def test_reimport_edited_sheet_produces_named_diff_and_import_never_mutates(clie
 
 def test_reordered_rows_still_rekey_by_business_key(client_as, admin, coverage_setup, db):
     c = client_as(admin)
-    content = _export(c, subfamily_id=coverage_setup["sub_a"].id)
+    content = _export(c, product_line_id=coverage_setup["line_a"].id)
     wb = _load(content)
     ws = wb.active
     price_col = _find_col(ws, "Base Price")
@@ -234,7 +279,7 @@ def test_reordered_rows_still_rekey_by_business_key(client_as, admin, coverage_s
         if row_values[code_col - 1] == t2_code:
             ws.cell(row=r_idx, column=price_col, value=250)
 
-    r = _import(c, _save(wb), subfamily_id=coverage_setup["sub_a"].id)
+    r = _import(c, _save(wb), product_line_id=coverage_setup["line_a"].id)
     assert r.status_code == 200, r.text
     changes = [d for d in r.json()["diffs"] if d["kind"] == "change"]
     assert len(changes) == 1
@@ -246,7 +291,7 @@ def test_reordered_rows_still_rekey_by_business_key(client_as, admin, coverage_s
 
 def test_readonly_column_edit_is_rejected_not_applied(client_as, admin, coverage_setup, db):
     c = client_as(admin)
-    content = _export(c, subfamily_id=coverage_setup["sub_a"].id)
+    content = _export(c, product_line_id=coverage_setup["line_a"].id)
     wb = _load(content)
     ws = wb.active
     conf_col = _find_col(ws, "Data Confidence")
@@ -256,7 +301,7 @@ def test_readonly_column_edit_is_rejected_not_applied(client_as, admin, coverage
         if row[code_col - 1].value == t1_code:
             row[conf_col - 1].value = "CONF-LOW"
 
-    r = _import(c, _save(wb), subfamily_id=coverage_setup["sub_a"].id)
+    r = _import(c, _save(wb), product_line_id=coverage_setup["line_a"].id)
     assert r.status_code == 200, r.text
     body = r.json()
     rejected = [d for d in body["diffs"] if d["kind"] == "rejected_readonly_edit"]
@@ -275,8 +320,8 @@ def test_readonly_column_edit_is_rejected_not_applied(client_as, admin, coverage
 
 def test_import_run_is_persisted_and_fetchable(client_as, admin, coverage_setup):
     c = client_as(admin)
-    content = _export(c, subfamily_id=coverage_setup["sub_a"].id)
-    r = _import(c, content, subfamily_id=coverage_setup["sub_a"].id)
+    content = _export(c, product_line_id=coverage_setup["line_a"].id)
+    r = _import(c, content, product_line_id=coverage_setup["line_a"].id)
     run_id = r.json()["id"]
 
     fresh = c.get(f"/api/sheets/import-runs/{run_id}")
@@ -287,8 +332,8 @@ def test_import_run_is_persisted_and_fetchable(client_as, admin, coverage_setup)
 
 def test_list_import_runs_by_payload_key(client_as, admin, coverage_setup):
     c = client_as(admin)
-    content = _export(c, subfamily_id=coverage_setup["sub_a"].id)
-    _import(c, content, subfamily_id=coverage_setup["sub_a"].id)
+    content = _export(c, product_line_id=coverage_setup["line_a"].id)
+    _import(c, content, product_line_id=coverage_setup["line_a"].id)
 
     listed = c.get("/api/sheets/import-runs", params={"payload_key": "formula_coverage_price"})
     assert listed.status_code == 200
@@ -299,7 +344,7 @@ def test_list_import_runs_by_payload_key(client_as, admin, coverage_setup):
 
 def test_apply_skips_stale_row_when_live_value_changed_since_diff(client_as, admin, coverage_setup, db):
     c = client_as(admin)
-    content = _export(c, subfamily_id=coverage_setup["sub_a"].id)
+    content = _export(c, product_line_id=coverage_setup["line_a"].id)
     wb = _load(content)
     ws = wb.active
     price_col = _find_col(ws, "Base Price")
@@ -309,7 +354,7 @@ def test_apply_skips_stale_row_when_live_value_changed_since_diff(client_as, adm
         if row[code_col - 1].value == t1_code:
             row[price_col - 1].value = 150
 
-    r = _import(c, _save(wb), subfamily_id=coverage_setup["sub_a"].id)
+    r = _import(c, _save(wb), product_line_id=coverage_setup["line_a"].id)
     run_id = r.json()["id"]
 
     # Simulate a second officer's concurrent change landing first.
@@ -332,7 +377,7 @@ def test_apply_skips_stale_row_when_live_value_changed_since_diff(client_as, adm
 
 def test_invalid_value_reported_not_silently_dropped(client_as, admin, coverage_setup):
     c = client_as(admin)
-    content = _export(c, subfamily_id=coverage_setup["sub_a"].id)
+    content = _export(c, product_line_id=coverage_setup["line_a"].id)
     wb = _load(content)
     ws = wb.active
     price_col = _find_col(ws, "Base Price")
@@ -342,7 +387,7 @@ def test_invalid_value_reported_not_silently_dropped(client_as, admin, coverage_
         if row[code_col - 1].value == t1_code:
             row[price_col - 1].value = "not-a-number"
 
-    r = _import(c, _save(wb), subfamily_id=coverage_setup["sub_a"].id)
+    r = _import(c, _save(wb), product_line_id=coverage_setup["line_a"].id)
     assert r.status_code == 200, r.text
     invalid = [d for d in r.json()["diffs"] if d["kind"] == "invalid_value"]
     assert len(invalid) == 1
@@ -351,26 +396,26 @@ def test_invalid_value_reported_not_silently_dropped(client_as, admin, coverage_
 
 def test_unmatched_key_reported(client_as, admin, coverage_setup):
     c = client_as(admin)
-    content = _export(c, subfamily_id=coverage_setup["sub_a"].id)
+    content = _export(c, product_line_id=coverage_setup["line_a"].id)
     wb = _load(content)
     ws = wb.active
     code_col = _find_col(ws, "Formula Code")
     ws.cell(row=2, column=code_col, value="NO-SUCH-CODE")
 
-    r = _import(c, _save(wb), subfamily_id=coverage_setup["sub_a"].id)
+    r = _import(c, _save(wb), product_line_id=coverage_setup["line_a"].id)
     assert r.status_code == 200, r.text
     unmatched = [d for d in r.json()["diffs"] if d["kind"] == "unmatched_key"]
     assert len(unmatched) == 1
 
 
 def test_import_requires_formulas_edit_permission(client_as, tenant_a, coverage_setup):
-    r = _import(client_as(tenant_a), b"irrelevant", subfamily_id=coverage_setup["sub_a"].id)
+    r = _import(client_as(tenant_a), b"irrelevant", product_line_id=coverage_setup["line_a"].id)
     assert r.status_code == 403
 
 
 def test_apply_is_idempotent_on_already_applied_diffs(client_as, admin, coverage_setup, db):
     c = client_as(admin)
-    content = _export(c, subfamily_id=coverage_setup["sub_a"].id)
+    content = _export(c, product_line_id=coverage_setup["line_a"].id)
     wb = _load(content)
     ws = wb.active
     price_col = _find_col(ws, "Base Price")
@@ -380,7 +425,7 @@ def test_apply_is_idempotent_on_already_applied_diffs(client_as, admin, coverage
         if row[code_col - 1].value == t1_code:
             row[price_col - 1].value = 150
 
-    r = _import(c, _save(wb), subfamily_id=coverage_setup["sub_a"].id)
+    r = _import(c, _save(wb), product_line_id=coverage_setup["line_a"].id)
     run_id = r.json()["id"]
 
     first = c.post(f"/api/sheets/import-runs/{run_id}/apply")
@@ -419,17 +464,18 @@ def test_each_payload_binds_its_own_filter_fields():
     from app.services.sheet_roundtrip import PAYLOAD_REGISTRY
 
     qs = {"kind": "industry", "min_occurrences": "5",
-          "subfamily_id": "7", "needs_review": "true", "bogus": "x"}
+          "product_line_id": "7", "family_id": "3", "needs_review": "true", "bogus": "x"}
 
     prices = _bind_filter(PAYLOAD_REGISTRY["formula_coverage_price"], _FakeRequest(qs))
-    assert prices.subfamily_id == 7
+    assert prices.product_line_id == 7
+    assert prices.family_id == 3
     assert prices.needs_review is True
     assert not hasattr(prices, "kind"), "price filter must not grow a dimension field"
 
     dims = _bind_filter(PAYLOAD_REGISTRY["dimension_decision"], _FakeRequest(qs))
     assert dims.kind == "industry", "the facet must actually reach the filter"
     assert dims.min_occurrences == 5
-    assert not hasattr(dims, "subfamily_id")
+    assert not hasattr(dims, "product_line_id")
 
 
 def test_an_unknown_query_param_is_ignored_but_a_bad_value_is_refused():

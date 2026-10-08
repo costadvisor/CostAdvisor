@@ -2,6 +2,7 @@ from app.models.user import User
 from app.models.team import Team, TeamMembership
 from app.models.chemical_family import ChemicalFamily
 from app.models.subfamily import Subfamily
+from app.models.product_line import ProductLine
 from app.models.region import Region
 from app.models.product import Product
 from app.models.supplier import Supplier
@@ -48,6 +49,19 @@ from app.models.support import SupportThread, SupportMessage, SupportCannedRespo
 from app.models.index_validation import (
     IndexValidationFinding, IndexValidationRun,
 )
+from app.models.taxonomy_v2 import (
+    Category, CategoryBuildItem, CategoryMember, CategoryPlacement, CategoryRef,
+    CategoryShared, CategorySharedMember, Industry, IndustryOut,
+)
+from app.models.market_report import (
+    MarketReport, MarketReportLine, MarketReportPanel, MarketReportSection,
+)
+from app.models.strategy import (
+    CustomLever, GemstoneCategory, LeverScore, Playbook, PlaybookLever,
+    PlaybookLeverObjective, PlaybookObjective, StrategicObjective, StrategyAction,
+    StrategyRecord, TeamObjective,
+)
+from app.models.content_load import ContentLoad
 
 __all__ = [
     "IndexValidationFinding",
@@ -57,6 +71,7 @@ __all__ = [
     "TeamMembership",
     "ChemicalFamily",
     "Subfamily",
+    "ProductLine",
     "Region",
     "Product",
     "Supplier",
@@ -129,4 +144,29 @@ __all__ = [
     "VolatilityCalibration",
     "VolatilityBreakpoint",
     "IndexSeasonalFactor",
+    "Industry",
+    "Category",
+    "CategoryShared",
+    "CategorySharedMember",
+    "CategoryRef",
+    "CategoryMember",
+    "CategoryBuildItem",
+    "IndustryOut",
+    "CategoryPlacement",
+    "MarketReport",
+    "MarketReportSection",
+    "MarketReportLine",
+    "MarketReportPanel",
+    "GemstoneCategory",
+    "StrategicObjective",
+    "Playbook",
+    "PlaybookLever",
+    "PlaybookLeverObjective",
+    "PlaybookObjective",
+    "StrategyRecord",
+    "TeamObjective",
+    "LeverScore",
+    "CustomLever",
+    "StrategyAction",
+    "ContentLoad",
 ]

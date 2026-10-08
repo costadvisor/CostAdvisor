@@ -1,12 +1,15 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
+// Shared stylesheets first: every page stylesheet is imported (through App)
+// after these, so a page rule wins over a shared rule of equal specificity.
+import './styles.css';
+import './styles/intel.css';
 import App from './App';
 import { AuthProvider } from './AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ConfirmProvider } from './components/ConfirmDialog';
 import { applyTheme, getCachedTheme } from './utils/theme';
-import './styles.css';
 
 applyTheme(getCachedTheme());
 

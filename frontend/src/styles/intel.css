@@ -1,0 +1,826 @@
+/* ──────────────────────────────────────────────────────────────────────
+ * Intelligence + Strategy layout system (prefix `ix-`).
+ *
+ * Built on the app's theme tokens (styles.css): every surface, border, text
+ * and status colour is a var(--…), so all four themes apply automatically.
+ * The ONLY hard-coded colours are the three fixed palettes the mockups define
+ * — regions, gemstones and Kraljic quadrants — and each of those is declared
+ * twice below: the mockup's own hex for the light themes (Paper, StaminaChem)
+ * and a lightened twin for the dark ones (Mint, Amber), because the mockup's
+ * navy/charcoal regions vanish on a near-black background.
+ *
+ * Imported once from main.jsx. Report HTML has its own scoped stylesheet
+ * (report.css, not this file).
+ * ──────────────────────────────────────────────────────────────────── */
+
+/* ── Fixed palettes ─────────────────────────────────────────────────── */
+/* Dark themes (default/Mint and Amber have no light data-theme). */
+:root {
+  --rg-EU: #34b08c;
+  --rg-CN: #e06a6a;
+  --rg-NA: #86a0d4;
+  --rg-APAC: #b8a07a;
+  --rg-IN: #33b5b5;
+  --rg-MEA: #e2a24a;
+  --rg-LA: #9a92ec;
+  --rg-GLOBAL: #a3adb8;
+  /* Text on a filled palette chip/bubble. */
+  --ix-on-palette: #0b0d12;
+
+  --gem-VC: #35b08e;
+  --gem-PC: #36adad;
+  --gem-GS: #45a6cc;
+  --gem-CM: #7e9fd0;
+  --gem-PS: #e0a048;
+  --gem-JP: #d68a5e;
+  --gem-RR: #9a92ec;
+  --gem-DF: #d27bb0;
+
+  --kq-leverage-bg: rgba(96,150,245,.18);
+  --kq-leverage-fg: #9dbcf6;
+  --kq-strategic-bg: rgba(245,170,40,.18);
+  --kq-strategic-fg: #f3c874;
+  --kq-noncritical-bg: rgba(148,163,184,.09);
+  --kq-noncritical-fg: #a3adbd;
+  --kq-bottleneck-bg: rgba(148,163,184,.20);
+  --kq-bottleneck-fg: #c3cbd6;
+  --kq-dot: #f0a93a;
+}
+[data-theme="light"],
+[data-theme="staminachem"] {
+  --rg-EU: #0F6E56;
+  --rg-CN: #A53030;
+  --rg-NA: #1B2B4B;
+  --rg-APAC: #6B6560;
+  --rg-IN: #0B6E6E;
+  --rg-MEA: #BA7517;
+  --rg-LA: #534AB7;
+  --rg-GLOBAL: #7B8794;
+  --ix-on-palette: #ffffff;
+
+  --gem-VC: #0F6E56;
+  --gem-PC: #0B6E6E;
+  --gem-GS: #146B8C;
+  --gem-CM: #3D6B99;
+  --gem-PS: #BA7517;
+  --gem-JP: #A0522D;
+  --gem-RR: #534AB7;
+  --gem-DF: #8C3A6B;
+
+  --kq-leverage-bg: #dbeafe;
+  --kq-leverage-fg: #1e40af;
+  --kq-strategic-bg: #fef3c7;
+  --kq-strategic-fg: #92400e;
+  --kq-noncritical-bg: #f1f5f9;
+  --kq-noncritical-fg: #64748b;
+  --kq-bottleneck-bg: #e2e8f0;
+  --kq-bottleneck-fg: #475569;
+  --kq-dot: #BA7517;
+}
+/* StaminaChem only: slate text on the non-critical tint reaches 4.5:1. */
+[data-theme="staminachem"] { --kq-noncritical-fg: #56657a; }
+
+/* Where sticky strips start. `.ca-nav` renders 55.5px tall (tab padding
+   2×18 + 16.5 line + 2 underline + 1 border); styles.css's --nav-h (58px) is a
+   rounded-up figure for max-height maths, and using it here left a 2.5px slit
+   between the nav and a sticky header that content scrolled through. The
+   offset errs 1.5px toward overlap (hidden under the opaque, higher nav): a
+   late font swap can shift the nav a pixel, and an overlap is invisible where
+   a slit is not. */
+:root { --ix-sticky-top: calc(var(--nav-h, 58px) - 4px); }
+
+/* ── Top nav: dropdown groups (Navbar.jsx) ──────────────────────────── */
+/* A thin accent rule under the bar, the mockup's green→amber underline in
+   the current theme's own colours. */
+.ca-nav::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent3) 45%, transparent);
+  opacity: .55; pointer-events: none;
+}
+.ca-nav a.ca-tab { text-decoration: none; display: block; position: relative; }
+.ca-nav .ca-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -6px; border-radius: 6px; }
+.ix-nav-group { position: relative; display: flex; align-self: stretch; }
+.ix-nav-trigger {
+  background: none; border: none; border-bottom: 2px solid transparent;
+  font-family: inherit; line-height: 1.5;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.ix-nav-caret { font-size: 8px; opacity: .7; transition: transform .15s; }
+.ix-nav-trigger[aria-expanded="true"] { color: var(--text); }
+.ix-nav-trigger[aria-expanded="true"] .ix-nav-caret { transform: rotate(180deg); }
+.ix-nav-menu {
+  position: absolute; top: 100%; left: 0; z-index: 120;
+  min-width: 208px; padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  box-shadow: var(--shadow-popover);
+  display: flex; flex-direction: column; gap: 1px;
+}
+.ix-nav-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border-radius: 6px;
+  border-left: 2px solid transparent;
+  font-size: 11px; color: var(--text-secondary);
+  text-decoration: none; white-space: nowrap;
+}
+.ix-nav-item:hover { background: var(--surface2); color: var(--text); }
+.ix-nav-item:focus-visible { background: var(--surface2); color: var(--text); outline: 2px solid var(--accent); outline-offset: -2px; }
+.ix-nav-item[aria-current="page"] { color: var(--accent-ink, var(--accent)); font-weight: 600; border-left-color: var(--accent); border-radius: 0 6px 6px 0; }
+.ix-nav-item-hint { font-size: 9px; color: var(--muted); letter-spacing: .3px; }
+.ix-nav-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+
+/* Right-hand cluster: team pill, theme button, account menu. It never wraps
+   or shrinks; the name is one line with an ellipsis at every width. */
+.ix-nav-right { margin-left: auto; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.ix-nav-user-name {
+  font-size: 11px; white-space: nowrap;
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis;
+}
+/* At 1400px and below the full nav (logo + 7 tabs + cluster, ~1365px) no
+   longer fits: narrower tab padding, the user name hidden (the avatar button
+   keeps it as its aria-label and title), the team pill capped with an
+   ellipsis (its full name stays in its title). Only horizontal padding
+   changes: the nav height feeds --ix-sticky-top above. */
+@media (max-width: 1400px) {
+  .ca-nav .ca-tab { padding-left: 13px; padding-right: 13px; }
+  .ix-nav-right { gap: 10px; }
+  .ix-nav-user-name { display: none; }
+  .ix-nav-right [aria-controls="ca-team-menu"] { max-width: 176px; }
+}
+@media (max-width: 1200px) {
+  .ca-nav .ca-tab { padding-left: 9px; padding-right: 9px; }
+  .ca-nav .ca-logo { padding-right: 14px; margin-right: 10px; }
+  .ix-nav-right [aria-controls="ca-team-menu"] { max-width: 150px; }
+}
+
+/* ── Page shells ───────────────────────────────────────────────────── */
+/* Wide variant of .ca-page: catalogue grids and two-column detail pages
+   need more than the 1380px cap to show four cards and a right rail. */
+.ix-page {
+  padding: 24px 32px 56px;
+  max-width: 1560px; margin: 0 auto; min-width: 0;
+}
+.ix-page.ix-narrow { max-width: 1240px; }
+
+/* Catalogue: sticky filter column + main, full-bleed like the mockup. */
+.ix-catalogue {
+  --ix-sb-w: 236px;
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--ix-sb-w) minmax(0, 1fr);
+  max-width: 1760px; margin: 0 auto; min-height: calc(100vh - var(--ix-sticky-top));
+}
+/* The sidebar is viewport-tall and sticky; this rail paints its column the
+   full height of the page so the column never ends mid-scroll. */
+.ix-catalogue::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: var(--ix-sb-w);
+  background: var(--surface); border-right: 1px solid var(--border); pointer-events: none;
+}
+.ix-catalogue > :not(.ix-sidebar) { position: relative; }
+.ix-catalogue-main { padding: 22px 28px 56px; min-width: 0; }
+
+/* ── Page header ───────────────────────────────────────────────────── */
+.ix-page-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 20px;
+}
+.ix-page-eyebrow {
+  font-size: 10px; font-weight: 600; letter-spacing: 1.2px;
+  text-transform: uppercase; color: var(--card-eyebrow); margin-bottom: 4px;
+}
+.ix-page-title {
+  font-family: 'Syne', sans-serif; font-size: 26px; font-weight: 800;
+  letter-spacing: -0.4px; line-height: 1.15; color: var(--text); margin: 0;
+}
+.ix-page-sub { font-size: 11.5px; color: var(--muted); margin-top: 5px; letter-spacing: .2px; }
+.ix-page-sub .ix-dot-sep { margin: 0 6px; opacity: .6; }
+.ix-page-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ── Filter sidebar ────────────────────────────────────────────────── */
+.ix-sidebar {
+  position: sticky; top: var(--ix-sticky-top);
+  align-self: start;
+  height: calc(100vh - var(--ix-sticky-top));
+  overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 14px 0 32px;
+}
+.ix-sidebar-search { padding: 0 14px 10px; }
+.ix-search {
+  width: 100%; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 10px 7px 28px; font-family: inherit; font-size: 11.5px; outline: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16' fill='none'%3E%3Ccircle cx='7' cy='7' r='5' stroke='%23888' stroke-width='1.5'/%3E%3Cpath d='M11 11L14 14' stroke='%23888' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: 9px center;
+}
+.ix-search:focus { border-color: var(--accent); }
+.ix-search::placeholder { color: var(--muted); }
+.ix-sb-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 6px 16px; border: none; background: transparent;
+  font-family: inherit; font-size: 11.5px; color: var(--text-secondary);
+  text-align: left; cursor: pointer;
+}
+.ix-sb-item:hover { background: var(--surface2); color: var(--text); }
+.ix-sb-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ix-sb-item.active { background: var(--accent-dim); color: var(--text); font-weight: 600; box-shadow: inset 2px 0 0 var(--accent); }
+.ix-sb-item.active .ix-count { background: var(--accent-fill, var(--accent)); color: var(--on-accent); }
+.ix-sb-div { height: 1px; background: var(--border); margin: 8px 0; }
+
+.ix-count {
+  flex-shrink: 0; min-width: 22px; text-align: center;
+  font-size: 9.5px; font-weight: 600; line-height: 1;
+  padding: 3px 6px; border-radius: 10px;
+  background: var(--surface2); color: var(--muted);
+}
+
+.ix-fgroup { padding: 2px 0; }
+.ix-fgroup + .ix-fgroup { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 8px; }
+.ix-fgroup-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 6px 16px; border: none; background: transparent;
+  font-family: inherit; font-size: 9.5px; font-weight: 700;
+  letter-spacing: 1.2px; text-transform: uppercase; color: var(--card-eyebrow);
+  cursor: pointer; text-align: left;
+}
+.ix-fgroup-head:hover { color: var(--text-secondary); }
+.ix-fgroup-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ix-fgroup-head .ix-chev { font-size: 9px; transition: transform .15s; }
+.ix-fgroup-head[aria-expanded="false"] .ix-chev { transform: rotate(-90deg); }
+.ix-fgroup-active { font-size: 9px; font-weight: 600; letter-spacing: .3px; text-transform: none; color: var(--accent-ink, var(--accent)); }
+.ix-fgroup-body { padding: 2px 0 4px; }
+.ix-fgroup-search { padding: 2px 14px 6px; }
+.ix-fgroup-search .ix-search { padding-top: 5px; padding-bottom: 5px; font-size: 11px; }
+.ix-fitem {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 16px; cursor: pointer;
+  font-size: 11.5px; color: var(--text-secondary); line-height: 1.35;
+}
+.ix-fitem:hover { background: var(--surface2); color: var(--text); }
+.ix-fitem input { accent-color: var(--accent); width: 13px; height: 13px; flex-shrink: 0; margin: 0; cursor: pointer; }
+.ix-fitem input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ix-fitem-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ix-fitem.checked { color: var(--text); font-weight: 600; }
+.ix-fitem.checked .ix-count { background: var(--accent-dim); color: var(--accent-ink, var(--accent)); }
+.ix-fitem.zero { opacity: .5; }
+.ix-fgroup-more {
+  border: none; background: none; cursor: pointer; font-family: inherit;
+  font-size: 10.5px; color: var(--accent4-ink, var(--accent4)); padding: 4px 16px 2px; text-align: left;
+}
+.ix-fgroup-more:hover { text-decoration: underline; }
+.ix-fgroup-foot { padding: 6px 16px 2px; font-size: 10px; color: var(--muted); line-height: 1.45; }
+.ix-sb-clear {
+  border: none; background: none; cursor: pointer; font-family: inherit;
+  font-size: 10.5px; color: var(--accent2-ink, var(--accent2)); padding: 2px 16px 8px; text-align: left;
+}
+
+/* ── Family group + card grid ──────────────────────────────────────── */
+.ix-group { margin-bottom: 26px; }
+.ix-group-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.ix-group-name {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 1.3px;
+  text-transform: uppercase; color: var(--text-secondary); white-space: nowrap;
+}
+.ix-group-sub { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.ix-group-rule { flex: 1; height: 1px; background: var(--border); min-width: 20px; }
+.ix-group-count { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.ix-subgroup-head { font-size: 10px; font-weight: 600; color: var(--muted); margin: 12px 0 8px; letter-spacing: .4px; }
+
+.ix-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+.ix-grid.ix-grid-lg { grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); }
+.ix-grid.ix-grid-sm { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+
+.ix-card {
+  position: relative; display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 14px 12px;
+  color: var(--text); text-decoration: none; cursor: pointer;
+  transition: border-color .14s, box-shadow .14s, transform .14s;
+  min-width: 0;
+}
+.ix-card:hover { border-color: var(--accent); box-shadow: var(--shadow-popover); transform: translateY(-1px); }
+.ix-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ix-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.ix-card-eyebrow {
+  font-size: 9px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--muted); line-height: 1.45; min-width: 0;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ix-card-badges { display: flex; gap: 4px; flex-shrink: 0; align-items: flex-start; }
+.ix-card-name {
+  font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700;
+  line-height: 1.22; color: var(--text); margin-bottom: 3px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ix-card-meta { font-size: 10.5px; color: var(--muted); margin-bottom: 8px; }
+.ix-card-spark { height: 38px; margin: 2px 0 4px; }
+.ix-card-sparkmeta { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.ix-card-base { font-size: 9.5px; color: var(--muted); }
+.ix-card-level { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ix-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.ix-card-foot {
+  margin-top: auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  padding-top: 8px; border-top: 1px solid var(--row-divider);
+  font-size: 10px; color: var(--muted); line-height: 1.5;
+}
+.ix-card-foot-cta { flex-shrink: 0; color: var(--text-secondary); font-weight: 500; }
+.ix-card.is-dim { opacity: .55; }
+
+/* Supplier-style rollup strip under a card (mockup's coloured segments). */
+.ix-seg-strip { display: flex; gap: 3px; height: 3px; margin-top: 8px; }
+.ix-seg-strip > span { border-radius: 2px; min-width: 4px; }
+
+/* ── Detail header strip (sticky under the nav) ────────────────────── */
+.ix-dh {
+  position: sticky; top: var(--ix-sticky-top); z-index: 60;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 0 var(--border);
+}
+.ix-dh-inner { max-width: 1560px; margin: 0 auto; padding: 12px 32px 0; }
+.ix-dh-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.ix-dh-lead { min-width: 0; flex: 1; }
+.ix-dh-crumbs {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 10.5px; color: var(--muted); margin-bottom: 3px;
+}
+.ix-dh-crumbs a { color: var(--muted); text-decoration: none; }
+.ix-dh-crumbs a:hover { color: var(--accent); text-decoration: underline; }
+.ix-dh-sep { opacity: .55; }
+.ix-dh-back {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: none; background: none; cursor: pointer; padding: 0; margin-right: 6px;
+  font-family: inherit; font-size: 10.5px; color: var(--text-secondary);
+}
+/* A rule between "← Back" and the first crumb, so the two never read as one
+   run ("Back Product lines › …"). */
+.ix-dh-back:not(:last-child) { padding-right: 10px; margin-right: 2px; border-right: 1px solid var(--border); }
+.ix-dh-back:hover { color: var(--accent); }
+.ix-dh-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.ix-dh-titlerow { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.ix-dh-title {
+  font-family: 'Syne', sans-serif; font-size: 21px; font-weight: 800;
+  letter-spacing: -0.3px; line-height: 1.2; color: var(--text); margin: 0;
+  overflow-wrap: anywhere;
+}
+.ix-dh-sub { font-size: 11px; color: var(--muted); }
+.ix-dh-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+.ix-dh-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-top: 6px; }
+.ix-dh-tabs { margin-top: 8px; }
+.ix-dh-tabs .ix-tabs { border-bottom: none; }
+.ix-dh-inner.no-tabs { padding-bottom: 12px; }
+
+/* ── Tabs ──────────────────────────────────────────────────────────── */
+.ix-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.ix-tabs::-webkit-scrollbar { display: none; }
+.ix-tab {
+  position: relative; flex-shrink: 0;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  padding: 10px 16px 9px; margin-bottom: -1px;
+  font-family: inherit; font-size: 11px; font-weight: 500;
+  letter-spacing: .8px; text-transform: uppercase;
+  color: var(--muted); cursor: pointer; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 7px;
+}
+.ix-tab:hover { color: var(--text-secondary); }
+.ix-tab[aria-selected="true"] { color: var(--accent-ink, var(--accent)); border-bottom-color: var(--accent); }
+.ix-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; border-radius: 4px; }
+.ix-tab:disabled { opacity: .4; cursor: not-allowed; }
+.ix-tab-count { font-size: 9px; font-weight: 700; letter-spacing: 0; padding: 2px 6px; border-radius: 9px; background: var(--surface2); color: var(--muted); }
+.ix-tab[aria-selected="true"] .ix-tab-count { background: var(--accent-dim); color: var(--accent-ink, var(--accent)); }
+.ix-tabpanel:focus-visible { outline: none; }
+
+/* ── Detail body layouts ───────────────────────────────────────────── */
+.ix-detail-body { max-width: 1560px; margin: 0 auto; padding: 20px 32px 56px; min-width: 0; }
+.ix-two-col { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+.ix-col, .ix-rail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* Opt-in sticky rail on detail pages: it has to clear the sticky header strip
+   too; set --ix-dh-h on the page if the header is taller than usual. */
+.ix-rail.is-sticky { position: sticky; top: calc(var(--ix-sticky-top) + var(--ix-dh-h, 136px) + 12px); }
+.ix-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.ix-split-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.ix-stack { display: flex; flex-direction: column; gap: 16px; }
+.ix-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ix-spacer { flex: 1; }
+
+/* ── Panel ─────────────────────────────────────────────────────────── */
+.ix-panel {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); min-width: 0;
+}
+.ix-panel-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 11px 16px 10px; border-bottom: 1px solid var(--border);
+}
+.ix-panel.is-collapsed .ix-panel-head { border-bottom-color: transparent; }
+.ix-panel-title {
+  font-family: 'Syne', sans-serif; font-size: 11px; font-weight: 700;
+  letter-spacing: 1.2px; text-transform: uppercase; color: var(--text);
+  margin: 0; display: flex; align-items: center; gap: 8px;
+}
+.ix-panel-caption { font-size: 10.5px; color: var(--muted); text-align: right; line-height: 1.4; }
+.ix-panel-headright { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+/* A collapsible title is a <button>: it inherits the h2's size, weight,
+   tracking and case, or browser button defaults would show it mixed-case. */
+.ix-panel-toggle {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+  background: none; border: none; padding: 0; cursor: pointer; text-align: left; color: inherit;
+  font: inherit; letter-spacing: inherit; text-transform: inherit;
+}
+.ix-panel-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.ix-panel-toggle .ix-chev { font-size: 9px; color: var(--muted); transition: transform .15s; }
+.ix-panel-toggle[aria-expanded="false"] .ix-chev { transform: rotate(-90deg); }
+.ix-panel-body { padding: 14px 16px; }
+.ix-panel-body.flush { padding: 0; }
+.ix-panel-foot { padding: 9px 16px; border-top: 1px solid var(--border); font-size: 10.5px; color: var(--muted); }
+.ix-section-label {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--card-eyebrow); margin: 14px 0 8px;
+}
+.ix-section-label:first-child { margin-top: 0; }
+.ix-divider { height: 1px; background: var(--border); margin: 12px 0; }
+.ix-prose { font-size: 12px; line-height: 1.7; color: var(--text-secondary); }
+.ix-prose p + p { margin-top: 8px; }
+/* Direction colours (the app's index convention: a rising cost reads as risk).
+   Scoped twice so they also win inside .ix-table cells. */
+.ix-up, .ix-table td.ix-up { color: var(--accent2-ink, var(--accent2)); font-weight: 700; }
+.ix-down, .ix-table td.ix-down { color: var(--accent-ink, var(--accent)); font-weight: 700; }
+.ix-flat, .ix-table td.ix-flat { color: var(--muted); }
+.ix-muted { color: var(--muted); }
+.ix-small { font-size: 10.5px; }
+.ix-mono { font-variant-numeric: tabular-nums; }
+
+/* Notes and callouts */
+.ix-note {
+  display: flex; align-items: flex-start; gap: 9px;
+  background: var(--info-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 9px 13px;
+  font-size: 11px; line-height: 1.6; color: var(--text-secondary);
+}
+.ix-note strong { color: var(--text); }
+.ix-callout {
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  background: var(--success-bg-soft); border-radius: 0 8px 8px 0;
+  padding: 10px 13px; font-size: 11.5px; line-height: 1.65; color: var(--text-secondary);
+}
+.ix-callout.warn { border-left-color: var(--accent3); background: var(--warn-bg); }
+.ix-callout.danger { border-left-color: var(--accent2); background: var(--danger-bg); }
+.ix-callout.info { border-left-color: var(--accent4); background: var(--info-bg); }
+.ix-callout-label { font-size: 9.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.ix-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+
+/* ── KPI tiles ─────────────────────────────────────────────────────── */
+.ix-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 8px; }
+.ix-kpis.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ix-kpi {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; min-width: 0;
+}
+.ix-kpi-label { font-size: 9px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; line-height: 1.35; }
+.ix-kpi-value {
+  font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700;
+  line-height: 1.1; color: var(--text); font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.ix-kpi-sub { font-size: 9.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+.ix-kpi.tone-good .ix-kpi-value { color: var(--accent); }
+.ix-kpi.tone-bad .ix-kpi-value { color: var(--accent2); }
+.ix-kpi.tone-warn .ix-kpi-value { color: var(--accent3); }
+.ix-kpi.tone-info .ix-kpi-value { color: var(--accent4); }
+.ix-kpi.is-large .ix-kpi-value { font-size: 26px; }
+
+/* ── Tables ────────────────────────────────────────────────────────── */
+.ix-table-wrap { width: 100%; overflow-x: auto; }
+.ix-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.ix-table th {
+  font-size: 9.5px; font-weight: 600; letter-spacing: .9px; text-transform: uppercase;
+  color: var(--muted); text-align: left; padding: 7px 12px; white-space: nowrap;
+  background: var(--surface2); border-bottom: 1px solid var(--border);
+}
+.ix-table td { padding: 8px 12px; border-bottom: 1px solid var(--row-divider); vertical-align: middle; color: var(--text); }
+.ix-table tbody tr:last-child td { border-bottom: none; }
+.ix-table tbody tr:hover td { background: var(--row-stripe); }
+.ix-table .num, .ix-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.ix-table .center { text-align: center; }
+.ix-table .ix-cell-main { font-weight: 600; color: var(--text); }
+.ix-table .ix-cell-sub { font-size: 10px; color: var(--muted); margin-top: 1px; }
+.ix-table tr.is-clickable { cursor: pointer; }
+.ix-table tr.is-clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ix-table tr.is-overdue td { background: var(--danger-bg); }
+.ix-table th.sortable { cursor: pointer; user-select: none; }
+.ix-table th.sortable:hover { color: var(--text); }
+.ix-table th[aria-sort="ascending"]::after { content: ' ▲'; font-size: 7px; }
+.ix-table th[aria-sort="descending"]::after { content: ' ▼'; font-size: 7px; }
+.ix-wbar { display: inline-flex; align-items: center; gap: 6px; }
+.ix-wbar-track { width: 44px; height: 4px; border-radius: 2px; background: var(--surface3); overflow: hidden; display: inline-block; }
+.ix-wbar-fill { height: 100%; border-radius: 2px; background: var(--accent4); display: block; }
+
+/* ── Chips, tags, pills ────────────────────────────────────────────── */
+.ix-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; padding: 3px 9px; border-radius: 5px;
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text-secondary);
+  white-space: nowrap;
+}
+.ix-chip strong { color: var(--text); font-weight: 600; }
+.ix-chip.accent { border-color: var(--accent); color: var(--accent-ink, var(--accent)); background: var(--accent-dim); }
+.ix-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; padding: 2px 8px; border-radius: 4px;
+  background: var(--info-bg); color: var(--text-secondary);
+  border: 1px solid var(--border); line-height: 1.5;
+}
+.ix-tag.fn { background: var(--success-bg); }
+.ix-tag.warn { background: var(--warn-bg); }
+.ix-tag.plain { background: var(--surface2); }
+a.ix-tag, button.ix-tag { cursor: pointer; text-decoration: none; font-family: inherit; }
+a.ix-tag:hover, button.ix-tag:hover { border-color: var(--accent); color: var(--text); }
+.ix-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; font-family: inherit; padding: 5px 11px; border-radius: 20px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); cursor: pointer;
+}
+.ix-pill:hover { border-color: var(--accent); color: var(--text); }
+.ix-pill.active, .ix-pill[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-ink, var(--accent)); background: var(--accent-dim); }
+.ix-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Region chips ──────────────────────────────────────────────────── */
+.ix-region-chips { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.ix-region-chips-label { font-size: 10.5px; font-weight: 600; color: var(--muted); margin-right: 4px; }
+.ix-rchip {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 34px; height: 22px; padding: 0 8px; border-radius: 4px;
+  font-family: inherit; font-size: 9.5px; font-weight: 700; letter-spacing: .4px;
+  background: var(--rg, var(--muted)); color: var(--ix-on-palette);
+  border: 1px solid transparent; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
+  white-space: nowrap;
+}
+button.ix-rchip { cursor: pointer; }
+button.ix-rchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ix-rchip.off {
+  background: var(--surface2); color: var(--muted); border-color: var(--border); box-shadow: none;
+}
+button.ix-rchip.off:hover { color: var(--text); border-color: var(--rg, var(--border-light)); }
+.ix-rchip.unavailable { opacity: .45; cursor: default; }
+.ix-rchip.sm { min-width: 0; height: 17px; padding: 0 4px; font-size: 7.5px; border-radius: 3px; letter-spacing: .2px; }
+.ix-rdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--rg, var(--muted)); flex-shrink: 0; box-shadow: 0 0 0 1px var(--border); }
+
+/* ── Badges ────────────────────────────────────────────────────────── */
+.ix-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 9px; font-weight: 700; line-height: 1.3;
+  padding: 2px 6px; border-radius: 4px;
+  letter-spacing: .3px; text-transform: uppercase; white-space: nowrap;
+  background: var(--neutral-bg); color: var(--muted);
+}
+.ix-badge.lg { font-size: 10px; padding: 3px 8px; }
+.ix-badge.plain { text-transform: none; letter-spacing: 0; font-size: 10px; }
+/* Trend — follows the app's index colouring: a rising cost reads as risk. */
+.ix-badge.trend-up { background: var(--danger-bg); color: var(--accent2-ink, var(--accent2)); }
+.ix-badge.trend-down { background: var(--success-bg); color: var(--accent-ink, var(--accent)); }
+.ix-badge.trend-flat { background: var(--neutral-bg); color: var(--muted); }
+/* Supply status (SupplyBadge): whether the supplier floor is met. Tone from
+   the API: green | green-amber | amber | grey. No number ever sits in it. */
+.ix-badge.sup { gap: 5px; }
+.ix-badge.sup .sup-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: currentColor; }
+.ix-badge.sup-green { background: var(--success-bg); color: var(--accent-ink, var(--accent)); }
+.ix-badge.sup-green-amber { background: var(--success-bg); color: var(--accent-ink, var(--accent)); }
+.ix-badge.sup-green-amber .sup-dot { background: linear-gradient(90deg, var(--accent) 50%, var(--accent3) 50%); }
+.ix-badge.sup-amber { background: var(--warn-bg); color: var(--accent3-ink, var(--accent3)); }
+.ix-badge.sup-grey { background: var(--neutral-bg); color: var(--muted); box-shadow: inset 0 0 0 1px var(--border); }
+.ix-badge.sup-grey .sup-dot { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+/* Status families */
+.ix-badge.st-good { background: var(--success-bg); color: var(--accent-ink, var(--accent)); }
+.ix-badge.st-warn { background: var(--warn-bg); color: var(--accent3-ink, var(--accent3)); }
+.ix-badge.st-bad { background: var(--danger-bg); color: var(--accent2-ink, var(--accent2)); }
+.ix-badge.st-info { background: var(--info-bg); color: var(--accent4-ink, var(--accent4)); }
+.ix-badge.st-neutral { background: var(--neutral-bg); color: var(--muted); border: 1px solid var(--border); }
+.ix-badge.st-struck { background: var(--danger-bg); color: var(--accent2-ink, var(--accent2)); text-decoration: line-through; }
+/* Kraljic quadrants */
+.ix-badge.kq-leverage { background: var(--kq-leverage-bg); color: var(--kq-leverage-fg); }
+.ix-badge.kq-strategic { background: var(--kq-strategic-bg); color: var(--kq-strategic-fg); }
+.ix-badge.kq-bottleneck { background: var(--kq-bottleneck-bg); color: var(--kq-bottleneck-fg); }
+.ix-badge.kq-noncritical { background: var(--kq-noncritical-bg); color: var(--kq-noncritical-fg); }
+.ix-badge.kq-boundary {
+  background: linear-gradient(90deg, var(--kq-leverage-bg) 50%, var(--kq-strategic-bg) 50%);
+  color: var(--text-secondary);
+}
+.ix-badge.kq-boundary .kq-a { color: var(--kq-leverage-fg); }
+.ix-badge.kq-boundary .kq-b { color: var(--kq-strategic-fg); }
+.ix-badge.kq-none { background: transparent; color: var(--muted); border: 1px dashed var(--border-light); }
+/* Gemstone tag: palette dot + neutral text so it reads on any surface. */
+.ix-gem {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10.5px; color: var(--text-secondary); white-space: nowrap;
+}
+.ix-gem.boxed { padding: 2px 8px 2px 6px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); }
+.ix-gem-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--gem, var(--muted)); flex-shrink: 0; }
+.ix-gem-code {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 8.5px; font-weight: 700; letter-spacing: .3px;
+  padding: 2px 5px; border-radius: 3px; background: var(--gem, var(--muted)); color: var(--ix-on-palette);
+}
+.ix-num-bubble {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 4px; border-radius: 10px;
+  font-size: 9.5px; font-weight: 700; background: var(--gem, var(--text-secondary)); color: var(--ix-on-palette);
+  flex-shrink: 0;
+}
+
+/* ── Empty state + skeleton ────────────────────────────────────────── */
+.ix-empty {
+  text-align: center; padding: 44px 24px;
+  border: 1px dashed var(--border-light); border-radius: var(--radius);
+  background: var(--neutral-bg-soft); color: var(--muted);
+}
+.ix-empty.compact { padding: 18px 14px; border-style: solid; border-color: var(--border); }
+.ix-empty.bare { border: none; background: none; padding: 20px 8px; }
+.ix-empty-icon { font-size: 22px; line-height: 1; margin-bottom: 10px; opacity: .7; }
+.ix-empty-title { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px; }
+.ix-empty.compact .ix-empty-title { font-size: 12px; }
+.ix-empty-body { font-size: 11.5px; line-height: 1.6; max-width: 56ch; margin: 0 auto; }
+.ix-empty-action { margin-top: 14px; }
+.ix-error { color: var(--accent2-ink, var(--accent2)); }
+
+.ix-skel { display: block; }
+.ix-skel-line { height: 10px; margin-bottom: 8px; }
+.ix-skel-line:last-child { margin-bottom: 0; }
+.ix-skel-title { height: 18px; width: 60%; margin-bottom: 12px; }
+.ix-skel-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px; height: 210px;
+  display: flex; flex-direction: column; gap: 9px;
+}
+
+/* ── Charts ────────────────────────────────────────────────────────── */
+.ix-chart { position: relative; width: 100%; min-width: 0; }
+.ix-chart svg { display: block; overflow: visible; }
+.ix-chart-axis { font-size: 9.5px; fill: var(--muted); font-family: 'JetBrains Mono', monospace; }
+.ix-chart-note { font-size: 10.5px; color: var(--muted); margin-top: 6px; }
+.ix-chart-tip {
+  position: absolute; z-index: 30; pointer-events: none;
+  min-width: 140px; max-width: 280px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: var(--shadow-popover);
+  padding: 8px 10px; font-size: 10.5px; color: var(--text);
+}
+.ix-chart-tip-title { font-weight: 700; margin-bottom: 5px; color: var(--text); display: flex; justify-content: space-between; gap: 10px; }
+.ix-chart-tip-title .ix-muted { font-weight: 500; }
+.ix-chart-tip-row { display: flex; align-items: center; gap: 7px; line-height: 1.7; }
+.ix-chart-tip-row .lbl { flex: 1; color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ix-chart-tip-row .val { font-weight: 700; font-variant-numeric: tabular-nums; }
+.ix-chart-tip-row.is-dim { opacity: .6; }
+.ix-chart-tip-total { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 4px; }
+.ix-swatch { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; display: inline-block; }
+.ix-swatch.line { height: 3px; width: 14px; border-radius: 1px; }
+.ix-swatch.dot { border-radius: 50%; }
+.ix-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 10.5px; color: var(--text-secondary); }
+.ix-legend.vertical { flex-direction: column; gap: 8px; margin-top: 0; }
+.ix-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+
+.ix-bubble-wrap { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+/* The plot box: the SVG scales down inside it, and a cluster's list is
+   positioned over it in percentages of the same box. */
+.ix-bubble-plot { position: relative; flex-shrink: 0; max-width: 100%; }
+.ix-bubble { cursor: pointer; outline: none; }
+.ix-bubble:focus-visible circle.ix-bubble-disc { stroke: var(--text); stroke-width: 2.5; }
+.ix-bubble-cluster:focus-visible circle.ix-bubble-cluster-back { stroke: var(--text); stroke-width: 2; stroke-dasharray: none; }
+.ix-bubble.is-dim { opacity: .25; }
+.ix-bubble-pop {
+  position: absolute; z-index: 40; width: 270px; transform: translateY(-22px);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: var(--shadow-popover); padding: 6px; text-align: left;
+}
+.ix-bubble-pop-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 3px 6px 6px; font-size: 9.5px; font-weight: 700; letter-spacing: .8px;
+  text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); margin-bottom: 4px;
+}
+.ix-bubble-pop-close {
+  border: none; background: none; cursor: pointer; font-family: inherit;
+  font-size: 14px; line-height: 1; color: var(--muted); padding: 0 2px;
+}
+.ix-bubble-pop-close:hover { color: var(--text); }
+.ix-bubble-pop-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+.ix-bubble-pop-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
+.ix-bubble-pop-item {
+  display: flex; align-items: flex-start; gap: 8px; width: 100%;
+  border: none; background: none; border-radius: 6px; padding: 5px 6px;
+  font-family: inherit; font-size: 11px; line-height: 1.4; color: var(--text-secondary); text-align: left;
+}
+button.ix-bubble-pop-item { cursor: pointer; }
+button.ix-bubble-pop-item:hover { background: var(--surface2); color: var(--text); }
+button.ix-bubble-pop-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ix-bubble-pop-item.is-selected { background: var(--surface2); color: var(--text); font-weight: 600; }
+.ix-bubble-pop-item.is-hl .ix-num-bubble { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--accent); }
+.ix-bubble-pop-item.is-dim { opacity: .45; }
+.ix-bubble-pop-title { flex: 1; min-width: 0; padding-top: 1px; }
+.ix-bubble-cluster-swatch {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 3px solid var(--muted); background: var(--surface);
+  font-size: 7.5px; font-weight: 700; color: var(--text); letter-spacing: 0;
+}
+.ix-bubble-legend-cluster { max-width: 190px; align-items: flex-start; line-height: 1.4; color: var(--muted); }
+
+/* Gauge (arc + track variants) */
+.ix-gauge { display: flex; flex-direction: column; align-items: center; min-width: 0; }
+.ix-gauge-value { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 18px; color: var(--text); line-height: 1.1; }
+.ix-gauge-sub { font-size: 10px; color: var(--muted); text-align: center; }
+.ix-track { width: 100%; }
+.ix-track-top { display: flex; justify-content: space-between; align-items: baseline; font-size: 10.5px; color: var(--muted); margin-bottom: 6px; gap: 8px; }
+.ix-track-value { font-weight: 700; font-size: 11.5px; }
+.ix-track-bar { position: relative; height: 8px; border-radius: 4px; }
+.ix-track-marker {
+  position: absolute; top: -4px; width: 4px; height: 16px; margin-left: -2px;
+  background: var(--text); border-radius: 2px; box-shadow: 0 0 0 2px var(--surface);
+}
+.ix-track-ends { display: flex; justify-content: space-between; font-size: 9.5px; color: var(--muted); margin-top: 5px; font-variant-numeric: tabular-nums; }
+.ix-track-zones { display: flex; font-size: 9px; color: var(--muted); margin-top: 2px; }
+.ix-track-zones > span { flex: 1; text-align: center; }
+.ix-track.is-empty .ix-track-bar { opacity: .3; }
+
+/* Horizontal bars */
+.ix-hbars { display: flex; flex-direction: column; gap: 7px; }
+.ix-hbar-row { display: grid; grid-template-columns: var(--ix-hbar-label, 150px) minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 11px; }
+.ix-hbar-label { color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ix-hbar-label .sub { display: block; font-size: 9.5px; color: var(--muted); }
+.ix-hbar-track { height: 8px; border-radius: 4px; background: var(--surface2); overflow: hidden; }
+.ix-hbar-fill { height: 100%; border-radius: 4px; background: var(--accent4); transition: width .3s ease; }
+.ix-hbar-val { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; text-align: right; min-width: 44px; }
+.ix-hbar-val.muted { color: var(--muted); font-weight: 500; }
+/* Clickable rows (onItemClick): a <button> inside each list item. Reset the
+   UA button box but keep .ix-hbar-row's 11px grid; no `font` shorthand, which
+   would undo that size. */
+.ix-hbar-item { min-width: 0; }
+button.ix-hbar-row {
+  width: 100%; margin: 0; padding: 2px 0; box-sizing: border-box;
+  background: none; border: none; border-radius: 4px; cursor: pointer; text-align: left;
+  font-family: inherit; font-weight: inherit; line-height: inherit; letter-spacing: inherit; color: inherit;
+}
+button.ix-hbar-row:hover { background: var(--surface2); }
+button.ix-hbar-row:hover .ix-hbar-label { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+button.ix-hbar-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ix-hbars.is-clickable { gap: 3px; }
+
+/* ── Toolbars and form controls ────────────────────────────────────── */
+.ix-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.ix-toolbar-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+.ix-select {
+  font-family: inherit; font-size: 11px; color: var(--text);
+  background-color: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 26px 6px 10px; cursor: pointer; outline: none;
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 9px center;
+}
+.ix-select:focus { border-color: var(--accent); }
+.ix-select option { background: var(--surface); color: var(--text); }
+.ix-input {
+  font-family: inherit; font-size: 11px; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 9px; outline: none; min-width: 0;
+}
+.ix-input:focus { border-color: var(--accent); }
+.ix-input::placeholder { color: var(--muted); }
+.ix-link { color: var(--accent4-ink, var(--accent4)); text-decoration: none; cursor: pointer; background: none; border: none; font: inherit; padding: 0; }
+.ix-link:hover { text-decoration: underline; }
+.ix-link:focus-visible { outline: 2px solid var(--accent4); outline-offset: 2px; border-radius: 2px; }
+
+/* ── Responsive (demo targets 1440 and 1280) ───────────────────────── */
+@media (max-width: 1380px) {
+  .ix-page, .ix-detail-body { padding-left: 24px; padding-right: 24px; }
+  .ix-dh-inner { padding-left: 24px; padding-right: 24px; }
+  .ix-two-col { grid-template-columns: minmax(0, 1fr) 296px; }
+  .ix-catalogue { --ix-sb-w: 216px; }
+  .ix-catalogue-main { padding-left: 22px; padding-right: 22px; }
+  .ix-grid { grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); }
+}
+@media (max-width: 1100px) {
+  .ix-two-col { grid-template-columns: minmax(0, 1fr); }
+  .ix-rail.is-sticky { position: static; }
+  .ix-split-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 860px) {
+  .ix-catalogue { grid-template-columns: minmax(0, 1fr); }
+  .ix-catalogue::before { display: none; }
+  .ix-sidebar { position: static; height: auto; max-height: 50vh; border-right: none; border-bottom: 1px solid var(--border); }
+  .ix-split, .ix-split-3 { grid-template-columns: minmax(0, 1fr); }
+  .ix-dh { position: static; }
+  .ix-page, .ix-detail-body, .ix-dh-inner, .ix-catalogue-main { padding-left: 16px; padding-right: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ix-card, .ix-hbar-fill, .ix-nav-caret { transition: none; }
+  .ix-card:hover { transform: none; }
+}
+@media print {
+  .ix-dh, .ix-sidebar { position: static; height: auto; }
+  .ix-sidebar { display: none; }
+  .ix-catalogue { grid-template-columns: minmax(0, 1fr); }
+}

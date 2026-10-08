@@ -24,19 +24,19 @@ import uuid
 from dataclasses import dataclass
 
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.chemical_family import ChemicalFamily
 from app.models.editorial import (
-    BLOCK_TYPES, BODY_FORMATS, EditorialBlock, EditorialBlockVersion,
-    PROVENANCE_HUMAN_APPROVED, PROVENANCE_HUMAN_EDITED, PROVENANCE_STATES,
-    SUBJECT_TYPES,
+    BLOCK_TYPES, BODY_FORMATS, PUBLIC_FORMULA_BLOCK_TYPES, RETIRED_BLOCK_TYPES,
+    EditorialBlock, EditorialBlockVersion, PROVENANCE_HUMAN_APPROVED,
+    PROVENANCE_HUMAN_EDITED, PROVENANCE_STATES, SUBJECT_TYPES,
 )
 from app.models.formula_template import FormulaTemplate
 from app.models.index_data import CommodityIndex
-from app.models.subfamily import Subfamily
+from app.models.product_line import ProductLine
 from app.models.user import User
 
 
@@ -47,15 +47,35 @@ class SubjectLinks:
     """The convenience joins for a subject, where they resolve.
 
     All nullable by design: `subject_code` is the identity and these are
-    lookups. 53 of 423 `CURATED_CONTENT` keys have no platform template, and
-    only 14 of 23 drop family names and 4 of 33 `Family|Subfamily` pairs match a
-    taxonomy row today — a hard FK would drop exactly those rows and leave
-    nothing able to tell "never authored" from "dropped at import".
+    lookups. A subject with no row in our catalogue or taxonomy keeps its
+    block; a hard FK would drop exactly those rows and leave nothing able to
+    tell "never authored" from "dropped at import".
     """
     template_id: uuid.UUID | None = None
     commodity_id: int | None = None
     family_id: int | None = None
-    subfamily_id: int | None = None
+    product_line_id: int | None = None
+
+
+def line_for_key(db: Session, line_key: str) -> ProductLine | None:
+    """The product line a `Family|||Line` key names.
+
+    The current `line_key` first. Else a former key that exactly one current
+    (not retired) line claims, so a block or assertion written against a name
+    the source has since changed still finds its line. Same rule as the
+    loaders' line index.
+    """
+    row = db.query(ProductLine).filter(ProductLine.line_key == line_key).first()
+    if row is not None:
+        return row
+    claims = (
+        db.query(ProductLine)
+        .filter(ProductLine.former_keys.contains([line_key]),
+                ProductLine.retired_at.is_(None))
+        .limit(2)
+        .all()
+    )
+    return claims[0] if len(claims) == 1 else None
 
 
 def resolve_subject(db: Session, subject_type: str, subject_code: str) -> SubjectLinks:
@@ -81,29 +101,16 @@ def resolve_subject(db: Session, subject_type: str, subject_code: str) -> Subjec
         if row:
             links.commodity_id = row.id
     elif subject_type == "family":
-        row = (
-            db.query(ChemicalFamily)
-            .filter(ChemicalFamily.name == subject_code,
-                    ChemicalFamily.team_id.is_(None))
-            .first()
-        )
+        # Families are platform-only, unique by name.
+        row = db.query(ChemicalFamily).filter(ChemicalFamily.name == subject_code).first()
         if row:
             links.family_id = row.id
-    elif subject_type == "subfamily":
-        # `"<family>|<subfamily>"` — see `editorial.subfamily_subject_code`.
-        family_name, _, sub_name = subject_code.partition("|")
-        if sub_name:
-            row = (
-                db.query(Subfamily)
-                .join(ChemicalFamily, ChemicalFamily.id == Subfamily.family_id)
-                .filter(Subfamily.name == sub_name,
-                        ChemicalFamily.name == family_name,
-                        Subfamily.team_id.is_(None))
-                .first()
-            )
-            if row:
-                links.subfamily_id = row.id
-                links.family_id = row.family_id
+    elif subject_type == "product_line":
+        # Keyed by the line's `Family|||Line` key.
+        row = line_for_key(db, subject_code)
+        if row:
+            links.product_line_id = row.id
+            links.family_id = row.family_id
     return links
 
 
@@ -111,8 +118,9 @@ def validate_vocab(subject_type: str, block_type: str, body_format: str,
                    provenance: str | None = None) -> None:
     if subject_type not in SUBJECT_TYPES:
         raise HTTPException(422, f"Invalid subject_type. Allowed: {sorted(SUBJECT_TYPES)}")
-    if block_type not in BLOCK_TYPES:
-        raise HTTPException(422, f"Invalid block_type. Allowed: {sorted(BLOCK_TYPES)}")
+    if block_type not in BLOCK_TYPES or block_type in RETIRED_BLOCK_TYPES:
+        allowed = sorted(set(BLOCK_TYPES) - set(RETIRED_BLOCK_TYPES))
+        raise HTTPException(422, f"Invalid block_type. Allowed: {allowed}")
     if body_format not in BODY_FORMATS:
         raise HTTPException(422, f"Invalid body_format. Allowed: {sorted(BODY_FORMATS)}")
     if provenance is not None and provenance not in PROVENANCE_STATES:
@@ -128,8 +136,32 @@ def _check_body(body_format: str, body_text: str | None, body_json) -> None:
 
 # ── Visibility ───────────────────────────────────────────────────────────────
 
+def served_clause(block=EditorialBlock):
+    """A block the editorial API may serve (design §4.2), as a SQL clause.
+
+    * A **platform** block on a `formula` subject only when its type is in
+      `PUBLIC_FORMULA_BLOCK_TYPES`. The content loader writes no other type;
+      this is the second lock, so an older load's leftovers never reach a
+      reader.
+    * No block of a **retired** type (`suppliers`, `supply`, `demand`), team
+      blocks included: a team fork of such a block is a copy of the platform
+      text the loader no longer serves.
+
+    Every read path applies it: the block list, one block, its versions, one
+    version, and the card. A block it excludes answers 404, the same as one
+    that does not exist.
+    """
+    return and_(
+        block.block_type.notin_(RETIRED_BLOCK_TYPES),
+        or_(block.team_id.isnot(None),
+            block.subject_type != "formula",
+            block.block_type.in_(PUBLIC_FORMULA_BLOCK_TYPES)),
+    )
+
+
 def visible_block(db: Session, block_id: uuid.UUID, team_id: uuid.UUID) -> EditorialBlock:
-    """A block this team may read: its own, or platform.
+    """A block this team may read: its own, or platform, and one the API
+    serves at all (`served_clause`).
 
     RLS already hides another team's rows, but this also refuses a row that is
     visible yet not this team's to act on — so a 404 never doubles as a hint
@@ -139,7 +171,8 @@ def visible_block(db: Session, block_id: uuid.UUID, team_id: uuid.UUID) -> Edito
         db.query(EditorialBlock)
         .filter(EditorialBlock.id == block_id,
                 or_(EditorialBlock.team_id.is_(None),
-                    EditorialBlock.team_id == team_id))
+                    EditorialBlock.team_id == team_id),
+                served_clause())
         .first()
     )
     if block is None:
@@ -235,7 +268,7 @@ def create_block(
         template_id=links.template_id,
         commodity_id=links.commodity_id,
         family_id=links.family_id,
-        subfamily_id=links.subfamily_id,
+        product_line_id=links.product_line_id,
         body_format=body_format,
         provenance=provenance,
         internal_note=internal_note,
@@ -303,7 +336,7 @@ def fork_block(
         subject_type=block.subject_type, subject_code=block.subject_code,
         block_type=block.block_type, region=block.region,
         template_id=block.template_id, commodity_id=block.commodity_id,
-        family_id=block.family_id, subfamily_id=block.subfamily_id,
+        family_id=block.family_id, product_line_id=block.product_line_id,
         body_format=block.body_format,
         # A fork starts unapproved even from an approved original: the sign-off
         # was on the platform text, and the team is about to change it.
@@ -373,7 +406,8 @@ def read_card(
         .filter(EditorialBlock.subject_type == subject_type,
                 EditorialBlock.subject_code == subject_code,
                 or_(EditorialBlock.team_id.is_(None),
-                    EditorialBlock.team_id == team_id))
+                    EditorialBlock.team_id == team_id),
+                served_clause())
         .all()
     )
 

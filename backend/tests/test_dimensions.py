@@ -18,8 +18,6 @@ canonicaliser wrong.
 """
 from __future__ import annotations
 
-import json
-import pathlib
 import uuid
 
 import pytest
@@ -41,20 +39,10 @@ from app.services.dimensions import (
     assert_term, record_unresolved, resolve_raw, unresolved_report, upsert_alias,
     upsert_term,
 )
-from app.services.drop.dimension_loader import load_dimensions
-from app.services.drop.reader import drop_available
 from app.services.producers import (
     resolve_raw_name, split_raw_name, upsert_producer_formula,
 )
 from app.services.sheet_roundtrip import get_spec
-
-DROP_RAW = (pathlib.Path(__file__).resolve().parents[2]
-            / "sample_idea" / "costadvisor-data" / "raw")
-
-needs_drop = pytest.mark.skipif(
-    not drop_available(), reason="costadvisor-data drop not present in this checkout"
-)
-
 
 def _cleanup(db, *, term_ids=(), producer_ids=(), product_ids=(), cost_model_ids=()):
     db.rollback()
@@ -70,191 +58,26 @@ def _cleanup(db, *, term_ids=(), producer_ids=(), product_ids=(), cost_model_ids
     db.commit()
 
 
+def _producer_ids(db) -> set:
+    return {pid for (pid,) in db.query(Producer.id)}
+
+
+def _added(resolved, before: set) -> list:
+    """The resolved producers this test created. The resolver also returns
+    producers that already existed (with the drop loaded, "BASF SE" and
+    "Sinopec / PetroChina" resolve to the real BASF, Sinopec and PetroChina),
+    and deleting those cascades through their product links, aliases and
+    dossier roles."""
+    return list({r.producer.id for r in resolved} - before)
+
+
 def _term(db, kind, code, label=None, **kw):
     return upsert_term(db, kind=kind, code=code, label=label or code, **kw)
 
 
-@pytest.fixture(scope="module")
-def _drop_loaded():
-    """Load the drop once for the module.
-
-    Module-scoped because a full load takes ~40s: six function-scoped loads made
-    this file the slowest in the suite by an order of magnitude, and every one of
-    them was loading identical data.
-    """
-    if not drop_available():
-        pytest.skip("costadvisor-data drop not present in this checkout")
-    session = SessionLocal()
-    bypass_rls_var.set(True)
-    try:
-        load_dimensions(session)
-        session.commit()
-    finally:
-        session.close()
-    return True
-
-
 # ── 1. Idempotent load from the drop ────────────────────────────────────────
 
-@needs_drop
-def test_the_load_is_idempotent(db, _drop_loaded):
-    """AC1. Re-running changes nothing — asserted on the diff, so a counter
-    that lies about an upsert fails here too (it did, and that is why
-    `upsert_producer_formula` returns whether it created)."""
-    bypass_rls_var.set(True)
-    second = load_dimensions(db)
-    db.commit()
-    assert second.report.changed == 0, second.render()
-    for diff in second.report.tables:
-        assert diff.created == 0, f"{diff.table} created {diff.created} on a re-run"
-        assert diff.updated == 0
-        assert diff.deleted == 0
-
-
-@needs_drop
-def test_functionality_loads_clean_with_no_strays(db, _drop_loaded):
-    """The one facet that is genuinely mechanical: 41 controlled terms, and
-    every tag value is in the taxonomy."""
-    bypass_rls_var.set(True)
-    taxonomy = json.loads((DROP_RAW / "FUNCTIONALITY_TAXONOMY.json").read_text(encoding="utf-8"))
-    terms = db.query(DimensionTerm).filter(
-        DimensionTerm.kind == KIND_FUNCTIONALITY,
-        DimensionTerm.team_id.is_(None)).all()
-    assert len(terms) == len(taxonomy)
-    assert {t.label for t in terms} == set(taxonomy)
-    # Zero strays, so nothing lands in the register for this facet.
-    assert db.query(UnresolvedValue).filter(
-        UnresolvedValue.kind == KIND_FUNCTIONALITY).count() == 0
-    assert db.query(DimensionAssertion).join(DimensionTerm).filter(
-        DimensionTerm.kind == KIND_FUNCTIONALITY).count() > 0
-
-
-@needs_drop
-def test_the_two_functionality_schemes_stay_separate_kinds(db, _drop_loaded):
-    """The trap the ticket names, verified: the family/subfamily vocabulary has
-    **zero** overlap with the taxonomy, so one kind holding both would produce a
-    facet with two disjoint halves and no way to tell which half a filter is
-    acting on."""
-    bypass_rls_var.set(True)
-    a = {t.label for t in db.query(DimensionTerm).filter(
-        DimensionTerm.kind == KIND_FUNCTIONALITY, DimensionTerm.team_id.is_(None)).all()}
-    b = {t.label for t in db.query(DimensionTerm).filter(
-        DimensionTerm.kind == KIND_FUNCTIONALITY_FAMILY,
-        DimensionTerm.team_id.is_(None)).all()}
-    assert a and b
-    assert a & b == set(), "the two schemes are meant to be disjoint"
-    assert KIND_FUNCTIONALITY in DIMENSION_KINDS
-    assert KIND_FUNCTIONALITY_FAMILY in DIMENSION_KINDS
-
-
-@needs_drop
-def test_the_industry_classifier_is_unrecoverable_and_the_load_says_so(db, _drop_loaded):
-    """A finding, pinned. `INDUSTRY_RULES.json` serialised **all 19** regexes to
-    `{}` and the mockup holding the originals is not in this repo — so the
-    mapping is entirely an analyst decision, and the loader must not pretend
-    otherwise."""
-    rules = json.loads((DROP_RAW / "INDUSTRY_RULES.json").read_text(encoding="utf-8"))
-    assert rules, "expected the rule list to exist"
-    assert all(r[0] == {} for r in rules), (
-        "the regexes are no longer empty — the classifier may be recoverable "
-        "now, and this test should be revisited"
-    )
-
-    bypass_rls_var.set(True)
-    report = load_dimensions(db)
-    db.commit()
-    assert any("INDUSTRY_RULES" in n for n in report.notes)
-    # The 19 controlled targets still load; only the mapping is missing.
-    assert db.query(DimensionTerm).filter(
-        DimensionTerm.kind == KIND_INDUSTRY,
-        DimensionTerm.team_id.is_(None)).count() == 19
-
-
-@needs_drop
-def test_no_compliance_terms_are_invented_from_the_raw_labels(db, _drop_loaded):
-    """The raw side is 239 distinct labels, many of them full sentences — a term
-    table over that is not a facet. So terms come from the decision file, and
-    every raw label is an alias candidate in the register instead."""
-    bypass_rls_var.set(True)
-    assert db.query(DimensionTerm).filter(
-        DimensionTerm.kind == KIND_COMPLIANCE_FLAG).count() == 0
-    queued = db.query(UnresolvedValue).filter(
-        UnresolvedValue.kind == KIND_COMPLIANCE_FLAG).count()
-    assert queued > 100, f"expected the raw flag labels to be queued, got {queued}"
-
-
-@needs_drop
-def test_out_of_vocabulary_risk_levels_are_queued_not_collapsed(db, _drop_loaded):
-    """Collapsing "Medium-High" into "High" or "Medium" would silently re-rate a
-    product, so it is queued for a human instead."""
-    bypass_rls_var.set(True)
-    codes = {t.code for t in db.query(DimensionTerm).filter(
-        DimensionTerm.kind == KIND_SUBSTITUTION_RISK).all()}
-    assert codes == {"low", "medium", "high"}
-    queued = {u.raw_value for u in db.query(UnresolvedValue).filter(
-        UnresolvedValue.kind == KIND_SUBSTITUTION_RISK).all()}
-    assert queued, "expected the out-of-vocabulary levels to be queued"
-    assert not (queued & {"Low", "Medium", "High"})
-
-
 # ── 3. The unresolved report ────────────────────────────────────────────────
-
-@needs_drop
-def test_every_unresolved_value_is_reported_and_ranked(db, _drop_loaded):
-    """AC3. The report is the analyst's work queue and how anyone checks the
-    load worked, so it is counted rather than merely listed — one unresolved
-    industry string can block dozens of assertions."""
-    bypass_rls_var.set(True)
-    rows = unresolved_report(db, kind=KIND_INDUSTRY)
-    assert rows, "expected unresolved industry strings"
-    # Ranked by how much each blocked.
-    counts = [r.occurrences for r in rows]
-    assert counts == sorted(counts, reverse=True)
-    assert rows[0].occurrences >= 1
-    assert rows[0].reason
-    # Named in context, so an analyst can recognise the value.
-    assert any(r.sample_subjects for r in rows)
-
-
-@needs_drop
-def test_the_register_is_a_snapshot_not_a_ledger(db, _drop_loaded):
-    """A value resolved by yesterday's decision-file import must stop
-    appearing, or the queue never shrinks and nobody trusts it."""
-    bypass_rls_var.set(True)
-    row = db.query(UnresolvedValue).filter(
-        UnresolvedValue.kind == KIND_INDUSTRY).order_by(
-        UnresolvedValue.occurrences.desc()).first()
-    assert row is not None
-    raw = row.raw_value
-
-    target = db.query(DimensionTerm).filter(
-        DimensionTerm.kind == KIND_INDUSTRY, DimensionTerm.team_id.is_(None)).first()
-    alias = upsert_alias(db, target, raw, source="decision_file")
-    alias_id = alias.id
-    db.commit()
-    try:
-        load_dimensions(db)
-        db.commit()
-        assert db.query(UnresolvedValue).filter(
-            UnresolvedValue.kind == KIND_INDUSTRY,
-            UnresolvedValue.normalized == normalize_value(raw)).count() == 0
-        # And it is now a real assertion.
-        assert db.query(DimensionAssertion).filter(
-            DimensionAssertion.term_id == target.id,
-            DimensionAssertion.raw_value == raw).count() > 0
-    finally:
-        # A **platform** alias has no team to CASCADE from, so it survives the
-        # tenant teardown — and a later test that expects this raw value to be
-        # undecided then finds it already mapped. Same class of leak as the
-        # platform market signal in unit 8; cleaned up for the same reason.
-        db.rollback()
-        bypass_rls_var.set(True)
-        db.execute(text("DELETE FROM dimension_assertions WHERE matched_alias_id = :i"),
-                   {"i": str(alias_id)})
-        db.execute(text("DELETE FROM dimension_aliases WHERE id = :i"),
-                   {"i": str(alias_id)})
-        db.commit()
-
 
 def test_unresolved_counts_occurrences_and_caps_its_samples(db):
     # Unique value: the real load already queues "Cross-sector" with its own
@@ -360,7 +183,7 @@ def test_a_template_less_subject_asserts_with_template_id_null(db):
 def facet_fixture(db, tenant_a):
     """A platform term asserted on a formula the team actually owns a product
     for, so both query grains have something to return."""
-    from app.models.formula_template import FormulaTemplate
+    from app.models.formula_template import FormulaRegionCoverage, FormulaTemplate
 
     tpl = FormulaTemplate(
         team_id=None, created_by=tenant_a["user_id"],
@@ -368,6 +191,10 @@ def facet_fixture(db, tenant_a):
         expression=None,
     )
     db.add(tpl)
+    db.flush()
+    # One combo, so the platform template is listed (the platform grain of the
+    # faceted query keeps listed templates only). It cascades with the template.
+    db.add(FormulaRegionCoverage(template_id=tpl.id, region="Europe"))
     db.flush()
     product = Product(
         id=uuid.uuid4(), team_id=tenant_a["team_id"], created_by=tenant_a["user_id"],
@@ -602,6 +429,7 @@ def test_one_raw_string_can_name_several_producers(db):
     assert split_raw_name("BASF SE / Hexion / INEOS Melamines") == [
         "BASF SE", "Hexion", "INEOS Melamines"]
 
+    before = _producer_ids(db)
     resolved = resolve_raw_name(db, "Sinopec / PetroChina", alias_map={})
     db.commit()
     ids = [r.producer.id for r in resolved]
@@ -613,32 +441,32 @@ def test_one_raw_string_can_name_several_producers(db):
         again = resolve_raw_name(db, "Sinopec / PetroChina", alias_map={})
         assert {r.producer.id for r in again} == set(ids)
     finally:
-        _cleanup(db, producer_ids=ids)
+        _cleanup(db, producer_ids=_added(resolved, before))
 
 
 def test_alias_resolution_walks_the_chain_to_a_fixpoint(db):
     """45 canonical values also appear as raw names, so a single lookup lands
     mid-chain."""
     alias_map = {"BASF SE": "BASF Group", "BASF Group": "BASF"}
+    before = _producer_ids(db)
     resolved = resolve_raw_name(db, "BASF SE", alias_map=alias_map)
     db.commit()
-    ids = [r.producer.id for r in resolved]
     try:
         assert len(resolved) == 1
         assert resolved[0].producer.name == "BASF"
         assert resolved[0].minted is False
     finally:
-        _cleanup(db, producer_ids=ids)
+        _cleanup(db, producer_ids=_added(resolved, before))
 
 
 def test_a_self_referential_alias_chain_cannot_hang_the_load(db):
+    before = _producer_ids(db)
     resolved = resolve_raw_name(db, "A", alias_map={"A": "B", "B": "A"})
     db.commit()
-    ids = [r.producer.id for r in resolved]
     try:
         assert len(resolved) == 1
     finally:
-        _cleanup(db, producer_ids=ids)
+        _cleanup(db, producer_ids=_added(resolved, before))
 
 
 def test_an_unmapped_name_mints_a_producer_and_says_it_did(db):

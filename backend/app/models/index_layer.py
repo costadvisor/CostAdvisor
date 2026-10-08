@@ -87,7 +87,8 @@ class TypeCode(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
-    label: Mapped[str | None] = mapped_column(String(128))
+    # Widened for the September drop: labels run to 155 characters.
+    label: Mapped[str | None] = mapped_column(String(255))
 
     resolves_to_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("commodity_indexes.id"), nullable=True
@@ -171,15 +172,18 @@ class IndexCard(Base):
     unit: Mapped[str | None] = mapped_column(String(32))
     incoterm: Mapped[str | None] = mapped_column(String(8))
     named_place: Mapped[str | None] = mapped_column(String(128))
-    category: Mapped[str | None] = mapped_column(String(64))
-    access: Mapped[str | None] = mapped_column(String(32))
+    # Widened for the September drop: card categories run to 137 characters
+    # and access notes to 138.
+    category: Mapped[str | None] = mapped_column(String(255))
+    access: Mapped[str | None] = mapped_column(String(255))
     frequency: Mapped[str | None] = mapped_column(String(64))
 
     # Not unique per slug — 18 slugs carry several defaults (one has four), so
     # a partial unique index here would reject the data as shipped.
     is_default_region: Mapped[bool | None] = mapped_column(Boolean)
 
-    agency: Mapped[str | None] = mapped_column(String(255))
+    # Text: the September drop's agency strings run to 290 characters.
+    agency: Mapped[str | None] = mapped_column(Text)
     source_freq: Mapped[str | None] = mapped_column(String(64))
     sourcing_note: Mapped[str | None] = mapped_column(Text)
     source_note: Mapped[str | None] = mapped_column(Text)

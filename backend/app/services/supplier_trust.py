@@ -2,8 +2,10 @@
 
 Scores a supplier's quoting behaviour against the should-cost line —
 consistency, direction of drift, implied margin — at (supplier, product)
-grain, falling back to (supplier, subfamily) pooling when a single product
-doesn't have enough priced history on its own. Deterministic, no ML,
+grain, falling back to (supplier, product line) pooling when a single product
+doesn't have enough priced history on its own. A product's line is its
+effective line (`services/effective_lines.py`): its catalogue template's line,
+else the template behind one of its cost models, else its manual line. Deterministic, no ML,
 consistent with this codebase's costing-engine philosophy of verifiable,
 reproducible output.
 
@@ -26,6 +28,10 @@ Three cases where the raw supplier row stays the unit, each reported as
   genuinely cannot be attributed to one of them;
 * the team has only one supplier row for that company anyway, so there is
   nothing to pool and claiming canonicalisation would overstate what happened.
+
+A **bucket** producer (`Producer.is_bucket`: "various Chinese makers" and the
+like) is not a company, so it never canonicalises: two supplier rows that
+both resolve to a bucket are not the same supplier.
 """
 from __future__ import annotations
 
@@ -38,10 +44,10 @@ from sqlalchemy.orm import Session
 
 from app.models.cost_model import CostModel
 from app.models.price_data import ActualPrice
-from app.models.product import Product
 from app.models.supplier import Supplier
 from app.models.supplier_trust import SupplierTrustScore
 from app.services.costing_engine import should_cost_for_period
+from app.services.effective_lines import effective_lines
 from app.services.index_projection import _fit_ols
 from app.services.producers import resolve_raw_name
 
@@ -73,7 +79,8 @@ def team_producer_map(db: Session, team_id: uuid.UUID) -> dict[int, uuid.UUID]:
         if not name:
             continue
         resolved = resolve_raw_name(db, name, create=False)
-        if len(resolved) == 1:
+        # A bucket names a group of unnamed makers, not one company.
+        if len(resolved) == 1 and not resolved[0].producer.is_bucket:
             out[supplier_id] = resolved[0].producer.id
     return out
 
@@ -170,7 +177,7 @@ def compute_supplier_trust_scores(
     supplier_id: int,
     producer_map: dict[int, uuid.UUID] | None = None,
 ) -> list[SupplierTrustScore]:
-    """Computes and upserts every (product|subfamily)-grain score for one
+    """Computes and upserts every (product|product_line)-grain score for one
     supplier. Never mutates row identity across recomputes — matched by
     (supplier_id, grain, grain_key), so re-running updates in place.
 
@@ -207,11 +214,9 @@ def compute_supplier_trust_scores(
         by_product[m.product_id].append(m)
 
     product_history = {pid: _collect_gap_history(db, ms) for pid, ms in by_product.items()}
-    product_subfamily = {
-        pid: subfamily_id
-        for pid, subfamily_id in db.query(Product.id, Product.subfamily_id)
-        .filter(Product.id.in_(list(by_product.keys())))
-        .all()
+    product_line = {
+        pid: line.product_line_id
+        for pid, line in effective_lines(db, by_product.keys()).items()
     }
 
     entries: list[tuple[str, uuid.UUID | None, int | None, list]] = []
@@ -223,16 +228,16 @@ def compute_supplier_trust_scores(
             handled.add(pid)
 
     remaining = {pid: h for pid, h in product_history.items() if pid not in handled}
-    by_subfamily: dict[int, list[uuid.UUID]] = defaultdict(list)
+    by_line: dict[int, list[uuid.UUID]] = defaultdict(list)
     for pid in remaining:
-        sub_id = product_subfamily.get(pid)
-        if sub_id is not None:
-            by_subfamily[sub_id].append(pid)
+        line_id = product_line.get(pid)
+        if line_id is not None:
+            by_line[line_id].append(pid)
 
-    for sub_id, pids in by_subfamily.items():
+    for line_id, pids in by_line.items():
         pooled = sorted(h for pid in pids for h in remaining[pid])
         if len(pooled) >= MIN_QUARTERS:
-            entries.append(("subfamily", None, sub_id, pooled))
+            entries.append(("product_line", None, line_id, pooled))
             handled.update(pids)
 
     for pid, history in product_history.items():
@@ -240,8 +245,8 @@ def compute_supplier_trust_scores(
             entries.append(("product", pid, None, history))
 
     rows = []
-    for grain, product_id, subfamily_id, history in entries:
-        grain_key = str(product_id) if grain == "product" else str(subfamily_id)
+    for grain, product_id, line_id, history in entries:
+        grain_key = str(product_id) if grain == "product" else str(line_id)
         sufficient = len(history) >= MIN_QUARTERS
         payload = _score_from_history(history) if sufficient else _insufficient_entry(len(history))
 
@@ -257,7 +262,7 @@ def compute_supplier_trust_scores(
         if not row:
             row = SupplierTrustScore(
                 team_id=team_id, supplier_id=supplier_id, grain=grain,
-                product_id=product_id, subfamily_id=subfamily_id, grain_key=grain_key,
+                product_id=product_id, product_line_id=line_id, grain_key=grain_key,
             )
             db.add(row)
 
