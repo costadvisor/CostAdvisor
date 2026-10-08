@@ -74,7 +74,7 @@ def _line(label, weight, cid=None, category="feedstock", tag=None):
 # ── Formatting the narratives depend on ──────────────────────────────────────
 
 @pytest.mark.parametrize("x,expected", [
-    (0.25, "0.3"), (-0.25, "-0.3"), (1.45, "1.4"), (99.1982, "99.2"), (-0.04, "0.0"),
+    (0.25, "0.3"), (-0.25, "-0.3"), (1.45, "1.4"), (42.1666, "42.2"), (-0.04, "0.0"),
     (13.0, "13.0"), (2.35, "2.4"),
 ])
 def test_js_fixed_rounds_like_javascript(x, expected):

@@ -723,6 +723,19 @@ def landing(ctx: TeamContext) -> dict:
 
 # ── Category detail ─────────────────────────────────────────────────────────
 
+def playbook_unpublished(db: Session, playbook: Playbook) -> bool:
+    """A playbook whose report was written for a product line that is not
+    published (every report join is off the current axis). Its title and its
+    report name that line, which must never be shown (design §4.1, Laurent's
+    frozen instruction), so Strategy does not serve it - the same rule
+    Intelligence applies to the report itself (`intel_reference.report_unpublished`)."""
+    from app.services.intel_reference import get_snapshot, report_unpublished
+    snap = get_snapshot(db)
+    if snap is None:  # no catalogue snapshot (only in tests that stub it out)
+        return False
+    return report_unpublished(snap, playbook.report_slug or playbook.slug)
+
+
 def report_lines(db: Session, slug: str) -> list[dict]:
     """The product lines a report (and so its playbook) is written for: its
     `market_report_lines` rows, resolved to current lines. A row whose key is

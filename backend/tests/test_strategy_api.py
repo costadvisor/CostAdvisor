@@ -46,8 +46,8 @@ from app.models.price_data import ActualPrice
 from app.models.product import Product
 from app.models.product_line import ProductLine
 from app.models.strategy import (
-    GEMSTONES, LeverScore, PlaybookLever, PlaybookObjective, StrategyAction, StrategyRecord,
-    TeamObjective,
+    GEMSTONES, LeverScore, Playbook, PlaybookLever, PlaybookObjective, StrategyAction,
+    StrategyRecord, TeamObjective,
 )
 from app.models.supplier import Supplier
 from app.models.team import TeamMembership
@@ -1031,9 +1031,13 @@ def test_a_report_key_that_is_no_current_line_is_never_served(tenant_a, client_a
     the stored key nor its tail is a line there, and the stored key appears
     nowhere in either payload. (The report's and playbook's own titles are
     theirs, shown as authored.)"""
-    joins = _unpublished_joins()
+    # Reports joined ONLY to unpublished keys are not served at all (see
+    # test_playbooks_of_unpublished_lines_are_not_served); this covers the
+    # reports that also serve published lines.
+    joins = {slug: keys for slug, keys in _unpublished_joins().items()
+             if _report_line_keys(slug) - {None}}
     if not joins:
-        pytest.skip("no report in this drop is joined to a key that is no current line")
+        pytest.skip("no report in this drop is joined to both published and unpublished keys")
     c = client_as(tenant_a)
     team = tenant_a["team_id"]
     for slug, keys in sorted(joins.items()):
@@ -1104,3 +1108,29 @@ def test_the_intelligence_caveat_is_used_only_when_it_names_no_unpublished_line(
     assert all(ln["line_key"] != key and ln["name"] != expect.line_tail(key)
                for ln in caveat["lines"])
     assert key not in json.dumps(caveat, ensure_ascii=False)
+
+
+def test_playbooks_of_unpublished_lines_are_not_served(db, tenant_a, client_as):
+    """A playbook whose report was written for a deliberately unnamed line is
+    not served by any Strategy endpoint, like the report on Intelligence, and
+    no Strategy payload names such a line (design §4.1)."""
+    from app.services.intel_reference import get_snapshot, report_unpublished
+
+    snap = get_snapshot(db)
+    hidden = [pb.slug for pb in db.query(Playbook).all()
+              if report_unpublished(snap, pb.report_slug or pb.slug)]
+    assert hidden, "the drop has playbooks on unpublished lines; none were found"
+    c = client_as(tenant_a)
+    team = tenant_a["team_id"]
+    for slug in hidden:
+        for suffix in ("", "/analysis", "/levers", "/spend", "/actions"):
+            r = c.get(f"/api/strategy/categories/{slug}{suffix}", params={"team_id": str(team)})
+            assert r.status_code == 404, (slug, suffix, r.status_code)
+        r = c.post(f"/api/strategy/categories/{slug}/adopt", params={"team_id": str(team)})
+        assert r.status_code == 404, (slug, "adopt", r.status_code)
+    landing = c.get("/api/strategy/categories", params={"team_id": str(team)}).text
+    for name in expect.unpublished_line_names():
+        assert name not in landing
+    published = next(pb.slug for pb in db.query(Playbook).all() if pb.slug not in hidden)
+    assert c.get(f"/api/strategy/categories/{published}",
+                 params={"team_id": str(team)}).status_code == 200

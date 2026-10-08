@@ -108,7 +108,7 @@ def _playbook(db: Session, slug: str) -> Playbook:
     if "\x00" in slug:
         raise HTTPException(status_code=404, detail="Strategy category not found")
     pb = db.query(Playbook).filter(Playbook.slug == slug).first()
-    if pb is None:
+    if pb is None or svc.playbook_unpublished(db, pb):
         raise HTTPException(status_code=404, detail="Strategy category not found")
     return pb
 
