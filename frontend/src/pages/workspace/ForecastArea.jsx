@@ -4,6 +4,8 @@ import { useAuth } from '../../AuthContext';
 import { useToast } from '../../components/Toast';
 import { qLabel } from '../../utils/quarters';
 import exportCsv from '../../utils/exportCsv';
+import { fmtMoney, EXPOSURE_NOTE } from '../../utils/currency';
+import DemoDataNote from '../../components/DemoDataNote';
 import { MultiLineChart } from './wsCharts';
 
 /* Forecast area — real history AND a real forward projection.
@@ -167,11 +169,18 @@ export default function ForecastArea() {
   const gaps = models.map(m => m.gap_pct).filter(v => v != null);
   const avgGap = gaps.length ? gaps.reduce((a, b) => a + Math.abs(b), 0) / gaps.length : null;
   const totalExposure = models.reduce((a, m) => a + Math.abs(m.cumulative_impact || 0), 0);
+  // The sum is not FX-converted, so it only carries a symbol when every model
+  // is priced in one currency.
+  const currencies = [...new Set(models.map(m => m.currency).filter(Boolean))];
+  const exposureLabel = !totalExposure ? '—'
+    : currencies.length === 1 ? fmtMoney(totalExposure, currencies[0], { decimals: 0 })
+      : fmtMoney(totalExposure, null, { decimals: 0 });
   const stats = [
     { lbl: 'Products tracked', val: String(models.length), color: 'var(--text)' },
     { lbl: 'Flagged (drift / index)', val: String(flagged), color: flagged ? 'var(--accent3)' : 'var(--text)' },
     { lbl: 'Avg |gap|', val: avgGap != null ? `${avgGap.toFixed(1)}%` : '—', color: 'var(--accent)' },
-    { lbl: 'Total exposure', val: totalExposure ? Math.round(totalExposure).toLocaleString() : '—', color: 'var(--accent2)' },
+    { lbl: currencies.length > 1 ? 'Total exposure (mixed currencies)' : 'Total exposure', val: exposureLabel, color: 'var(--accent2)',
+      sub: "Sum over cost models of today's gap × all volume on record", title: EXPOSURE_NOTE },
   ];
 
   const doExport = () => exportCsv(
@@ -208,7 +217,10 @@ export default function ForecastArea() {
     <div className="ca-page ca-fade-in">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
         <div style={{ minWidth: 0 }}>
-          <div className="ca-h1">Cost forecast</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div className="ca-h1">Cost forecast</div>
+            <DemoDataNote />
+          </div>
           <p className="ca-subtitle">
             Where the indices under your portfolio are heading, from stored projection vintages — and where your
             should-cost stands today.
@@ -226,9 +238,10 @@ export default function ForecastArea() {
 
       <div style={{ display: 'flex', gap: 16, margin: '16px 0', flexWrap: 'wrap' }}>
         {stats.map(s => (
-          <div key={s.lbl} className="ca-card ca-metric" style={{ flex: '1 1 180px' }}>
+          <div key={s.lbl} className="ca-card ca-metric" style={{ flex: '1 1 180px' }} title={s.title}>
             <div className="ca-metric-val" style={{ color: s.color }}>{s.val}</div>
             <div className="ca-metric-lbl">{s.lbl}</div>
+            {s.sub && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.5 }}>{s.sub}</div>}
           </div>
         ))}
       </div>
@@ -375,9 +388,9 @@ export default function ForecastArea() {
                     <td style={{ fontWeight: 600 }}>{m.product_name}</td>
                     <td>{m.supplier_name || '—'}</td>
                     <td>{m.region}</td>
-                    <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{m.current_should_cost?.toLocaleString()}</td>
-                    <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{m.latest_actual_price != null ? m.latest_actual_price.toLocaleString() : '—'}</td>
-                    <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace", color: m.gap_pct == null ? 'var(--muted)' : m.gap_pct > 0 ? 'var(--accent2)' : 'var(--accent)' }}>{m.gap_pct != null ? `${m.gap_pct > 0 ? '+' : ''}${m.gap_pct}%` : '—'}</td>
+                    <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{m.current_should_cost != null ? fmtMoney(m.current_should_cost, m.currency) : '—'}</td>
+                    <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{m.latest_actual_price != null ? fmtMoney(m.latest_actual_price, m.currency) : '—'}</td>
+                    <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace", color: m.gap_pct == null ? 'var(--muted)' : m.gap_pct > 0 ? 'var(--accent2)' : 'var(--accent)' }}>{m.gap_pct != null ? `${m.gap_pct > 0 ? '+' : ''}${m.gap_pct.toFixed(1)}%` : '—'}</td>
                   </tr>
                 ))}
               </tbody>

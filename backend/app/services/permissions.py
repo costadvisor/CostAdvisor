@@ -25,8 +25,11 @@ from app.models.user import User
 MEMBER_READABLE_CATEGORIES = frozenset({
     "briefs", "content", "cost_models", "costing", "dimensions", "evolution",
     "formulas", "fx_rates", "indexes", "prices", "products", "scenarios",
-    "squeeze", "suppliers", "volumes",
+    "squeeze", "strategy", "suppliers", "volumes",
 })
+
+# `strategy` is listed so plain members can read the Strategy pages
+# (`strategy.view`); without it the fallback bounced them off Strategy.
 
 # Deliberately absent, so the reasoning is here rather than in a commit message:
 #   contracts — Unit 6 (MON-1) grants it to Owner/Admin and the Dream plan and

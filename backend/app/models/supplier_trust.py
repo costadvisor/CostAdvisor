@@ -26,14 +26,15 @@ class SupplierTrustScore(Base):
     supplier_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("suppliers.id", ondelete="CASCADE"), nullable=False
     )
-    grain: Mapped[str] = mapped_column(String(16), nullable=False)  # "product" | "subfamily"
+    grain: Mapped[str] = mapped_column(String(16), nullable=False)  # "product" | "product_line"
     product_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("products.id", ondelete="SET NULL"), nullable=True
     )
-    subfamily_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("subfamilies.id", ondelete="SET NULL"), nullable=True
+    # The product's effective line (services/effective_lines.py).
+    product_line_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("product_lines.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    # str(product_id) or str(subfamily_id) — always non-null, unlike the two
+    # str(product_id) or str(product_line_id) — always non-null, unlike the two
     # columns above. Postgres treats every NULL as distinct in a unique
     # constraint, which would silently defeat upsert-in-place on recompute
     # if the constraint were keyed on the nullable FK columns directly.
@@ -62,4 +63,4 @@ class SupplierTrustScore(Base):
 
     supplier = relationship("Supplier")
     product = relationship("Product")
-    subfamily = relationship("Subfamily")
+    product_line = relationship("ProductLine")

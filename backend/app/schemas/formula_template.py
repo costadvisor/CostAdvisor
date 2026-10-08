@@ -29,6 +29,25 @@ class FormulaTemplateForkRequest(BaseModel):
     team_id: uuid.UUID
 
 
+class TaxonomyRef(BaseModel):
+    """A family, sub-family or product line, by id and display name."""
+    id: int
+    name: str | None = None
+
+
+def _resolved(name: str):
+    """A field the router fills after validation. Its validation alias names
+    no ORM attribute, so `model_validate(orm_row)` never reads (and lazy-loads)
+    the relationship of the same name; it serialises under the field name."""
+    return Field(default=None, validation_alias=f"resolved_{name}")
+
+
+# The only `catalog_meta` keys a team screen reads (design §4.2). The column
+# holds more structure (per-combo recipes, variant overrides, the pricing-gap
+# codes) for the Intelligence services; none of it is served here.
+SERVED_CATALOG_META_KEYS = ("coverage_tier", "region_count", "regions", "data_confidence")
+
+
 class FormulaTemplateOut(BaseModel):
     id: uuid.UUID
     team_id: uuid.UUID | None
@@ -38,10 +57,24 @@ class FormulaTemplateOut(BaseModel):
     name: str
     code: str | None = None
     family_id: int | None = None
-    subfamily_id: int | None = None
+    product_line_id: int | None = None
     family_code: str | None = None
     family_name: str | None = None
-    subfamily_name: str | None = None
+    # The supply taxonomy, resolved on read: the template's line (a team fork
+    # without one of its own takes its origin's), the line's sub-family, and
+    # the family. All null-safe: an off-axis or card-only template has a family
+    # or nothing, and reads "Product line not yet published".
+    family: TaxonomyRef | None = _resolved("family")
+    subfamily: TaxonomyRef | None = _resolved("subfamily")
+    product_line: TaxonomyRef | None = _resolved("product_line")
+    # The catalogue card's kind and supply status (design §2.3). A team's own
+    # template is a `product` with no status.
+    card_kind: str | None = None
+    supply_status: str | None = None
+    # {code, label, tone, description}; the badge never carries a number.
+    status: dict | None = _resolved("status")
+    # Pointer and duplicate cards name the card that replaces them.
+    redirect_to: str | None = None
     catalog_meta: dict | None = None
     # SCRUM-78 rollup across this template's coverage rows. The grade is stored
     # per (template, region) because trust is a property of a *combo*, not of a
@@ -57,6 +90,15 @@ class FormulaTemplateOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("catalog_meta")
+    @classmethod
+    def _served_catalog_meta(cls, value):
+        """Keep the four keys team screens read; drop every other key, on the
+        list and on every by-id read alike."""
+        if not isinstance(value, dict):
+            return None
+        return {k: value[k] for k in SERVED_CATALOG_META_KEYS if k in value}
 
 
 # ── Weighted components (Scrum 58) ────────────────────────────────────────────
@@ -164,6 +206,9 @@ class FormulaCoverageOut(BaseModel):
     reviewed_by_name: str | None = None
     reviewed_at: datetime | None = None
     review_metadata: dict | None = None
+    # Set when the source no longer prices this combo. The row is kept (team
+    # data may point at it) but it leaves every list.
+    withdrawn_at: datetime | None = None
     # ── The derived trust state (SCRUM-78) ──────────────────────────────────
     trust_grade: str | None = None
     # Names the type-codes and lines that pulled the grade down — an ungraded

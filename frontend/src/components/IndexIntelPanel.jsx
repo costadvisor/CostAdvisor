@@ -13,8 +13,8 @@ import api from '../api';
  *  - A volatility percentile always names the calibration behind it. The ladder
  *    is regenerated, not imported, so "90th percentile" means nothing without
  *    which ladder said so and when.
- *  - A producer share of zero means *not disclosed* on 99% of the source rows,
- *    so `share_disclosed: false` renders "not disclosed" and never "0%".
+ *  - No producer share is shown (house rule 6: a zero means not disclosed and
+ *    a non-zero share is unsourced); the API serves none.
  *
  * A missing profile or dossier is a 404 carrying a reason. The reason is what
  * gets rendered — a flat curve would present "not enough history to tell" as
@@ -306,7 +306,6 @@ function Producers({ roles }) {
           <tr>
             <th>Producer</th>
             <th style={{ width: 110 }}>Role</th>
-            <th style={{ width: 110 }}>Share</th>
             <th style={{ width: 120 }}>Location</th>
           </tr>
         </thead>
@@ -317,14 +316,6 @@ function Producers({ roles }) {
                 {r.producer_name || r.raw_name || '—'}
               </td>
               <td style={{ color: 'var(--text-secondary)' }}>{r.role}</td>
-              {/* A share of 0 means "not disclosed" on virtually every source
-                  row, so publishing "0%" would state something the data never
-                  said. */}
-              <td style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                {r.share_disclosed && r.share_pct !== null && r.share_pct !== undefined
-                  ? `${r.share_pct}%`
-                  : <span style={{ color: 'var(--muted)', fontFamily: 'inherit' }}>not disclosed</span>}
-              </td>
               <td style={{ color: 'var(--text-secondary)' }}>{r.location || '—'}</td>
             </tr>
           ))}

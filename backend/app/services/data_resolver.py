@@ -3,6 +3,8 @@ Data resolver: implements the override hierarchy.
 Priority: team override > scraped value > fallback.
 """
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from types import SimpleNamespace
 from sqlalchemy.orm import Session
@@ -13,7 +15,7 @@ from app.models.index_layer import IndexCard, IndexMonthlyValue
 from app.models.user import User
 from app.schemas.index_data import IndexValueOut
 from app.services.scraper import SCRAPER_REGISTRY, SCRAPER_SOURCE_LABELS
-from app.services.drop.catalog_loader import REGION_MAP
+from app.services.drop.common import REGION_MAP
 
 
 def _override_source_label(override: IndexOverride) -> str:
@@ -500,6 +502,64 @@ def get_forward_index_value(
     }
 
 
+# ── Request-scoped memo for the single-value lookup ──────────────────────────
+#
+# A portfolio view asks for the same (commodity, region, quarter) value over and
+# over: every cost model on the same recipe, every period of an evolution (the
+# base-quarter value once per period and per line), the should-cost total and
+# its per-line breakdown. Measured on the demo buyer, /portfolio/priority-matrix
+# issued ~32,000 SQL statements for ~3,300 lookups, of which a few hundred are
+# distinct.
+#
+# `index_lookup_cache()` opens a memo for the length of one read. Inside it,
+# `get_single_index_value_detailed` (and so `get_single_index_value` and the
+# composite recursion, which go through it) answers a repeated call from the
+# memo, keyed by its full argument tuple. Outside it nothing changes: every call
+# reads the database, as before.
+#
+# The rules that keep it safe:
+# * Only read paths enter it (the portfolio endpoints, and the costing engine's
+#   should-cost / evolution / breakdown calls for their own duration). Writes
+#   are never cached; nothing here stores an ORM object, only the resolved
+#   (value, source) pair.
+# * The memo lives in a ContextVar and is dropped in `finally`, so it cannot
+#   outlive the `with` block, whatever raised. A FastAPI sync endpoint runs in
+#   its own copied context, so concurrent requests never share one.
+# * Re-entrant: a nested `with` (an endpoint that calls the costing engine,
+#   which enters it too) reuses the outer memo and leaves it in place.
+
+_index_memo: ContextVar[dict | None] = ContextVar("index_lookup_memo", default=None)
+
+
+@contextmanager
+def index_lookup_cache():
+    """Memoise index lookups for the duration of the block (see above)."""
+    if _index_memo.get() is not None:
+        yield          # an outer block owns the memo
+        return
+    token = _index_memo.set({})
+    try:
+        yield
+    finally:
+        _index_memo.reset(token)
+
+
+def index_lookup_cache_active() -> bool:
+    return _index_memo.get() is not None
+
+
+def request_memoised(key: tuple, compute):
+    """`compute()` once per `key` while an `index_lookup_cache()` block is open;
+    a plain `compute()` otherwise. `key` names the lookup first (a string) and
+    then every argument it depends on. For pure reads that return plain data."""
+    memo = _index_memo.get()
+    if memo is None:
+        return compute()
+    if key not in memo:
+        memo[key] = compute()
+    return memo[key]
+
+
 def get_single_index_value(
     db: Session,
     team_id: uuid.UUID,
@@ -591,6 +651,27 @@ def _monthly_carry_forward(
 
 
 def get_single_index_value_detailed(
+    db: Session,
+    team_id: uuid.UUID,
+    commodity_id: int,
+    region: str,
+    year: int,
+    quarter: int,
+    _resolving: set | None = None,
+) -> tuple[float | None, str | None]:
+    """`_resolve_index_value_detailed`, answered from the request memo when one
+    is open (`index_lookup_cache`). The key is the full argument tuple, the
+    composite chain included: a cycle guard's `(None, None)` for one chain must
+    not answer a call made outside that chain."""
+    return request_memoised(
+        ("index_value", db, team_id, commodity_id, region, year, quarter,
+         frozenset(_resolving or ())),
+        lambda: _resolve_index_value_detailed(
+            db, team_id, commodity_id, region, year, quarter, _resolving=_resolving),
+    )
+
+
+def _resolve_index_value_detailed(
     db: Session,
     team_id: uuid.UUID,
     commodity_id: int,

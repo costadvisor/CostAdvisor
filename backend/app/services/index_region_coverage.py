@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.models.index_data import CommodityIndex
 from app.models.index_layer import IndexCard
-from app.services.drop.catalog_loader import REGION_MAP
+from app.services.drop.common import REGION_MAP
 
 # Card regions that are not regions. `multi` means the card deliberately spans
 # several and a blank means the drop did not say — neither is a mapping

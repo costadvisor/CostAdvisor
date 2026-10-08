@@ -212,7 +212,8 @@ def get_subject_dimensions(subject_type: str, subject_code: str, team_id: uuid.U
     SCRUM-76's composed card read folds in, rather than a second card-shaped
     endpoint.
 
-    `:path` because a `subfamily` key is `"<family>|<subfamily>"`.
+    `:path` because a `product_line` key is `"<Family>|||<Line>"`, and a name
+    can hold a slash.
     """
     require_permission(db, current_user, team_id, "dimensions.view")
     if subject_type not in SUBJECT_TYPES:

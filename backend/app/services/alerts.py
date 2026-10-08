@@ -58,10 +58,13 @@ def _index_move_trigger(db, commodity_id, threshold):
 
 
 def _gap_trigger(db, cm, threshold):
-    from app.services.costing_engine import calculate_should_cost
+    from app.services.costing_engine import _current_quarter, calculate_should_cost
     if not cm.current_formula:
         return None
-    sc = calculate_should_cost(db, cm).should_cost
+    # Should-cost now, at the current quarter. With no target quarter the
+    # engine evaluates at the formula's base quarter, i.e. the base price.
+    now_y, now_q = _current_quarter()
+    sc = calculate_should_cost(db, cm, target_year=now_y, target_quarter=now_q).should_cost
     latest = (
         db.query(ActualPrice).filter(ActualPrice.cost_model_id == cm.id)
         .order_by(ActualPrice.year.desc(), ActualPrice.quarter.desc()).first()

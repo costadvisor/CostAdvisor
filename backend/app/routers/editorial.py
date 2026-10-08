@@ -39,7 +39,7 @@ from app.schemas.editorial import (
 )
 from app.services.audit import log_event, log_platform_event
 from app.services.editorial import (
-    add_version, approve_block, create_block, fork_block, read_card,
+    add_version, approve_block, create_block, fork_block, read_card, served_clause,
     validate_vocab, visible_block,
 )
 from app.services.permissions import require_permission, require_platform_permission
@@ -58,7 +58,7 @@ def _out(block: EditorialBlock) -> BlockOut:
         subject_type=block.subject_type, subject_code=block.subject_code,
         block_type=block.block_type, region=block.region,
         template_id=block.template_id, commodity_id=block.commodity_id,
-        family_id=block.family_id, subfamily_id=block.subfamily_id,
+        family_id=block.family_id, product_line_id=block.product_line_id,
         body_format=block.body_format, provenance=block.provenance,
         badge=ProvenanceBadge(**PROVENANCE_BADGES[block.provenance]),
         current_version_no=v.version_no if v else None,
@@ -110,7 +110,8 @@ def list_blocks(team_id: uuid.UUID,
                 offset: int = Query(0, ge=0),
                 db: Session = Depends(get_db),
                 current_user: User = Depends(get_current_user)):
-    """Blocks visible to this team: its own plus the platform library.
+    """Blocks visible to this team: its own plus the platform library, minus
+    the types the API never serves (`served_clause`).
 
     `provenance` filters the four-state review ladder, which is what an
     approvals queue reads — "everything not yet signed off" is the question, and
@@ -132,7 +133,8 @@ def list_blocks(team_id: uuid.UUID,
         db.query(EditorialBlock)
         .options(joinedload(EditorialBlock.current_version))
         .filter(or_(EditorialBlock.team_id.is_(None),
-                    EditorialBlock.team_id == team_id))
+                    EditorialBlock.team_id == team_id),
+                served_clause())
     )
     if subject_type:
         q = q.filter(EditorialBlock.subject_type == subject_type)
@@ -298,9 +300,9 @@ def card(subject_type: str, subject_code: str, team_id: uuid.UUID,
 
     One query regardless of how many block types are present — the whole reason
     `current_version_id` exists rather than a per-type read. `subject_code` uses
-    a `:path` converter because the `subfamily` key is
-    `"<family>|<subfamily>"` and a family name can contain characters a plain
-    segment would mangle.
+    a `:path` converter because a `product_line` key is `"<Family>|||<Line>"`
+    and a family or line name can contain characters (a slash) a plain segment
+    would mangle.
     """
     require_permission(db, current_user, team_id, "content.view")
     result = read_card(db, subject_type, subject_code, team_id, region=region)

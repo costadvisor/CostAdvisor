@@ -334,9 +334,11 @@ def dossier_for(
                 "producer_id": str(p.producer_id),
                 "producer_name": p.producer.name if p.producer else None,
                 "role": p.role,
-                # Null whenever the share was not disclosed — never a real zero.
-                "share_pct": float(p.share_pct) if p.share_pct is not None else None,
-                "share_disclosed": p.share_disclosed,
+                # Never served (design decision 13, the source's house rule 6:
+                # a non-zero share is unsourced, a zero means not disclosed).
+                # The stored value stays for the source's own record.
+                "share_pct": None,
+                "share_disclosed": False,
                 "location": p.location, "regions_raw": p.regions_raw,
                 "tags": p.tags, "raw_name": p.raw_name,
             }

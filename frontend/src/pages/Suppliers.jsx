@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { DriftBar } from './workspace/wsCharts';
 import exportCsv from '../utils/exportCsv';
+import { fmtMoney } from '../utils/currency';
 
 export default function Suppliers() {
   const { activeTeamId } = useAuth();
@@ -142,6 +143,7 @@ export default function Suppliers() {
           data={benchmark} loading={benchLoading} error={benchErr}
           trustScores={trustScores} trustResolution={trustResolution}
           computingTrust={computingTrust} onComputeTrustScores={handleComputeTrustScores}
+          models={portfolio}
         />
       ) : (
       <>
@@ -191,8 +193,8 @@ export default function Suppliers() {
                 const models = getSupplierModels(s.id);
                 const isExpanded = expandedId === s.id;
                 return (
-                  <>
-                    <tr key={s.id} style={{ cursor: models.length > 0 ? 'pointer' : 'default' }}
+                  <Fragment key={s.id}>
+                    <tr style={{ cursor: models.length > 0 ? 'pointer' : 'default' }}
                       onClick={() => models.length > 0 && setExpandedId(isExpanded ? null : s.id)}>
                       <td style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center' }}>
                         {models.length > 0 ? (isExpanded ? '\u25BC' : '\u25B6') : ''}
@@ -270,7 +272,7 @@ export default function Suppliers() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -290,6 +292,14 @@ const TRUST_GRADE_COLOR = {
   A: 'var(--accent)', B: 'var(--accent)', C: 'var(--accent3)', D: 'var(--accent2)', F: 'var(--accent2)',
 };
 
+// A score pools either one product or every product on one product line.
+function trustGrainLabel(s) {
+  if (s.grain === 'product_line') {
+    return s.product_line_name ? `Product line: ${s.product_line_name}` : `Product line #${s.product_line_id}`;
+  }
+  return 'Product';
+}
+
 function TrustGradeBadge({ summary }) {
   if (!summary) {
     return <span style={{ fontSize: 11, color: 'var(--muted)' }}>Not computed</span>;
@@ -299,7 +309,7 @@ function TrustGradeBadge({ summary }) {
   }
   const breakdown = summary.scores
     .filter(s => !s.insufficient_data)
-    .map(s => `${s.grain}${s.product_id ? '' : ` #${s.subfamily_id}`}: ${s.grade} (${s.score}) — avg gap ${s.inputs.avg_gap_pct}%, drift ${s.inputs.slope_pct_per_quarter}pt/qtr`)
+    .map(s => `${trustGrainLabel(s)}: ${s.grade} (${s.score}) — avg gap ${s.inputs.avg_gap_pct}%, drift ${s.inputs.slope_pct_per_quarter}pt/qtr`)
     .join('\n');
   return (
     <span
@@ -316,7 +326,7 @@ function TrustGradeBadge({ summary }) {
   );
 }
 
-function BenchmarkView({ data, loading, error, trustScores, trustResolution, computingTrust, onComputeTrustScores }) {
+function BenchmarkView({ data, loading, error, trustScores, trustResolution, computingTrust, onComputeTrustScores, models = [] }) {
   if (loading) return <div style={{ padding: 20, color: 'var(--muted)' }}>Loading benchmarking…</div>;
   if (error) return (
     <div className="ca-card" style={{ textAlign: 'center', padding: 40 }}>
@@ -336,6 +346,11 @@ function BenchmarkView({ data, loading, error, trustScores, trustResolution, com
   );
 
   const maxAbs = Math.max(5, ...priced.map(s => Math.abs(s.avg_gap_pct)));
+  // The benchmark sums exposure in each cost model's own currency and does not
+  // say which: take it from the supplier's cost models. Mixed currencies get no
+  // symbol, since the sum is not converted.
+  const currenciesOf = Object.fromEntries(priced.map(s => [s.supplier_id, [...new Set(models
+    .filter(m => m.supplier_name === s.supplier_name).map(m => m.currency).filter(Boolean))]]));
   const gapColor = (g) => (g > 1 ? 'var(--accent2)' : g < -1 ? 'var(--accent)' : 'var(--muted)');
   const trendArrow = (t) => {
     if (!t || t.length < 2) return null;
@@ -385,7 +400,7 @@ function BenchmarkView({ data, loading, error, trustScores, trustResolution, com
               <th>Avg Gap %</th>
               <th className="center">Latest</th>
               <th className="center">Trend</th>
-              <th className="center">Exposure</th>
+              <th className="center" title="Each priced quarter's gap (actual price − that quarter's should-cost) × that quarter's volume, summed over the supplier's cost models">Exposure</th>
               <th className="center">Trust Grade</th>
             </tr>
           </thead>
@@ -409,8 +424,9 @@ function BenchmarkView({ data, loading, error, trustScores, trustResolution, com
                   {s.latest_gap_pct > 0 ? '+' : ''}{s.latest_gap_pct.toFixed(1)}%
                 </td>
                 <td className="center" style={{ fontSize: 16 }}>{trendArrow(s.trend)}</td>
-                <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: s.exposure > 0 ? 'var(--accent2)' : 'var(--muted)' }}>
-                  {s.exposure ? `$${Math.round(s.exposure).toLocaleString()}` : '—'}
+                <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: s.exposure > 0 ? 'var(--accent2)' : 'var(--muted)' }}
+                  title={currenciesOf[s.supplier_id].length > 1 ? `Summed across ${currenciesOf[s.supplier_id].join(' and ')} cost models without conversion` : undefined}>
+                  {s.exposure ? fmtMoney(s.exposure, currenciesOf[s.supplier_id].length === 1 ? currenciesOf[s.supplier_id][0] : null, { decimals: 0 }) : '—'}
                 </td>
                 <td className="center">
                   <TrustGradeBadge summary={trustScores ? trustScores[s.supplier_id] : null} />

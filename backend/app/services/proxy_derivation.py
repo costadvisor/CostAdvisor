@@ -38,6 +38,7 @@ from app.constants.index_metadata import PROXY_OPERATIONS
 from app.models.formula_template import FormulaTemplate, FormulaTemplateComponent
 from app.models.index_data import CommodityIndex
 from app.models.index_layer import IndexMonthlyValue, TypeCode
+from app.services.catalog_visibility import listed_clause
 
 # Value freshness, reported rather than inferred by the caller.
 CURRENT = "current"
@@ -406,6 +407,9 @@ def swap_backlog(
             FormulaTemplateComponent.type_code_id.isnot(None),
             FormulaTemplateComponent.component_type == "index",
             FormulaTemplate.team_id.is_(None),
+            # Listed cards only: an absorbed, pointer, duplicate or withdrawn
+            # card is not part of the library the ranking describes.
+            listed_clause(),
         )
         .group_by(FormulaTemplateComponent.type_code_id)
         .subquery()
@@ -427,6 +431,9 @@ def swap_backlog(
             FormulaTemplateComponent.type_code_id.isnot(None),
             FormulaTemplateComponent.component_type == "index",
             FormulaTemplate.team_id.is_(None),
+            # Listed cards only: an absorbed, pointer, duplicate or withdrawn
+            # card is not part of the library the ranking describes.
+            listed_clause(),
         )
         .scalar()
         or 0

@@ -24,6 +24,8 @@ celerybeat.pid
 
 # Node
 node_modules/
+# Tool folders (drop extractor, screenshot helper)
+tools/*/node_modules/
 dist/
 .vite/
 

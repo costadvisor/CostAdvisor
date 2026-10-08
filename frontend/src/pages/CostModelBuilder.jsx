@@ -12,10 +12,17 @@ import { stripReservedFns } from '../utils/formulaFns';
 import NumberInput from '../components/NumberInput';
 import { normalizeVarMap } from '../components/VariableMapEditor';
 import IndexCombo from '../components/IndexCombo';
+import { curSym } from '../utils/currency';
+
+// Catalog recipes list their regions as drop codes (`catalog_meta.regions`);
+// the builder's region select uses the app codes they were loaded under
+// (backend/app/services/drop/catalog_loader.py REGION_MAP).
+const CATALOG_TO_APP_REGION = { EU: 'Europe', NA: 'NA', CN: 'China', IN: 'India', APAC: 'APAC', MEA: 'MEA', LA: 'Latam', GL: 'GLOBAL' };
 
 export default function CostModelBuilder() {
   const { costModelId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { activeTeamId, user } = useAuth();
   const confirm = useConfirm();
   const showAlert = useAlert();
@@ -134,7 +141,15 @@ export default function CostModelBuilder() {
       const t = formulaTemplates.find(ft => ft.id === p.formula_template_id);
       if (t) {
         autoLoadedTemplateRef.current = true;
-        loadTemplateIntoModel(t);
+        // A recipe priced only outside the builder's default region (e.g. an
+        // NA-only card) resolves to no lines there: open on a region it covers
+        // (the caller's `state.region` when it is one of them).
+        const covered = (t.catalog_meta?.regions || []).map(c => CATALOG_TO_APP_REGION[c] || c);
+        const wanted = location.state?.region;
+        const r = !covered.length || covered.includes(region) ? region
+          : covered.includes(wanted) ? wanted : covered[0];
+        if (r !== region) setRegion(r);
+        loadTemplateIntoModel(t, r);
       }
     }
   }, [products, formulaTemplates, location.state, costModelId]);
@@ -445,11 +460,11 @@ export default function CostModelBuilder() {
   // as simple-mode components (the resolver flattens chained formulas and
   // picks the recipe for this model's region); expression templates keep the
   // existing advanced-mode prefill.
-  const loadTemplateIntoModel = async (t) => {
+  const loadTemplateIntoModel = async (t, atRegion = region) => {
     setShowTemplateDropdown(false);
     try {
       const res = await api.get(`/api/formulas/${t.id}/resolve`, {
-        params: { team_id: activeTeamId, region },
+        params: { team_id: activeTeamId, region: atRegion },
       });
       const { lines, coverage: cov, region_resolved } = res.data;
       loadedTemplateIdRef.current = t.id;
@@ -483,7 +498,7 @@ export default function CostModelBuilder() {
           if (cov.base_year) { setBaseYear(cov.base_year); setBaseQuarter(cov.base_quarter); }
           if (cov.currency) setCurrency(cov.currency);
         }
-        const fallback = region_resolved && region_resolved !== region
+        const fallback = region_resolved && region_resolved !== atRegion
           ? ` — pricing from ${region_resolved}` : '';
         addToast(`Loaded ${t.name}${fallback}`, 'success');
         if (cov?.needs_review) {
@@ -508,7 +523,7 @@ export default function CostModelBuilder() {
 
   if (!loaded) return <div className="ca-page" style={{ color: 'var(--muted)' }}>Loading...</div>;
 
-  const sym = currency === 'EUR' ? '\u20AC' : '$';
+  const sym = curSym(currency);
 
   return (
     <>
@@ -1296,7 +1311,7 @@ export default function CostModelBuilder() {
           )}
 
           {costModelId && (
-            <VersionHistory costModelId={costModelId} editing={editing} onLoadVersion={(v) => {
+            <VersionHistory costModelId={costModelId} editing={editing} sym={sym} onLoadVersion={(v) => {
               setBasePrice(v.base_price);
               setBaseYear(v.base_year);
               setBaseQuarter(v.base_quarter);
@@ -1430,7 +1445,7 @@ function SaveTemplateModal({ expression, variables, activeTeamId, canEditPlatfor
   );
 }
 
-function VersionHistory({ costModelId, editing, onLoadVersion }) {
+function VersionHistory({ costModelId, editing, sym, onLoadVersion }) {
   const [versions, setVersions] = useState([]);
   const [open, setOpen] = useState(false);
   const confirm = useConfirm();
@@ -1484,8 +1499,8 @@ function VersionHistory({ costModelId, editing, onLoadVersion }) {
               {versions.map(v => (
                 <tr key={v.id}>
                   <td>Q{v.base_quarter}-{v.base_year}</td>
-                  <td>${v.base_price.toFixed(2)}</td>
-                  <td>{v.margin_type === 'pct' ? `${v.margin_value}%` : v.margin_type === 'fixed' ? `$${v.margin_value}` : 'Unknown'}</td>
+                  <td>{sym}{v.base_price.toFixed(2)}</td>
+                  <td>{v.margin_type === 'pct' ? `${v.margin_value}%` : v.margin_type === 'fixed' ? `${sym}${v.margin_value}` : 'Unknown'}</td>
                   <td style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(v.updated_at || v.created_at).toLocaleDateString()}</td>
                   {editing && (
                     <td className="center">

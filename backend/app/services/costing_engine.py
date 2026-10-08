@@ -1,6 +1,8 @@
 """
 Core costing engine: should-cost, evolution, squeeze/desqueeze, and brief calculations.
 """
+import functools
+
 from sqlalchemy.orm import Session
 
 from app.models.cost_model import CostModel
@@ -8,8 +10,9 @@ from app.models.price_data import ActualPrice
 from app.models.actual_volume import ActualVolume
 from app.services.data_resolver import (
     get_single_index_value, get_single_index_value_detailed, get_forward_index_value,
+    index_lookup_cache, request_memoised,
 )
-from app.services.formula_resolver import get_effective_lines
+from app.services.formula_resolver import get_effective_lines as _resolve_effective_lines
 from app.services.volume_projector import project_volumes
 from app.services.narrative import generate_narrative
 from app.services.fx_converter import convert_price
@@ -135,6 +138,35 @@ def safe_eval_expr(expression: str, context: dict) -> float:
 
 
 # ── Period helpers ─────────────────────────────────────────────
+
+def _index_memo_scope(fn):
+    """Caching hook: run a read-only calculation inside the request-scoped
+    index-lookup memo (`data_resolver.index_lookup_cache`). A call made inside
+    an outer scope (a portfolio endpoint) shares that scope's memo; a call made
+    on its own gets a memo for its own duration only. The results are the same
+    either way — the memo only answers repeated identical lookups."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with index_lookup_cache():
+            return fn(*args, **kwargs)
+    return wrapper
+
+
+def get_effective_lines(db: Session, fv, cost_model: CostModel):
+    """`formula_resolver.get_effective_lines`, answered from the request memo
+    inside an `index_lookup_cache()` block (an evolution asks for the same
+    version's lines once per period). Keyed on everything the resolution reads;
+    a version or model not yet flushed (no id) is never memoised. Each caller
+    gets its own list; the lines themselves are read-only data."""
+    if fv is None or getattr(fv, "id", None) is None or getattr(cost_model, "id", None) is None:
+        return _resolve_effective_lines(db, fv, cost_model)
+    lines, reason = request_memoised(
+        ("effective_lines", db, fv.id, fv.link_mode, fv.source_coverage_id,
+         cost_model.id, cost_model.region),
+        lambda: _resolve_effective_lines(db, fv, cost_model),
+    )
+    return list(lines), reason
+
 
 MONTH_NAMES = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -289,11 +321,14 @@ def _output_unit(model_unit: str, display_unit: str | None) -> str:
 def _effective_base_price(db: Session, cost_model_id, fv) -> float:
     """Return the actual price for the formula's base period if one exists,
     otherwise fall back to the manually-entered base_price on the formula version."""
-    actual = db.query(ActualPrice.price).filter(
-        ActualPrice.cost_model_id == cost_model_id,
-        ActualPrice.year == fv.base_year,
-        ActualPrice.quarter == fv.base_quarter,
-    ).scalar()
+    actual = request_memoised(
+        ("base_period_actual", db, cost_model_id, fv.base_year, fv.base_quarter),
+        lambda: db.query(ActualPrice.price).filter(
+            ActualPrice.cost_model_id == cost_model_id,
+            ActualPrice.year == fv.base_year,
+            ActualPrice.quarter == fv.base_quarter,
+        ).scalar(),
+    )
     if actual is not None:
         return float(actual)
     return float(fv.base_price)
@@ -358,6 +393,7 @@ def _normalize_to(
     )
 
 
+@_index_memo_scope
 def calculate_should_cost(
     db: Session,
     cost_model: CostModel,
@@ -430,6 +466,7 @@ def calculate_should_cost(
 
 # ── Evolution ──────────────────────────────────────────────────
 
+@_index_memo_scope
 def calculate_evolution(
     db: Session,
     cost_model: CostModel,
@@ -1176,6 +1213,7 @@ def _compute_indexed_cost_detailed(
     return indexed_cost, components, data_gaps
 
 
+@_index_memo_scope
 def calculate_should_cost_breakdown(
     db: Session,
     cost_model: CostModel,

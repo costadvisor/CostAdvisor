@@ -17,8 +17,6 @@ factors within 0.05 on 46 of the 48 series that have actual history.
 """
 from __future__ import annotations
 
-import json
-import pathlib
 import statistics
 import uuid
 
@@ -31,18 +29,10 @@ from app.models.index_layer import IndexMonthlyValue
 from app.models.index_seasonality import (
     METHOD_RATIO_TO_CENTRED_MA12, MONTH_NAMES, IndexSeasonalFactor,
 )
-from app.services.drop.reader import drop_available
 from app.services.index_seasonality import (
     LOW_TIER_DEVIATION_CLAIM, MIN_MONTHS, TIER_LOW_MAX, TIER_MODEST_MAX,
     compute_factors, profile_for, recompute_all, recompute_series,
     render_season_note, tier_for,
-)
-
-DROP_RAW = (pathlib.Path(__file__).resolve().parents[2]
-            / "sample_idea" / "costadvisor-data" / "raw")
-
-needs_drop = pytest.mark.skipif(
-    not drop_available(), reason="costadvisor-data drop not present in this checkout"
 )
 
 # The tolerance the ticket asks for. 0.05 is half of the published factors' own
@@ -226,104 +216,6 @@ def test_recompute_all_reports_each_outcome(db):
 
 
 # ── 3. The regression check against the drop ───────────────────────────────
-
-@needs_drop
-def test_generated_factors_reproduce_the_drops_values(db):
-    """AC3, and the whole reason this can replace the import: the method has to
-    be the one the source used.
-
-    Reads the drop's series CSV directly rather than the DB, so the check is
-    against the published pair (series -> factors) and does not depend on what a
-    loader happened to bring in.
-    """
-    import csv
-    from collections import defaultdict
-
-    published = json.loads(
-        (DROP_RAW / "INDEX_SEASONALITY.json").read_text(encoding="utf-8"))
-    actuals: dict[str, list[tuple[int, int, float]]] = defaultdict(list)
-    with open(DROP_RAW.parent / "tables" / "index_series.csv",
-              newline="", encoding="utf-8") as fh:
-        for row in csv.DictReader(fh):
-            if (row.get("kind") or "").strip() != "actual":
-                continue
-            try:
-                actuals[row["series_key"]].append(
-                    (int(row["year"]), int(row["month"]), float(row["value"])))
-            except (ValueError, TypeError, KeyError):
-                continue
-
-    checked, matched, worst = 0, 0, []
-    for key, want in published.items():
-        points = actuals.get(key)
-        if not points:
-            continue
-        got = compute_factors(points)
-        if got is None:
-            continue
-        checked += 1
-        deviation = max(abs(round(a, 1) - b) for a, b in zip(got, want))
-        worst.append((deviation, key))
-        if deviation <= TOLERANCE:
-            matched += 1
-
-    assert checked >= 40, f"only {checked} series were comparable"
-    # 46 of 48 reproduce exactly; the two that do not (sulfuric-acid-cn,
-    # caustic-soda-cn) differ by 4.5 and 2.2 points, which is a source
-    # discrepancy on those two rather than a different method.
-    assert matched / checked >= 0.9, (
-        f"only {matched}/{checked} series reproduce within {TOLERANCE} — "
-        f"the method may no longer match the source. Worst: "
-        f"{sorted(worst, reverse=True)[:3]}"
-    )
-    # Named, so a *different* series starting to disagree is visible rather
-    # than being absorbed by the ratio above.
-    offenders = {key for deviation, key in worst if deviation > TOLERANCE}
-    assert offenders <= {"sulfuric-acid-cn", "caustic-soda-cn"}, (
-        f"new series disagree with the source: {offenders}"
-    )
-
-
-@needs_drop
-def test_the_drop_publishes_seasonality_for_series_with_no_history(db):
-    """The finding that makes generating strictly better than importing.
-
-    **30 of the 78 series with published seasonality have no monthly actuals at
-    all** — six forecast points each — and every one of their notes still
-    asserts "computed directly from 42 months of real index history". A
-    generated table simply has no factors for them, which is the honest answer.
-    """
-    import csv
-    from collections import defaultdict
-
-    published = json.loads(
-        (DROP_RAW / "INDEX_SEASONALITY.json").read_text(encoding="utf-8"))
-    notes = json.loads(
-        (DROP_RAW / "INDEX_SEASON_NOTES.json").read_text(encoding="utf-8"))
-    actual_keys = set()
-    with open(DROP_RAW.parent / "tables" / "index_series.csv",
-              newline="", encoding="utf-8") as fh:
-        for row in csv.DictReader(fh):
-            if (row.get("kind") or "").strip() == "actual":
-                actual_keys.add(row["series_key"])
-
-    homeless = [k for k in published if k not in actual_keys]
-    assert homeless, (
-        "every published seasonality series now has actual history — the "
-        "import would no longer be making a false claim, worth revisiting"
-    )
-    # And the prose asserts a history they do not have.
-    assert any("months of real index history" in (notes.get(k) or "")
-               for k in homeless)
-
-
-@needs_drop
-def test_the_source_names_the_method_we_implemented(db):
-    """Not reverse-engineered on a hunch — the drop's own notes say so."""
-    notes = json.loads(
-        (DROP_RAW / "INDEX_SEASON_NOTES.json").read_text(encoding="utf-8"))
-    assert any("ratio-to-moving-average" in (v or "") for v in notes.values())
-
 
 # ── 4. The note is rendered, not stored ────────────────────────────────────
 

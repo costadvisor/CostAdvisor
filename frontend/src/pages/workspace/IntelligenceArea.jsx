@@ -203,17 +203,24 @@ export default function IntelligenceArea() {
   const byId = useMemo(
     () => Object.fromEntries(templates.map(t => [t.id, t])), [templates]);
 
+  // Only combos of formulas the library lists for this team: the catalogue's
+  // listed cards and the team's own. The combo index also returns combos of
+  // cards the catalogue does not list (merged away, pointers, withdrawn), and
+  // those have no place in this grid.
+  const libraryCombos = useMemo(
+    () => combos.filter(c => byId[c.template_id]), [combos, byId]);
+
   const regions = useMemo(
-    () => [...new Set(combos.map(c => c.region))].sort(), [combos]);
+    () => [...new Set(libraryCombos.map(c => c.region))].sort(), [libraryCombos]);
 
   const q = search.trim().toLowerCase();
-  const filtered = useMemo(() => combos.filter(c => {
+  const filtered = useMemo(() => libraryCombos.filter(c => {
     if (regionFilter !== 'all' && c.region !== regionFilter) return false;
     if (!q) return true;
     const t = byId[c.template_id];
-    return `${c.template_code || ''} ${c.template_name || ''} ${t?.family_name || ''}`
+    return `${c.template_code || ''} ${c.template_name || ''} ${t?.family?.name || ''} ${t?.product_line?.name || ''}`
       .toLowerCase().includes(q);
-  }), [combos, regionFilter, q, byId]);
+  }), [libraryCombos, regionFilter, q, byId]);
 
   const pageCombos = filtered.slice(page * BATCH, page * BATCH + BATCH);
   const pageKey = pageCombos.map(c => `${c.template_id}:${c.region}`).join('|');
@@ -247,7 +254,7 @@ export default function IntelligenceArea() {
   const groups = useMemo(() => {
     const map = new Map();
     for (const c of pageCombos) {
-      const label = byId[c.template_id]?.family_name || 'Uncategorised';
+      const label = byId[c.template_id]?.family?.name || 'No family';
       if (!map.has(label)) map.set(label, []);
       map.get(label).push(c);
     }
@@ -273,7 +280,7 @@ export default function IntelligenceArea() {
         <div style={{ padding: 20, color: 'var(--muted)' }}>Loading…</div>
       ) : error ? (
         <div className="ca-card" style={{ color: 'var(--accent2)' }}>Error: {error}</div>
-      ) : combos.length === 0 ? (
+      ) : libraryCombos.length === 0 ? (
         <div className="ca-card" style={{ textAlign: 'center', padding: 48 }}>
           <div style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
             No priced combos yet — a formula needs at least one region with pricing.
@@ -350,7 +357,7 @@ export default function IntelligenceArea() {
                     key={`${c.template_id}:${c.region}`}
                     result={results[`${c.template_id}:${c.region}`]}
                     name={`${c.template_name || c.template_code} · ${c.region}`}
-                    family={byId[c.template_id]?.family_name || 'Uncategorised'}
+                    family={byId[c.template_id]?.family?.name || 'No family'}
                     onOpen={() => navigate(
                       `/intelligence/combo/${c.template_id}/${encodeURIComponent(c.region)}`)}
                   />

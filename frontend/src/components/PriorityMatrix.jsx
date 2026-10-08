@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import exportCsv from '../utils/exportCsv';
+import { fmtMoney } from '../utils/currency';
 
 /* Scrum 20 — Procurement Priority Matrix.
  * A 2×2 scatter of index volatility (x) vs spend exposure (y) per product,
@@ -19,8 +20,6 @@ const cssVar = (name, fallback) => {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || fallback;
 };
-
-const curSym = (c) => (c === 'EUR' ? '€' : c === 'USD' ? '$' : c === 'GBP' ? '£' : c ? `${c} ` : '');
 
 export default function PriorityMatrix({ data, loading, error }) {
   const svgRef = useRef(null);
@@ -53,15 +52,17 @@ export default function PriorityMatrix({ data, loading, error }) {
     );
   }
 
-  // Layout
-  const W = 720, H = 460;
-  const pad = { l: 78, r: 24, t: 24, b: 52 };
+  // Layout. The quadrant names sit outside the plot, at its four corners: the
+  // median split can fall close to an axis (volatility here: 1.1 of 11.9), and
+  // names anchored to the split lines then ran into each other.
+  const W = 860, H = 480;
+  const pad = { l: 78, r: 24, t: 34, b: 70 };
   const plotW = W - pad.l - pad.r;
   const plotH = H - pad.t - pad.b;
 
-  const maxVol = Math.max(data.volatility_threshold * 2, ...priced.map(i => i.volatility_pct), 1);
-  const maxExp = Math.max(data.exposure_threshold * 2, ...priced.map(i => i.spend_exposure), 1);
-  const sym = curSym(data.reporting_currency);
+  // A little headroom so the largest point is not cut by the plot edge.
+  const maxVol = Math.max(data.volatility_threshold * 2, ...priced.map(i => i.volatility_pct), 1) * 1.04;
+  const maxExp = Math.max(data.exposure_threshold * 2, ...priced.map(i => i.spend_exposure), 1) * 1.06;
 
   const xOf = (v) => pad.l + Math.min(1, v / maxVol) * plotW;
   const yOf = (e) => pad.t + plotH - Math.min(1, e / maxExp) * plotH;   // invert: high exposure = top
@@ -76,7 +77,7 @@ export default function PriorityMatrix({ data, loading, error }) {
     { key: 'monitor', x: xThr, y: yThr, w: pad.l + plotW - xThr, h: pad.t + plotH - yThr },          // hi vol, lo exp
   ];
 
-  const fmtExp = (e) => `${sym}${Math.round(e).toLocaleString()}`;
+  const fmtExp = (e) => fmtMoney(e, data.reporting_currency, { decimals: 0 });
 
   const handleCsv = () => exportCsv(
     'priority-matrix.csv',
@@ -122,18 +123,19 @@ export default function PriorityMatrix({ data, loading, error }) {
         </div>
       </div>
 
-      <div className="ca-scroll-x">
+      {/* Not .ca-scroll-x: its 440px max-height cut off the x-axis title. */}
+      <div style={{ overflowX: 'auto' }}>
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 520, maxWidth: W, display: 'block', margin: '0 auto' }}>
           {/* quadrant tints */}
           {zones.map(z => (
             <rect key={z.key} x={z.x} y={z.y} width={Math.max(0, z.w)} height={Math.max(0, z.h)}
               fill={colors[z.key]} opacity="0.06" />
           ))}
-          {/* quadrant labels */}
-          <text x={xThr + 8} y={pad.t + 16} fontSize="11" fontWeight="700" fill={colors.act_now} opacity="0.8">ACT NOW</text>
-          <text x={pad.l + 8} y={pad.t + 16} fontSize="11" fontWeight="700" fill={colors.hedge} opacity="0.8">HEDGE</text>
-          <text x={xThr + 8} y={pad.t + plotH - 8} fontSize="11" fontWeight="700" fill={colors.monitor} opacity="0.8">MONITOR</text>
-          <text x={pad.l + 8} y={pad.t + plotH - 8} fontSize="11" fontWeight="700" fill={colors.low_priority} opacity="0.7">LOW PRIORITY</text>
+          {/* quadrant labels, outside the plot at its corners */}
+          <text x={pad.l} y={pad.t - 10} fontSize="11" fontWeight="700" fill={colors.hedge}>HEDGE</text>
+          <text x={pad.l + plotW} y={pad.t - 10} fontSize="11" fontWeight="700" fill={colors.act_now} textAnchor="end">ACT NOW</text>
+          <text x={pad.l} y={pad.t + plotH + 18} fontSize="11" fontWeight="700" fill={colors.low_priority}>LOW PRIORITY</text>
+          <text x={pad.l + plotW} y={pad.t + plotH + 18} fontSize="11" fontWeight="700" fill={colors.monitor} textAnchor="end">MONITOR</text>
 
           {/* axes */}
           <line x1={pad.l} y1={pad.t} x2={pad.l} y2={pad.t + plotH} stroke={colors.axis} strokeWidth="1" />
@@ -166,6 +168,12 @@ export default function PriorityMatrix({ data, loading, error }) {
             );
           })}
         </svg>
+      </div>
+
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
+        Spend exposure = today's should-cost × the last four quarters of volume on record, in {data.reporting_currency}.
+        {' '}Volatility = spread (standard deviation) of the should-cost's last four quarter-on-quarter changes.
+        {' '}The dashed lines are the portfolio medians.
       </div>
 
       {hover && (

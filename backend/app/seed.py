@@ -1,10 +1,15 @@
 """
 Seed the database with initial data.
 Run with: python -m app.seed
+
+The schema comes from Alembic (`alembic upgrade head`), never from here: the
+seed only adds reference rows. Each part skips what already exists, so it works
+on a fresh migrated database (where migrations have already inserted regions
+and some commodity rows) and on one that is already seeded.
 """
-from app.database import SessionLocal, engine, Base
+from app.database import SessionLocal, bypass_rls_var
 from app.models import (
-    CommodityIndex, IndexValue, CostScenario, ChemicalFamily, Region,
+    CommodityIndex, IndexValue, CostScenario, Region,
 )
 
 # Region reference data (Scrum 56): 7 top-level regions + GLOBAL sentinel, plus a
@@ -330,89 +335,63 @@ SCENARIOS_DATA = {
     },
 }
 
-FAMILIES = [
-    'Solvents', 'Polymers', 'Surfactants', 'Acids & Bases',
-    'Coagulants', 'Specialty Chemicals', 'Other',
-]
+# No chemical families here: families are the platform taxonomy, loaded from
+# the content drop (seed_content_drop.py). Seeding a legacy list put families
+# like "Polymers" and "Other" next to the drop's own.
 
 
 def seed():
-    """Populate the database with initial data."""
-    Base.metadata.create_all(bind=engine)
+    """Add the reference regions and system scenarios that are missing.
 
+    Commodity indexes and their seed values are `seed_update()`'s (it adds a
+    missing index by name and backfills missing values), so a database the
+    migrations already gave commodity rows still gets its regions and system
+    scenarios. Nothing that exists is changed.
+
+    Platform writes with no request user: row-level security is bypassed (the
+    contextvar form, so every transaction the session opens re-applies it), as
+    `seed_all.seed_identities` does. `cost_scenarios` refuses a platform row
+    otherwise.
+    """
+    bypass_rls_var.set(True)
     db = SessionLocal()
     try:
-        existing = db.query(CommodityIndex).first()
-        if existing:
-            print("Database already seeded. Skipping.")
-            return
-
         # Regions must exist before index values (region is an FK to regions.code).
-        print("Seeding regions...")
-        by_code = {}
+        # Migrations insert most of them; add only the missing codes, and set
+        # a parent only where none is set.
+        by_code = {r.code: r for r in db.query(Region).all()}
+        added_regions = 0
         for code, name, _ in REGIONS_SEED:
-            r = Region(code=code, name=name)
-            db.add(r)
-            by_code[code] = r
+            if code not in by_code:
+                by_code[code] = Region(code=code, name=name)
+                db.add(by_code[code])
+                added_regions += 1
         db.flush()
         for code, _, parent_code in REGIONS_SEED:
-            if parent_code:
-                by_code[code].parent_id = by_code[parent_code].id
+            region = by_code[code]
+            if parent_code and region.parent_id is None:
+                region.parent_id = by_code[parent_code].id
         db.flush()
 
-        print("Seeding chemical families...")
-        for name in FAMILIES:
-            db.add(ChemicalFamily(name=name))
-
-        print("Seeding commodity indexes...")
-        # All commodities with a registered scraper get scrape_enabled=True
-        from app.services.scraper import SCRAPER_REGISTRY
-        scrape_enabled_names = set(SCRAPER_REGISTRY.keys())
-
-        for name, data in INDEXES_DATA.items():
-            commodity = CommodityIndex(
-                name=name,
-                unit=data['unit'],
-                currency=data.get('currency'),
-                category=data.get('category'),
-                source_url=data.get('source_url'),
-                scrape_enabled=name in scrape_enabled_names,
-            )
-            db.add(commodity)
-            db.flush()
-
-            for region, values in data['values'].items():
-                for i, (year, quarter) in enumerate(PERIODS):
-                    if i < len(values):
-                        iv = IndexValue(
-                            commodity_id=commodity.id,
-                            region=region,
-                            year=year,
-                            quarter=quarter,
-                            value=values[i],
-                            source="seed",
-                        )
-                        db.add(iv)
-
-        print("Seeding scenarios...")
+        existing_scenarios = {
+            name for (name,) in db.query(CostScenario.name).filter(
+                CostScenario.is_system.is_(True), CostScenario.team_id.is_(None))
+        }
+        added_scenarios = 0
         for name, data in SCENARIOS_DATA.items():
-            scenario = CostScenario(
+            if name in existing_scenarios:
+                continue
+            db.add(CostScenario(
                 name=name,
                 description=data['description'],
                 is_system=True,
                 team_id=None,
                 breakdown=data['breakdown'],
-            )
-            db.add(scenario)
+            ))
+            added_scenarios += 1
 
         db.commit()
-        commodity_count = len(INDEXES_DATA)
-        seeded_count = sum(1 for d in INDEXES_DATA.values() if d['values'])
-        print(f"Seeded {len(FAMILIES)} chemical families.")
-        print(f"Seeded {commodity_count} commodities ({seeded_count} with initial data, {commodity_count - seeded_count} awaiting data).")
-        print(f"Seeded {len(SCENARIOS_DATA)} system scenarios.")
-        print("Done.")
-
+        print(f"Regions: {added_regions} added. System scenarios: {added_scenarios} added.")
     finally:
         db.close()
 
@@ -422,6 +401,7 @@ def seed_update():
     Safe to run multiple times — updates existing rows and adds missing ones.
     Also backfills any missing seed IndexValue rows for existing commodities.
     """
+    bypass_rls_var.set(True)
     db = SessionLocal()
     try:
         from app.services.scraper import SCRAPER_REGISTRY

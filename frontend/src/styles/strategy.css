@@ -1,0 +1,324 @@
+/* ──────────────────────────────────────────────────────────────────────
+ * Strategy pages (landing, category shell, Strategic Analysis, Spend
+ * Analysis). Prefix `st-`. Built on the app's theme tokens and the shared
+ * `ix-` layout system (styles/intel.css); no hard-coded surface or text
+ * colours, so every theme applies.
+ * ──────────────────────────────────────────────────────────────────── */
+
+/* ── Small shared bits ─────────────────────────────────────────────── */
+.st-illus {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10px; font-weight: 600; letter-spacing: .3px;
+  color: var(--text-secondary); background: var(--warn-bg);
+  border: 1px solid var(--border); border-radius: 10px; padding: 2px 9px;
+  white-space: nowrap;
+}
+.st-illus::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent3); flex-shrink: 0;
+}
+.st-overdue, .ix-table td.st-overdue { color: var(--accent2); font-weight: 700; }
+.st-num-zero { color: var(--muted); }
+.st-nowrap { white-space: nowrap; }
+.st-unassigned { color: var(--muted); }
+.st-section-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  margin: 30px 0 4px;
+}
+.st-section-title {
+  font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 800; letter-spacing: -0.1px;
+  color: var(--text); margin: 0;
+}
+.st-section-title:focus { outline: none; }
+.st-section-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 2px; }
+.st-section-sub { font-size: 11.5px; color: var(--muted); margin: 0 0 14px; line-height: 1.6; max-width: 90ch; }
+
+/* ── Landing: header, filter bar + table ───────────────────────────── */
+/* Keep "Illustrative demo data" and "+ Add category" on the title's right:
+   the long counts line wraps inside its own column instead. */
+.st-landing .ix-page-header { flex-wrap: nowrap; }
+.st-landing .ix-page-header > :first-child { flex: 1 1 auto; }
+.st-landing .ix-page-actions { flex-shrink: 0; flex-wrap: nowrap; }
+.st-landing .ix-page-sub.st-counts { margin-top: 3px; }
+.st-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.st-filters .ix-select { min-width: 0; }
+.st-filters-sort { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.st-table-panel { overflow: hidden; }
+/* Short one-line headers (full names in their title tooltips). */
+.st-table-panel .ix-table th { white-space: nowrap; line-height: 1.35; vertical-align: bottom; }
+.ix-table.st-landing-table td { padding: 11px 10px; }
+.ix-table.st-landing-table th { padding-left: 10px; padding-right: 10px; }
+.st-landing-table .st-family { font-size: 10.5px; color: var(--text-secondary); max-width: 170px; }
+.st-landing-table .st-catname { font-weight: 700; font-size: 12.5px; color: var(--text); text-decoration: none; }
+.st-landing-table .st-catname:hover { color: var(--accent); }
+.st-landing-table .st-catname:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.st-landing-table .ix-cell-sub { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-landing-table .st-date { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.st-landing-table .st-owner { white-space: nowrap; }
+.st-table-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 9px 14px; border-top: 1px solid var(--border); font-size: 10.5px; color: var(--muted);
+}
+.st-empty-row td { text-align: center; color: var(--muted); padding: 24px 12px; }
+
+/* ── Landing: suggestion cards ─────────────────────────────────────── */
+.st-sugg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.st-sugg {
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px; min-width: 0;
+}
+.st-sugg-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.st-sugg-family {
+  font-size: 9.5px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--card-eyebrow);
+}
+.st-sugg-name { font-size: 13.5px; font-weight: 700; color: var(--text); margin: 3px 0 0; line-height: 1.3; }
+.st-sugg-label { font-size: 9.5px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; color: var(--muted); margin-bottom: 5px; }
+.st-sugg-products { display: flex; flex-wrap: wrap; gap: 4px; }
+.st-sugg-stats {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+  border-top: 1px solid var(--border); padding-top: 10px;
+}
+.st-sugg-stat-l { font-size: 9px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; color: var(--muted); }
+.st-sugg-stat-v { font-size: 13px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.st-sugg-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; }
+.st-sugg-error { font-size: 10.5px; color: var(--accent2); }
+
+/* ── Category page shell ───────────────────────────────────────────── */
+/* The header stays short: badge and date on the title row, the status and
+   owner selects inline with their labels, the product chips in the body. */
+.st-dh-sub { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.st-ctl { display: flex; align-items: center; gap: 7px; }
+.st-ctl-label { font-size: 9px; font-weight: 600; letter-spacing: .9px; text-transform: uppercase; color: var(--muted); }
+.st-ctl .ix-select { min-width: 124px; }
+.st-ctl-status { font-size: 10px; color: var(--muted); min-width: 44px; }
+.st-ctl-status.is-error { color: var(--accent2); }
+.st-products-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 16px; }
+.st-products-label { font-size: 9.5px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); margin-right: 2px; }
+.st-product-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; color: var(--text-secondary); text-decoration: none;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 2px 9px;
+}
+.st-product-chip:hover { border-color: var(--accent); color: var(--text); }
+.st-product-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.st-notadopted { margin-bottom: 16px; }
+
+/* ── Strategic Analysis ────────────────────────────────────────────── */
+.st-anchor { scroll-margin-top: calc(var(--ix-sticky-top) + var(--ix-dh-h, 136px) + 12px); }
+/* The rail (contents + demand categories) sticks under the header and
+   scrolls on its own when it is taller than the space left. While more is
+   below, a fade into the page background and a "More below" button mark the
+   cut, so a row sliced by the edge never reads as the end of the list. */
+.ix-rail.is-sticky.st-rail { display: block; }
+.st-rail-scroll {
+  max-height: calc(100vh - var(--ix-sticky-top) - var(--ix-dh-h, 136px) - 24px);
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+  padding: 2px; margin: -2px;
+}
+.st-rail-inner { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.st-rail::after {
+  content: ''; position: absolute; left: 0; right: 8px; bottom: 0; height: 72px;
+  background: linear-gradient(to bottom, transparent, var(--bg) 88%);
+  pointer-events: none; opacity: 0; transition: opacity .15s;
+}
+.st-rail.has-more::after { opacity: 1; }
+.st-rail-more {
+  position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 1;
+  display: inline-flex; align-items: center; gap: 5px;
+  font: inherit; font-size: 10px; font-weight: 600; letter-spacing: .3px; color: var(--text-secondary);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 3px 11px; cursor: pointer; box-shadow: var(--shadow-popover); white-space: nowrap;
+}
+.st-rail-more:hover { color: var(--text); border-color: var(--accent); }
+.st-caveat { margin-bottom: 16px; }
+/* Collapsible panel titles: a <button> does not inherit the title's case
+   and tracking by default, so match the other panel titles. */
+.st-analysis .ix-panel-toggle { font: inherit; letter-spacing: inherit; text-transform: inherit; }
+/* Long report sections open clamped. The fade matches the report's own
+   white paper (report.css keeps a light palette in every theme). */
+.st-clamp { position: relative; }
+.st-clamp.is-clamped { overflow: hidden; }
+.st-clamp.is-clamped::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 110px; pointer-events: none;
+  background: linear-gradient(to bottom, rgba(255,255,255,0), #fff 85%);
+}
+.st-clamp-foot { padding: 9px 16px 11px; border-top: 1px solid var(--border); text-align: center; }
+.st-caveat p { margin: 0; }
+.st-caveat-lines { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 8px; }
+
+/* Report HTML sits inside .report-wrap (report.css keeps its own light
+   palette, as a delivered document). Give it the panel's padding and a
+   reading size that matches the rest of the page. */
+.st-report.report-wrap { padding: 16px 18px 14px; font-size: 12.5px; line-height: 1.7; border-radius: 0 0 var(--radius) var(--radius); }
+.st-report.report-wrap > :first-child { margin-top: 0; }
+.st-report.report-wrap > :last-child { margin-bottom: 0; }
+.st-report.report-wrap table { font-size: 11.5px; margin: 1rem 0; }
+.st-report.report-wrap .card p,
+.st-report.report-wrap .app-card ul,
+.st-report.report-wrap .driver-card p { font-size: 11.5px; }
+.st-report.report-wrap .src { font-size: 10.5px; }
+.st-report.report-wrap .insight,
+.st-report.report-wrap .warning,
+.st-report.report-wrap .risk { font-size: 11.5px; margin: 1rem 0; }
+.st-report.report-wrap .stat-grid { margin: 1rem 0; }
+.st-report.report-wrap .stat { padding: 1rem .8rem; }
+.st-report.report-wrap .stat .value { font-size: 1.5rem; }
+.st-report.report-wrap .chain-diagram { margin: 1rem 0; }
+.st-report.report-wrap .grid-2 { margin: 1rem 0; gap: 1rem; }
+.st-report.report-wrap .cost-bar { grid-template-columns: 180px 1fr 60px; }
+
+/* Dark themes (Mint, Amber): every analysis section is the same white
+   sheet. The report sections are delivered paper (report.css keeps its light
+   palette), so the PESTEL, Porter, drivers and Kraljic bodies take the
+   report's own palette too, instead of alternating white and dark. The panel
+   title strips stay in the app theme, like the Intelligence report page's
+   paper on the app background. Light themes are untouched. */
+:root:not([data-theme]) .st-sheet > .ix-panel-body,
+[data-theme="default"] .st-sheet > .ix-panel-body,
+[data-theme="amber"] .st-sheet > .ix-panel-body {
+  --surface: #ffffff; --surface2: #f5f7fa; --surface3: #e2e8f0;
+  --border: #e2e8f0; --border-light: #cbd5e0;
+  --text: #2d3748; --text-secondary: #4a5568; --muted: #718096; --card-eyebrow: #718096;
+  --accent: #0e8c7f; --accent-dim: #e8f5f3;
+  --accent2: #c53030; --accent2-dim: #fde8e8;
+  --accent3: #d4842a; --accent3-dim: #fef3e2;
+  --accent4: #2a6ebf; --accent4-dim: rgba(42,110,191,.12);
+  --info-bg: rgba(42,110,191,.10); --warn-bg: #fef3e2; --danger-bg: #fde8e8;
+  --success-bg: #e8f5f3; --neutral-bg: rgba(26,39,68,.05);
+  --row-stripe: rgba(26,39,68,.025); --row-divider: #e2e8f0;
+  --ix-on-palette: #ffffff;
+  --kq-leverage-bg: #dbeafe; --kq-leverage-fg: #1e40af;
+  --kq-strategic-bg: #fef3c7; --kq-strategic-fg: #92400e;
+  --kq-noncritical-bg: #f1f5f9; --kq-noncritical-fg: #64748b;
+  --kq-bottleneck-bg: #e2e8f0; --kq-bottleneck-fg: #475569;
+  --kq-dot: #BA7517;
+  background: #fff; color: var(--text);
+  border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px);
+}
+:root:not([data-theme]) .st-sheet .st-card-title,
+[data-theme="default"] .st-sheet .st-card-title,
+[data-theme="amber"] .st-sheet .st-card-title { color: #1a2744; }
+
+/* PESTEL cards */
+.st-pestel { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
+.st-card {
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; gap: 6px;
+}
+.st-card-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11.5px; font-weight: 700; color: var(--text); margin: 0;
+}
+.st-card-letter {
+  width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 800; color: var(--accent); background: var(--accent-dim);
+}
+.st-card-text { font-size: 11.5px; line-height: 1.6; color: var(--text-secondary); margin: 0; }
+.st-card-impl {
+  font-size: 11px; line-height: 1.6; color: var(--text-secondary); margin: 2px 0 0;
+  border-top: 1px dashed var(--border); padding-top: 7px;
+}
+.st-card-impl strong { color: var(--text); font-weight: 700; }
+
+/* Porter table */
+.ix-table.st-porter td { vertical-align: top; }
+.st-porter td:first-child { width: 26%; }
+.st-porter td:nth-child(2) { width: 150px; white-space: nowrap; }
+.st-porter .st-impl { font-size: 11.5px; line-height: 1.6; color: var(--text-secondary); }
+.st-level { display: inline-flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 700; color: var(--text); }
+.st-meter { display: inline-flex; gap: 2px; }
+.st-meter > span { width: 14px; height: 4px; border-radius: 2px; background: var(--surface3); }
+.st-meter > span.on { background: var(--accent3); }
+.st-meter > span.half { background: linear-gradient(90deg, var(--accent3) 50%, var(--surface3) 50%); }
+
+/* Market drivers */
+.st-drivers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.st-driver-arrow {
+  width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 800; color: var(--accent4); background: var(--info-bg);
+}
+
+/* Kraljic */
+.st-kraljic { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+.st-kraljic-chart { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.st-kraljic-text { flex: 1; min-width: 260px; }
+.st-kraljic-text p { font-size: 12px; line-height: 1.7; color: var(--text-secondary); margin: 0 0 9px; }
+.st-kraljic-text p strong { color: var(--text); }
+.st-src {
+  font-size: 10.5px; line-height: 1.6; font-style: italic; color: var(--muted);
+  border-top: 1px dashed var(--border); padding-top: 8px; margin-top: 12px;
+}
+.st-src p { margin: 0 0 4px; }
+.st-src a { color: var(--accent4); }
+
+/* Rail: contents + demand categories */
+.st-toc { display: flex; flex-direction: column; }
+.st-toc a {
+  display: block; font-size: 11px; color: var(--text-secondary); text-decoration: none;
+  padding: 4px 8px; border-left: 2px solid transparent; border-radius: 0 4px 4px 0;
+}
+.st-toc a:hover { color: var(--text); background: var(--surface2); border-left-color: var(--accent); }
+.st-toc a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.st-demand-intro { font-size: 10.5px; color: var(--muted); line-height: 1.55; margin: 0 0 10px; }
+.st-demand-pick { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
+.st-demand-pick .ix-select { width: 100%; }
+.st-demand-pick .ix-select.st-demand-unset { color: var(--muted); }
+.st-demand-pick .ix-select option { color: var(--text); }
+.st-demand-lead-label {
+  font-size: 9px; font-weight: 600; letter-spacing: .9px; text-transform: uppercase; line-height: 1.5;
+  color: var(--muted); margin: 0 0 5px;
+}
+.st-demand-group + .st-demand-group { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.st-demand-ind {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  font-size: 10px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; color: var(--text);
+  text-decoration: none; margin-bottom: 6px;
+}
+a.st-demand-ind:hover .st-demand-ind-name { color: var(--accent); text-decoration: underline; }
+.st-demand-ind-count { font-size: 9.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); white-space: nowrap; }
+.st-demand-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 6px; align-items: start; padding: 4px 0; }
+.st-demand-code { font-size: 9.5px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 1px; }
+.st-demand-name { font-size: 11px; color: var(--text); line-height: 1.4; }
+.st-demand-fn { font-size: 9.5px; color: var(--muted); margin-top: 1px; }
+.st-demand-more { margin-top: 10px; }
+.st-demand-others { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+.st-demand-other { font-size: 10.5px; color: var(--text-secondary); line-height: 1.45; }
+.st-demand-other a { color: var(--text); text-decoration: none; font-weight: 600; }
+.st-demand-other a:hover { color: var(--accent); text-decoration: underline; }
+
+/* ── Spend Analysis ────────────────────────────────────────────────── */
+.st-spend-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.st-spend-window { font-size: 10.5px; color: var(--muted); }
+.ix-kpis.st-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.st-kpis .ix-kpi-value { font-size: 18px; }
+.ix-kpis.st-kpis .ix-kpi.is-large .ix-kpi-value { font-size: 22px; }
+
+.st-donut-wrap { display: flex; align-items: center; justify-content: center; gap: 28px; flex-wrap: wrap; padding: 6px 0; }
+.st-donut-legend { display: flex; flex-direction: column; gap: 9px; min-width: 220px; flex: 1; max-width: 340px; }
+.st-donut-row { display: grid; grid-template-columns: 11px minmax(0, 1fr) auto auto; align-items: center; gap: 9px; font-size: 11.5px; }
+.st-donut-row .nm { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-donut-row .pc { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; text-align: right; min-width: 44px; }
+.st-donut-row .mv { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; min-width: 82px; }
+.st-dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+
+.st-cols { display: flex; justify-content: center; }
+.st-cols svg { display: block; overflow: visible; }
+
+.st-evo-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 10.5px; color: var(--text-secondary); margin-bottom: 6px; }
+.st-evo-legend .ix-legend-item { gap: 7px; }
+.st-evo-summary { font-size: 11.5px; line-height: 1.6; color: var(--text-secondary); margin-top: 8px; }
+.st-evo-summary strong { color: var(--text); }
+
+/* ── Responsive ────────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .ix-kpis.st-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .st-rail-scroll { max-height: none; overflow: visible; padding: 0; margin: 0; }
+  .st-rail::after, .st-rail-more { display: none; }
+}
+@media (max-width: 860px) {
+  .st-landing .ix-page-header { flex-wrap: wrap; }
+  .ix-kpis.st-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .st-filters-sort { margin-left: 0; }
+}

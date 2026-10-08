@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.models.index_data import CommodityIndex
 from app.models.index_layer import IndexMonthlyValue
 from app.models.index_seasonality import (
     METHOD_RATIO_TO_CENTRED_MA12, MONTH_NAMES, IndexSeasonalFactor,
@@ -43,6 +44,16 @@ TIER_MODEST_MAX = 8.0
 # The claim the "Low" note makes. Kept beside the boundary it depends on, so a
 # change to one cannot silently falsify the other.
 LOW_TIER_DEVIATION_CLAIM = 3
+
+# A series whose source publishes it as a step (an annual price spread over the
+# months, "Annual, stepped monthly") has no within-year movement to fit: the
+# only change is the step itself, so a "seasonal" pattern read off it is
+# invented. Matched on the stored, as-authored frequency text.
+STEPPED_FREQUENCY_MARK = "stepped"
+
+
+def is_stepped(frequency: str | None) -> bool:
+    return bool(frequency) and STEPPED_FREQUENCY_MARK in frequency.lower()
 
 
 def compute_factors(points: list[tuple[int, int, float]]) -> list[float] | None:
@@ -209,8 +220,8 @@ class RecomputeReport:
             # Reported, never filled with a flat 100: a series that cannot
             # support a fit is not a series with no seasonality.
             f"  insufficient {self.insufficient:5d}  (fewer than "
-            f"{MIN_MONTHS} monthly actuals, or a calendar month with no "
-            "interior observation)",
+            f"{MIN_MONTHS} monthly actuals, a calendar month with no "
+            "interior observation, or a stepped series)",
         ]
         return "\n".join(lines)
 
@@ -237,7 +248,10 @@ def recompute_series(
     to wire into a nightly job.
     """
     points = _monthly_actuals(db, commodity_id)
-    factors = compute_factors(points)
+    frequency = db.query(CommodityIndex.frequency).filter(
+        CommodityIndex.id == commodity_id).scalar()
+    stepped = is_stepped(frequency)
+    factors = None if stepped else compute_factors(points)
     existing = {
         r.month: r for r in db.query(IndexSeasonalFactor).filter(
             IndexSeasonalFactor.commodity_id == commodity_id,
@@ -256,7 +270,9 @@ def recompute_series(
             db.flush()
         return SeriesResult(
             commodity_id=commodity_id, status="insufficient",
-            reason=(f"{len(points)} monthly actuals — a centred 12-month average "
+            reason=(f"the source publishes this series as stepped ({frequency}); "
+                    "it has no within-year pattern to fit" if stepped else
+                    f"{len(points)} monthly actuals — a centred 12-month average "
                     f"needs at least {MIN_MONTHS} with every calendar month "
                     "represented in the interior"),
         )

@@ -78,11 +78,17 @@ def load_example_data(
     """Seed a runnable demo (products, suppliers, cost models, actuals) into ANY
     team, not just the hardcoded staminachem team seed_all.py provisions. Idempotent —
     seed_staminachem.run()'s existing name-based lookups skip rows that already exist
-    for this team_id, so re-clicking the button is safe."""
+    for this team_id, so re-clicking the button is safe.
+
+    The demo resolves its commodity indexes by name; a database without the
+    reference indexes answers 409 and writes nothing."""
     require_permission(db, current_user, team_id, "products.edit")
 
     import seed_staminachem
-    seed_staminachem.run(team_id=str(team_id), created_by=str(current_user.id))
+    try:
+        seed_staminachem.run(team_id=str(team_id), created_by=str(current_user.id))
+    except seed_staminachem.MissingReferenceData as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
     log_event(db, team_id, current_user.id, "load_example_data", "team", str(team_id))
     db.commit()

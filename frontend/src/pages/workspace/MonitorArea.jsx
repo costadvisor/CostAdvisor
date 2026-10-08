@@ -5,6 +5,8 @@ import { useAuth } from '../../AuthContext';
 import exportCsv from '../../utils/exportCsv';
 import { DriftBar } from './wsCharts';
 import RadarView from '../../components/RadarView';
+import DemoDataNote from '../../components/DemoDataNote';
+import { fmtMoney, fmtSignedMoney, EXPOSURE_NOTE } from '../../utils/currency';
 
 /* Monitor — the standing question of the job: across everything I buy, where am
  * I overpaying right now, before I walk into a negotiation. Rebuilt to the new IA
@@ -13,7 +15,7 @@ import RadarView from '../../components/RadarView';
  *
  * This is a re-platform, not new brains — it wires the EXISTING gap /
  * should-cost-vs-actual outputs (GET /api/portfolio/summary, joined client-side
- * with cost-models/products/families for family grouping + draft products, the
+ * with cost-models/products (each product carries its family) for family grouping + draft products, the
  * same shape PortfolioArea uses). No new backend engine. The trigger radar /
  * priority matrix / alerts that turn "here's a gap" into "fix this one first"
  * are deliberately Wave 3, not built here. */
@@ -35,9 +37,6 @@ const STATUS_FILTERS = [
   { key: 'draft', label: 'Formula draft' },
 ];
 
-const curSym = (c) => (c === 'EUR' ? '€' : c === 'USD' ? '$' : c === 'GBP' ? '£' : c ? `${c} ` : '');
-const fmtMoney = (v) => (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : v.toFixed(3));
-
 function Badge({ color, bg, children, title }) {
   return (
     <span className="ca-badge" title={title} style={{ background: bg, color }}>{children}</span>
@@ -51,7 +50,6 @@ export default function MonitorArea() {
   const [summary, setSummary] = useState(null);   // /api/portfolio/summary
   const [costModels, setCostModels] = useState([]);
   const [products, setProducts] = useState([]);
-  const [families, setFamilies] = useState([]);
   const [reportCur, setReportCur] = useState('USD');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -75,13 +73,11 @@ export default function MonitorArea() {
     Promise.all([
       api.get('/api/cost-models', { params: { team_id: activeTeamId } }),
       api.get('/api/products', { params: { team_id: activeTeamId } }),
-      api.get('/api/chemical-families'),
     ])
-      .then(([cmRes, pRes, fRes]) => {
+      .then(([cmRes, pRes]) => {
         if (cancelled) return null;
         setCostModels(cmRes.data);
         setProducts(pRes.data);
-        setFamilies(fRes.data);
         const counts = {};
         cmRes.data.forEach(cm => { if (cm.currency) counts[cm.currency] = (counts[cm.currency] || 0) + 1; });
         const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'USD';
@@ -94,7 +90,8 @@ export default function MonitorArea() {
     return () => { cancelled = true; };
   }, [activeTeamId]);
 
-  const familyName = (fid) => families.find(f => f.id === fid)?.name || null;
+  // A product's family comes resolved on ProductOut (from its catalogue
+  // product, its cost model's template, or its custom line).
   const productById = useMemo(() => Object.fromEntries(products.map(p => [p.id, p])), [products]);
   const summaryByModel = useMemo(
     () => Object.fromEntries((summary?.models || []).map(m => [m.cost_model_id, m])),
@@ -106,7 +103,7 @@ export default function MonitorArea() {
   const rows = useMemo(() => {
     const cmRows = costModels.map(cm => {
       const s = summaryByModel[cm.id];
-      const fid = productById[cm.product_id]?.chemical_family_id ?? null;
+      const fam = productById[cm.product_id]?.family || null;
       // A cost model with no completed formula still reads as a draft.
       const status = !s ? 'draft'
         : s.flag_price_drift ? 'alert'
@@ -119,7 +116,7 @@ export default function MonitorArea() {
         supplier: cm.supplier_name || null,
         region: cm.region || null,
         currency: cm.currency || reportCur,
-        familyLabel: familyName(fid) || 'No family',
+        familyLabel: fam?.name || 'No family',
         status,
         shouldCost: s ? s.current_should_cost : null,
         actual: s ? s.latest_actual_price : null,
@@ -133,11 +130,15 @@ export default function MonitorArea() {
       kind: 'draft', key: `p-${p.id}`, productId: p.id,
       ref: p.formula || null, name: p.name, supplier: null, region: null,
       currency: reportCur,
-      familyLabel: familyName(p.chemical_family_id) || 'No family',
+      familyLabel: p.family?.name || 'No family',
       status: 'draft', shouldCost: null, actual: null, gap: null, gapPct: null, exposure: 0,
     }));
     return [...cmRows, ...draftRows];
-  }, [costModels, products, families, summaryByModel, productById, reportCur]);
+  }, [costModels, products, summaryByModel, productById, reportCur]);
+
+  // Families the team actually buys in, for the filter chips.
+  const familyLabels = useMemo(
+    () => [...new Set(rows.map(r => r.familyLabel))].sort(), [rows]);
 
   const q = search.trim().toLowerCase();
   const filtered = rows.filter(r => {
@@ -170,14 +171,17 @@ export default function MonitorArea() {
   // Stats — mockup's g4, all from existing outputs.
   const kpis = summary?.kpis;
   const completeCount = costModels.filter(cm => summaryByModel[cm.id]).length;
+  // Products (not cost models) with a live should-cost: a product bought from
+  // two suppliers has two cost models but is one product of the portfolio.
+  const liveProducts = new Set(costModels.filter(cm => summaryByModel[cm.id]).map(cm => cm.product_id)).size;
   const draftCount = rows.filter(r => r.status === 'draft').length;
   // "Awaiting invoice" = a live should-cost exists but no actual price landed yet.
   const awaitingInvoice = rows.filter(r => r.shouldCost != null && r.actual == null).length;
   const totalProducts = products.length;
   const stats = [
-    { lbl: 'Products in portfolio', val: totalProducts, sub: `${completeCount} active · ${draftCount} formula incomplete` },
-    { lbl: 'Should-costs live', val: `${completeCount} / ${totalProducts}`, color: 'var(--accent)', sub: draftCount ? `${draftCount} awaiting formula completion` : 'all products modelled' },
-    { lbl: 'Estimated drift', val: `${curSym(reportCur)}${Math.round(kpis?.total_exposure || 0).toLocaleString()}`, color: (kpis?.total_exposure || 0) > 0 ? 'var(--accent2)' : undefined, sub: 'money at stake vs should-cost' },
+    { lbl: 'Products in portfolio', val: totalProducts, sub: `${completeCount} active cost model${completeCount === 1 ? '' : 's'} · ${draftCount} formula incomplete` },
+    { lbl: 'Should-costs live', val: `${liveProducts} / ${totalProducts}`, color: 'var(--accent)', sub: draftCount ? `${draftCount} awaiting formula completion` : 'all products modelled' },
+    { lbl: 'Estimated drift', val: fmtMoney(kpis?.total_exposure || 0, reportCur, { decimals: 0 }), color: (kpis?.total_exposure || 0) > 0 ? 'var(--accent2)' : undefined, sub: `sum of exposures: today's gap × all volume on record, in ${reportCur}`, title: EXPOSURE_NOTE },
     { lbl: 'Awaiting invoice', val: awaitingInvoice, sub: awaitingInvoice ? 'price not yet received this period' : 'all invoices in' },
   ];
 
@@ -190,7 +194,10 @@ export default function MonitorArea() {
     <div className="ca-page ca-fade-in">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <div className="ca-h1">Monitor</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div className="ca-h1">Monitor</div>
+            <DemoDataNote />
+          </div>
           <p className="ca-subtitle">Should-cost is always live — driven by your linked indices, not invoices. Every product ranked by the money at stake where actuals drift away from it.</p>
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -243,11 +250,11 @@ export default function MonitorArea() {
                 <button key={f.key} className={filterBtn(statusFilter === f.key)} onClick={() => setStatusFilter(f.key)}>{f.label}</button>
               ))}
             </div>
-            {families.length > 0 && <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 2px' }} />}
-            {families.length > 0 && (
+            {familyLabels.length > 0 && <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 2px' }} />}
+            {familyLabels.length > 0 && (
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 <button className={filterBtn(familyFilter === 'all')} onClick={() => setFamilyFilter('all')}>All families</button>
-                {[...new Set(rows.map(r => r.familyLabel))].sort().map(fl => (
+                {familyLabels.map(fl => (
                   <button key={fl} className={filterBtn(familyFilter === fl)} onClick={() => setFamilyFilter(fl)}>{fl}</button>
                 ))}
               </div>
@@ -257,7 +264,7 @@ export default function MonitorArea() {
           {/* Stats */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 14 }}>
             {stats.map(s => (
-              <div key={s.lbl} className="ca-metric">
+              <div key={s.lbl} className="ca-metric" title={s.title}>
                 <div className="ca-metric-lbl">{s.lbl}</div>
                 <div className="ca-metric-val" style={{ color: s.color }}>{s.val}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.sub}</div>
@@ -280,7 +287,7 @@ export default function MonitorArea() {
                     <th>Drift trend</th>
                     <th className="center">Invoice</th>
                     <th className="center">Status</th>
-                    <th className="center">Exposure</th>
+                    <th className="center" title={EXPOSURE_NOTE}>Exposure</th>
                     <th className="center">Actions</th>
                   </tr>
                 </thead>
@@ -304,7 +311,6 @@ export default function MonitorArea() {
                         </tr>
                         {open && group.rows.map(r => {
                           const st = STATUS[r.status];
-                          const cs = curSym(r.currency);
                           return (
                             <tr key={r.key}>
                               <td style={{ width: 4, padding: 0, background: st.color }} />
@@ -316,16 +322,16 @@ export default function MonitorArea() {
                               <td className="center">
                                 {r.shouldCost != null ? (
                                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                    <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent)' }}>{cs}{fmtMoney(r.shouldCost)}</span>
+                                    <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent)' }}>{fmtMoney(r.shouldCost, r.currency)}</span>
                                     <Badge color="var(--accent)" bg="var(--success-bg)">live</Badge>
                                   </div>
                                 ) : <span style={{ color: 'var(--muted)' }}>—</span>}
                               </td>
                               <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.actual != null ? 'var(--accent4)' : 'var(--muted)' }}>
-                                {r.actual != null ? `${cs}${fmtMoney(r.actual)}` : '—'}
+                                {r.actual != null ? fmtMoney(r.actual, r.currency) : '—'}
                               </td>
                               <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.gap > 0 ? 'var(--accent2)' : r.gap < 0 ? 'var(--accent)' : 'var(--muted)' }}>
-                                {r.gap != null ? `${r.gap > 0 ? '+' : ''}${cs}${fmtMoney(Math.abs(r.gap))}` : '—'}
+                                {r.gap != null ? fmtSignedMoney(r.gap, r.currency) : '—'}
                                 {r.gapPct != null && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{r.gapPct > 0 ? '+' : ''}{r.gapPct.toFixed(1)}%</div>}
                               </td>
                               <td>{r.gapPct != null ? <DriftBar value={Math.abs(r.gapPct)} max={maxAbsGap} color={st.color} /> : null}</td>
@@ -338,7 +344,7 @@ export default function MonitorArea() {
                               </td>
                               <td className="center"><Badge color={st.color} bg={st.bg}>{st.label}</Badge></td>
                               <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>
-                                {r.exposure ? `${cs}${Math.round(r.exposure).toLocaleString()}` : '—'}
+                                {r.exposure ? fmtMoney(r.exposure, r.currency) : '—'}
                               </td>
                               <td className="center">
                                 <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
@@ -363,6 +369,7 @@ export default function MonitorArea() {
               </table>
             </div>
           </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10, lineHeight: 1.6 }}>{EXPOSURE_NOTE}</div>
         </>
       ))}
     </div>

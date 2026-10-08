@@ -96,7 +96,7 @@ DIMENSION_KINDS = (
 )
 
 # Same four as the editorial blocks, plus the producer entity this story owns.
-SUBJECT_TYPES = ("formula", "index", "subfamily", "family", "producer")
+SUBJECT_TYPES = ("formula", "index", "product_line", "family", "producer")
 
 # Where a row came from. `decision_file` is the analyst-owned path; `loader` is
 # a mechanical load from a controlled vocabulary. Keeping them distinct is what
@@ -184,7 +184,7 @@ class DimensionAssertion(Base):
     __tablename__ = "dimension_assertions"
     __table_args__ = (
         CheckConstraint(
-            "subject_type IN ('formula','index','subfamily','family','producer')",
+            "subject_type IN ('formula','index','product_line','family','producer')",
             name="ck_dimension_assertion_subject_type",
         ),
     )
@@ -214,8 +214,8 @@ class DimensionAssertion(Base):
         Integer, ForeignKey("commodity_indexes.id", ondelete="SET NULL"), nullable=True)
     family_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("chemical_families.id", ondelete="SET NULL"), nullable=True)
-    subfamily_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("subfamilies.id", ondelete="SET NULL"), nullable=True)
+    product_line_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("product_lines.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # The audit trail for the hit: what the source actually said, and which
     # alias matched it. A bare list of product names cannot be checked by the

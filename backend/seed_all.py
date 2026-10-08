@@ -3,6 +3,7 @@ seed_all.py — one command to fully populate a CostAdvisor database.
 
 Run (fresh DB):
     cd backend && alembic upgrade head && python seed_all.py
+    python seed_all.py --stages 1        # platform reference data only
 
 On Railway:
     cd /app && python seed_all.py
@@ -11,7 +12,7 @@ Idempotent: safe to re-run. Every stage upserts or skips rows that already
 exist, so a second run creates nothing.
 
 Stages run in dependency order — this order matters:
-  1. Platform reference data — regions, chemical families, commodity indexes,
+  1. Platform reference data — regions, commodity indexes,
      index values, system scenarios          (app.seed.seed + seed_update)
   2. Users, teams, team memberships           (inline, exact dev UUIDs)
      jil@staminachem.com (13099867…) and team 6ee41dc2… MUST be created here,
@@ -133,16 +134,56 @@ def _stage(n, title, fn):
         raise
 
 
-def main():
+def _stage_1():
     from app import seed as app_seed
-    import seed_shadow_library
-    import seed_staminachem
+    app_seed.seed()
+    app_seed.seed_update()
 
-    _stage(1, "platform reference data",
-           lambda: (app_seed.seed(), app_seed.seed_update()))
-    _stage(2, "users / teams / memberships", seed_identities)
-    _stage(3, "shadow formula library", seed_shadow_library.run)
-    _stage(4, "staminachem demo data", seed_staminachem.run)
+
+def _stage_3():
+    import seed_shadow_library
+    seed_shadow_library.run()
+
+
+def _stage_4():
+    import seed_staminachem
+    seed_staminachem.run()
+
+
+# Imports stay inside each stage, so `--stages 1` loads no demo seed module.
+STAGES = {
+    1: ("platform reference data", _stage_1),
+    2: ("users / teams / memberships", seed_identities),
+    3: ("shadow formula library", _stage_3),
+    4: ("staminachem demo data", _stage_4),
+}
+
+
+def parse_stages(value: str | None) -> list[int]:
+    """`"1,2"` → `[1, 2]`, kept in dependency order. None means every stage."""
+    if not value:
+        return sorted(STAGES)
+    try:
+        wanted = {int(part) for part in value.split(",") if part.strip()}
+    except ValueError:
+        raise SystemExit(f"--stages takes stage numbers, e.g. 1,2 (got {value!r})")
+    unknown = wanted - set(STAGES)
+    if unknown or not wanted:
+        raise SystemExit(f"--stages: unknown stage(s) {sorted(unknown)}; "
+                         f"choose from {sorted(STAGES)}")
+    return sorted(wanted)
+
+
+def main(argv=None):
+    import argparse
+    parser = argparse.ArgumentParser(description="Populate a CostAdvisor database.")
+    parser.add_argument("--stages", help="comma list of stages to run (default: all). "
+                        "1 = platform reference data only.")
+    args = parser.parse_args(argv)
+
+    for n in parse_stages(args.stages):
+        title, fn = STAGES[n]
+        _stage(n, title, fn)
 
     print("\n=== seed_all complete ===")
 

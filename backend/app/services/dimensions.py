@@ -41,7 +41,8 @@ from app.models.dimension import (
 from app.models.formula_template import FormulaTemplate
 from app.models.index_data import CommodityIndex
 from app.models.product import Product
-from app.models.subfamily import Subfamily
+from app.services.catalog_visibility import platform_or_team_listed_clause
+from app.services.editorial import line_for_key
 
 # How many example subjects to keep on an unresolved row. Enough to recognise
 # the value in context, not enough to turn the queue into a data dump.
@@ -211,7 +212,7 @@ class SubjectLinks:
     template_id: uuid.UUID | None = None
     commodity_id: int | None = None
     family_id: int | None = None
-    subfamily_id: int | None = None
+    product_line_id: int | None = None
 
 
 def resolve_subject(
@@ -247,25 +248,17 @@ def resolve_subject(
         if row:
             links.commodity_id = row.id
     elif subject_type == "family":
-        row = db.query(ChemicalFamily).filter(
-            ChemicalFamily.name == subject_code,
-            ChemicalFamily.team_id.is_(None)).first()
+        # Families are platform-only, unique by name.
+        row = db.query(ChemicalFamily).filter(ChemicalFamily.name == subject_code).first()
         if row:
             links.family_id = row.id
-    elif subject_type == "subfamily":
-        family_name, _, sub_name = subject_code.partition("|")
-        if sub_name:
-            row = (
-                db.query(Subfamily)
-                .join(ChemicalFamily, ChemicalFamily.id == Subfamily.family_id)
-                .filter(Subfamily.name == sub_name,
-                        ChemicalFamily.name == family_name,
-                        Subfamily.team_id.is_(None))
-                .first()
-            )
-            if row:
-                links.subfamily_id = row.id
-                links.family_id = row.family_id
+    elif subject_type == "product_line":
+        # Keyed by the line's `Family|||Line` key (current, else a former key
+        # one current line claims).
+        row = line_for_key(db, subject_code)
+        if row:
+            links.product_line_id = row.id
+            links.family_id = row.family_id
     if cache is not None:
         cache[key] = links
     return links
@@ -320,7 +313,7 @@ def assert_term(
         team_id=team_id, term_id=term.id,
         subject_type=subject_type, subject_code=subject_code, region=region,
         template_id=links.template_id, commodity_id=links.commodity_id,
-        family_id=links.family_id, subfamily_id=links.subfamily_id,
+        family_id=links.family_id, product_line_id=links.product_line_id,
         raw_value=raw_value,
         matched_alias_id=matched_alias.id if matched_alias else None,
         source=source, detail=detail,
@@ -430,18 +423,25 @@ def query_platform(
 
     Backs the Intelligence library, which renders platform tiles — not a team's
     products. This is the grain the old single-"products" framing lost.
+
+    A formula hit is kept only when its template is **listed** (design §2.3:
+    `catalog_visibility`), or is one of the team's own: a pointer, duplicate,
+    absorbed or withdrawn card, or a code with no template, is no tile.
     """
     rows = _assertion_rows(db, kind, code, team_id, region)
     template_ids = {a.template_id for a, _, _ in rows if a.template_id}
     names = {
         t.id: t.name
         for t in db.query(FormulaTemplate).filter(
-            FormulaTemplate.id.in_(template_ids)).all()
+            FormulaTemplate.id.in_(template_ids),
+            platform_or_team_listed_clause(team_id)).all()
     } if template_ids else {}
 
     hits = []
     for assertion, term, alias in rows:
         if subject_type and assertion.subject_type != subject_type:
+            continue
+        if assertion.subject_type == "formula" and assertion.template_id not in names:
             continue
         hits.append(Hit(
             subject_type=assertion.subject_type,

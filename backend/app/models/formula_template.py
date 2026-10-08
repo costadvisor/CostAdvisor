@@ -14,9 +14,27 @@ from app.database import Base
 # (tiered "Lego" chaining, Scrum 58).
 COMPONENT_TYPES = ("index", "fixed", "formula")
 
+# What a catalogue card is. Only `product` and `group` cards are listed; the
+# others answer by id (a pointer or duplicate answers with `redirect_to`).
+CARD_KINDS = ("product", "group", "absorbed", "pointer", "duplicate", "withdrawn")
+# Whether three makers are verified (the supplier floor). Says nothing else.
+# NULL for absorbed, pointer, duplicate and withdrawn cards.
+SUPPLY_STATUSES = ("live", "supply_exception", "supply_pending", "not_audited")
+
+
+def _in_list(column: str, values: tuple[str, ...]) -> str:
+    return f"{column} IN ({', '.join(repr(v) for v in values)})"
+
 
 class FormulaTemplate(Base):
     __tablename__ = "formula_templates"
+    __table_args__ = (
+        CheckConstraint(_in_list("card_kind", CARD_KINDS), name="ck_formula_templates_card_kind"),
+        CheckConstraint(
+            f"supply_status IS NULL OR {_in_list('supply_status', SUPPLY_STATUSES)}",
+            name="ck_formula_templates_supply_status",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -38,18 +56,48 @@ class FormulaTemplate(Base):
     # upserts by. Unique among platform rows only; a fork keeps its origin's
     # code (same rule as chemical_families.code).
     code: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    # Taxonomy spine links (family -> subfamily -> formula). subfamily_id stays
-    # NULL until the reference drop carries the formula->subfamily mapping.
+    # Taxonomy links. A platform template sits on a product line; its family
+    # is the line's family (kept here too, for templates with no line yet).
     family_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("chemical_families.id", ondelete="SET NULL"), nullable=True
     )
-    subfamily_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("subfamilies.id", ondelete="SET NULL"), nullable=True
+    product_line_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("product_lines.id", ondelete="SET NULL"),
+        nullable=True, index=True,
     )
-    # Reference-drop metadata (form / coverage_tier / data_confidence /
-    # region_count); SEED-2 gates low-confidence rows on this.
+    # Structure only: source, regions, region_count, coverage_tier,
+    # data_confidence, combos, variant_overrides, absorbed_via, pricing_gap
+    # {status, line, since} and margin_status. Served to teams through a
+    # narrower allowlist. Prose and provenance go to `internal_meta`.
     catalog_meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Prose and provenance for us only (rationales, ruling notes, the record's
+    # own line key, grade source, review flags). No API schema maps it.
+    internal_meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ── Product metadata from the content drop ───────────────────────────────
+    cas_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    form: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    volatile: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    reference_grade: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Internal: never served.
+    archival_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A GRP-* auto-group card: coverage rows per combo, no components.
+    is_group: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false")
+    group_members: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # The group code that represents this product in the catalogue grid, if
+    # it is an absorbed product. The product stays loaded.
+    absorbed_into: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    full_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ── Card kind and supply status: two separate facts ──────────────────────
+    card_kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="product", server_default="product")
+    supply_status: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    # {source, value, date} only: where the status came from and its raw
+    # value. Never audit fields.
+    supply_status_detail: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The target PID of a pointer or duplicate card.
+    redirect_to: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Nullable since Scrum 58: a template can be defined purely as weighted
     # component lines instead of a free-form expression.
     expression: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -75,6 +123,7 @@ class FormulaTemplate(Base):
         back_populates="template",
         cascade="all, delete-orphan",
     )
+    product_line = relationship("ProductLine")
 
 
 class FormulaTemplateComponent(Base):
@@ -114,6 +163,11 @@ class FormulaTemplateComponent(Base):
             "input_template_id IS NULL OR input_template_id <> template_id",
             name="ck_ftc_no_self_reference",
         ),
+        CheckConstraint(
+            "cost_category IS NULL OR cost_category IN "
+            "('feedstock', 'utility', 'margin', 'fixed', 'packaging')",
+            name="ck_ftc_cost_category",
+        ),
         Index("ix_ftc_template_id", "template_id"),
         Index("ix_ftc_input_template_id", "input_template_id"),
     )
@@ -126,8 +180,14 @@ class FormulaTemplateComponent(Base):
         ForeignKey("formula_templates.id", ondelete="CASCADE"),
         nullable=False,
     )
-    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Widened from String(64) for the September drop: cost-line labels run
+    # to 202 characters.
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     component_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    # The line's cost category — feedstock / utility / margin / fixed /
+    # packaging (the drop's `kind`). Not an index flag: whether a line is
+    # indexed is `component_type`, decided by the tag being in FCOVERED.
+    cost_category: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # No ondelete: deleting a commodity index or a template that other
     # formulas still reference must fail loudly, not silently orphan lines.
     commodity_id: Mapped[int | None] = mapped_column(
@@ -286,6 +346,10 @@ class FormulaRegionCoverage(Base):
     # estimator proposed it, not yet reviewed) / "human_approved" (a person
     # signed off — via mark_coverage_reviewed or estimator approval).
     provenance: Mapped[str] = mapped_column(String(16), default="imported", server_default="imported")
+    # Set when the combo leaves the content drop (a region dropped). The row
+    # and its cost lines stay, because a team cost model may track it; it is
+    # hidden from the catalogue.
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

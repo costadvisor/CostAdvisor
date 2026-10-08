@@ -1,5 +1,9 @@
+import asyncio
+import logging
+
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -13,22 +17,41 @@ from app.rate_limit import limiter
 init_sentry()
 from app.routers import (
     auth, teams, products, cost_models, indexes, prices,
-    volumes, costing, scenarios, suppliers, chemical_families, subfamilies,
+    volumes, costing, scenarios, suppliers,
     fx_rates, audit, portfolio, admin, ai, account, freight_lanes,
     invites, access_requests, settings as settings_router, formulas, demo, regions,
     collaboration, alerts, provider_credentials, sheets, quotes, price_lists,
     negotiation_prep, push, ai_cost_modeler, resolution,
     contracts, radar, editorial, dimensions, index_dossier, seasonality,
     intelligence, support, index_validation,
+    intel_catalogue, intel_reference, strategy, taxonomy,
 )
 # Imported for its side effect: registers the before_flush listener that
 # auto-registers region codes so the region FK never rejects a user write.
 from app.services import regions as _region_events  # noqa: F401
 
 
+logger = logging.getLogger(__name__)
+
+
+def _warm_intelligence() -> None:
+    """Build the Intelligence snapshots (catalogue and reference) so the
+    first page view does not pay for them. Best-effort: it runs after startup,
+    in a worker thread, and any failure (an empty or unmigrated database, a
+    missing module) is logged and ignored. The API never waits for it."""
+    try:
+        from app.services import intel_warm
+        intel_warm.warm()
+    except Exception:  # noqa: BLE001 — a cold first request is the only cost
+        logger.warning("Intelligence warm-up skipped", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    warm = asyncio.create_task(asyncio.to_thread(_warm_intelligence))
     yield
+    if not warm.done():
+        warm.cancel()
 
 
 app = FastAPI(
@@ -61,6 +84,11 @@ async def add_robots_header(request, call_next):
     return response
 
 
+# Compress large JSON payloads (the Intelligence product list is several MB
+# uncompressed). Every StreamingResponse in the app is a one-shot file download,
+# so buffering them here is harmless.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -78,8 +106,6 @@ app.add_middleware(
 # Register routers
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
-app.include_router(chemical_families.router, prefix="/api/chemical-families", tags=["chemical-families"])
-app.include_router(subfamilies.router, prefix="/api/subfamilies", tags=["subfamilies"])
 app.include_router(regions.router, prefix="/api/regions", tags=["regions"])
 app.include_router(suppliers.router, prefix="/api/suppliers", tags=["suppliers"])
 app.include_router(products.router, prefix="/api/products", tags=["products"])
@@ -96,6 +122,10 @@ app.include_router(seasonality.router, prefix="/api/seasonality",
 app.include_router(intelligence.router, prefix="/api/intelligence",
                   tags=["intelligence"])
 app.include_router(support.router, prefix="/api/support", tags=["support"])
+app.include_router(intel_catalogue.router, prefix="/api/intel", tags=["intel"])
+app.include_router(intel_reference.router, prefix="/api/intel", tags=["intel"])
+app.include_router(taxonomy.router, prefix="/api/taxonomy", tags=["taxonomy"])
+app.include_router(strategy.router, prefix="/api/strategy", tags=["strategy"])
 app.include_router(indexes.router, prefix="/api/indexes", tags=["indexes"])
 # Platform-grain index resolution reads (Scrum 74) — deliberately its own
 # surface rather than a mode of /api/indexes, which is team-scoped.

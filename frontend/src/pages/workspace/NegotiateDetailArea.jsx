@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import EvoChart from '../../components/EvoChart';
 import api, { formatApiError } from '../../api';
+import { curSym, decimalsFor, fmtMoney } from '../../utils/currency';
+import DemoDataNote from '../../components/DemoDataNote';
 
 /* ──────────────────────────────────────────────────────────────────────
  * Negotiate detail — the moment the journey pays off: product → gap →
@@ -13,32 +15,12 @@ import api, { formatApiError } from '../../api';
  * .ca-print-only) is the same global CSS Brief.jsx already relies on.
  * ──────────────────────────────────────────────────────────────────── */
 
-const curSym = (c) => (c === 'EUR' ? '€' : c === 'USD' ? '$' : c === 'GBP' ? '£' : c ? `${c} ` : '');
-
 /* Money on this page is the number a buyer reads out in a negotiation, so it must
- * not be ambiguous. `toFixed(3)` rendered a $3/kg should-cost as "$3.000", which in
- * any locale using `.` as a thousands separator reads as three thousand dollars.
- * Fixed locale + decimals from magnitude: 3 → "3.00", 1234.56 → "1,235".
- * (Same rule as PortfolioArea — worth extracting to a shared util next time one of
- * these pages is touched.) */
-const MONEY_LOCALE = 'en-US';
-const decimalsFor = (magnitude) => {
-  const m = Math.abs(magnitude ?? 0);
-  if (m >= 100) return 0;
-  if (m >= 1) return 2;
-  return 4;
-};
-/* `decimals` lets a caller pin every figure in one comparison to the same scale.
- * Deriving decimals per value gave "$1.94" next to "$0.3600" inside a single
- * chart, which reads as two different kinds of number. */
-const fmtMoney = (v, { signed = false, decimals } = {}) => {
-  if (v == null || !Number.isFinite(Number(v))) return '—';
-  const n = Number(v);
-  const dp = decimals != null ? decimals : decimalsFor(n);
-  const body = Math.abs(n).toLocaleString(MONEY_LOCALE, { minimumFractionDigits: dp, maximumFractionDigits: dp });
-  const sign = n < 0 ? '−' : signed && n > 0 ? '+' : '';
-  return `${sign}${body}`;
-};
+ * not be ambiguous: fixed en-US grouping, decimals from magnitude (3 → "3.00",
+ * 1234.56 → "1,235") and the sign in front of the symbol ("+€48", "−€9"). The
+ * rule lives in utils/currency.js (fmtMoney). `decimals` lets a caller pin every
+ * figure in one comparison to the same scale: deriving decimals per value gave
+ * "$1.94" next to "$0.3600" inside a single chart. */
 // Product name is nullable on the model; without a fallback the verdict card
 // rendered a blank line and the subtitle read " · Supplier" with a dangling dot.
 const PRODUCT_FALLBACK = 'Unnamed product';
@@ -75,6 +57,7 @@ export default function NegotiateDetailArea() {
     total_impact, volumes_missing, period_label, evolution, narrative, drivers,
   } = data;
   const sym = curSym(currency);
+  const money = (v, opts) => fmtMoney(v, currency, opts);
 
   // calculate_brief returns an empty evolution only when the cost model has
   // no formula version yet — there is nothing to negotiate from until then.
@@ -131,7 +114,10 @@ export default function NegotiateDetailArea() {
 
       <div className="ca-no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap', gap: 8 }}>
         <div>
-          <div className="ca-h1">Negotiation Brief</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div className="ca-h1">Negotiation Brief</div>
+            <DemoDataNote />
+          </div>
           {/* Built from parts rather than interpolated, so a missing product name
               can't leave a dangling " · " at the front of the line. */}
           <p className="ca-subtitle" style={{ marginBottom: 0 }}>{[displayName, routeLabel].filter(Boolean).join(' · ')}</p>
@@ -159,6 +145,7 @@ export default function NegotiateDetailArea() {
             {destination_country && <div>Destination: {destination_country}</div>}
             <div>Period: {period_label}</div>
             <div>Generated: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+            <DemoDataNote />
           </div>
         </div>
       </div>
@@ -199,14 +186,14 @@ export default function NegotiateDetailArea() {
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Should-Cost</div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: 'var(--accent)' }}>
-              {sym}{fmtMoney(current_should_cost, { decimals: dp })}
+              {money(current_should_cost, { decimals: dp })}
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>per {unit} at {period_label}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Actual Price</div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: hasActual ? 'var(--accent4)' : 'var(--muted)' }}>
-              {hasActual ? `${sym}${fmtMoney(current_actual_price, { decimals: dp })}` : 'Not recorded'}
+              {hasActual ? `${money(current_actual_price, { decimals: dp })}` : 'Not recorded'}
             </div>
             {!hasActual && <div style={{ fontSize: 11, color: 'var(--muted)' }}>from your supplier invoices</div>}
           </div>
@@ -217,7 +204,7 @@ export default function NegotiateDetailArea() {
             </div>
             {hasActual && (
               <div style={{ fontSize: 11, color: verdictColor, fontFamily: "'JetBrains Mono', monospace" }}>
-                {sym}{fmtMoney(gap, { signed: true, decimals: dp })} ({gap_pct > 0 ? '+' : ''}{gap_pct.toFixed(1)}%)
+                {money(gap, { signed: true, decimals: dp })} ({gap_pct > 0 ? '+' : ''}{gap_pct.toFixed(1)}%)
               </div>
             )}
           </div>
@@ -237,29 +224,29 @@ export default function NegotiateDetailArea() {
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Floor</div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 700, color: 'var(--accent4)' }}>
-              {current_floor != null ? `${sym}${fmtMoney(current_floor, { decimals: dp })}` : '—'}
+              {current_floor != null ? `${money(current_floor, { decimals: dp })}` : '—'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>cost before margin — a minimum, not a target</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Should-Cost</div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 700, color: 'var(--accent)' }}>
-              {sym}{fmtMoney(current_should_cost, { decimals: dp })}
+              {money(current_should_cost, { decimals: dp })}
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>fair price — open near here</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Current Ask</div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 700, color: hasActual ? verdictColor : 'var(--muted)' }}>
-              {hasActual ? `${sym}${fmtMoney(current_actual_price, { decimals: dp })}` : 'Not recorded'}
+              {hasActual ? `${money(current_actual_price, { decimals: dp })}` : 'Not recorded'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>what the supplier is charging today</div>
           </div>
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
           {current_floor != null
-            ? <>Your defensible range for this product is <strong>{sym}{fmtMoney(current_floor, { decimals: dp })}</strong> to{' '}
-                <strong>{sym}{fmtMoney(current_should_cost, { decimals: dp })}</strong> — anchor the conversation near should-cost and hold
+            ? <>Your defensible range for this product is <strong>{money(current_floor, { decimals: dp })}</strong> to{' '}
+                <strong>{money(current_should_cost, { decimals: dp })}</strong> — anchor the conversation near should-cost and hold
                 the floor as your walk-away point, not your opening offer.</>
             : 'The floor (cost before margin) is not available for this formula.'}
         </div>
@@ -278,9 +265,15 @@ export default function NegotiateDetailArea() {
               to calculate your total financial exposure.
             </div>
           ) : (
-            <div className="ca-metric-val" style={{ fontFamily: "'JetBrains Mono', monospace", color: total_impact > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
-              {sym}{fmtMoney(total_impact, { signed: true })}
-            </div>
+            <>
+              <div className="ca-metric-val" style={{ fontFamily: "'JetBrains Mono', monospace", color: total_impact > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
+                {money(total_impact, { signed: true })}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.6 }}>
+                Each quarter's gap × that quarter's volume, summed over {period_label} ({evolution.length} quarters).
+                {' '}The exposure on the Dashboard and Monitor is a different figure: today's gap × all volume on record.
+              </div>
+            </>
           )}
         </div>
       )}
@@ -298,6 +291,7 @@ export default function NegotiateDetailArea() {
           <EvoChart
             periods={periodLabels} theoretical={theoretical} actual={actual}
             refCost={current_should_cost}
+            currencySymbol={sym}
             /* One flat should-cost line doesn't need the full canvas. */
             height={hasActual ? 230 : 150}
           />
@@ -339,11 +333,11 @@ export default function NegotiateDetailArea() {
                   ...(divider ? { borderLeft: '1px solid var(--border)', paddingLeft: 6, marginLeft: 2 } : {}),
                 }}>
                   <div style={{ fontSize: 9, color: bold ? color : 'var(--muted)', fontWeight: bold ? 700 : 400, marginBottom: 3, whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace" }}>
-                    {sym}{fmtMoney(value, { decimals: dp })}
+                    {money(value, { decimals: dp })}
                   </div>
                   <div
                     style={{ width: '58%', height: barPx(value), background: color, borderRadius: '3px 3px 0 0', opacity }}
-                    title={`${label} — ${sym}${fmtMoney(value, { decimals: dp })}`}
+                    title={`${label} — ${money(value, { decimals: dp })}`}
                   />
                   <div style={{ fontSize: 8, fontWeight: bold ? 700 : 400, color: 'var(--text-secondary)', marginTop: 5, textAlign: 'center', lineHeight: 1.25, minHeight: 20 }}>
                     {label}
@@ -406,8 +400,8 @@ export default function NegotiateDetailArea() {
                       </td>
                       <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
                         {hasActual
-                          ? `${sym}${fmtMoney(d.contribution_to_gap, { signed: true, decimals: dp })}`
-                          : <>{sym}{fmtMoney(d.component_cost, { decimals: dp })}{share != null && <span style={{ color: 'var(--muted)' }}> · {share.toFixed(0)}%</span>}</>}
+                          ? `${money(d.contribution_to_gap, { signed: true, decimals: dp })}`
+                          : <>{money(d.component_cost, { decimals: dp })}{share != null && <span style={{ color: 'var(--muted)' }}> · {share.toFixed(0)}%</span>}</>}
                       </td>
                       <td className="right">
                         {/* Full border, not a left stripe. The arrow glyph carries

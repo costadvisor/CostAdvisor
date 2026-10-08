@@ -1,0 +1,250 @@
+/* ──────────────────────────────────────────────────────────────────────
+ * Delivered market reports — the report template stylesheet, scoped.
+ *
+ * Every rule of the <style> block the 171 delivered reports share
+ * (docs/drop_live/reports/*.html; taken from "Inorganic Chemicals -
+ * Coagulants.html" — the four variants in the corpus differ only in
+ * comments), re-scoped under `.report-wrap` so none of it reaches the app:
+ *
+ *   - `:root{--navy…}` and `body{…}` became `.report-wrap{…}`. The report
+ *     reuses the app's token names (--bg --text --border --accent); declared
+ *     on the wrapper they re-theme the report only, never the page.
+ *   - `*{margin:0;padding:0;box-sizing:border-box}` became `.report-wrap *`:
+ *     the template spaces everything from zero, so anything placed inside
+ *     the wrapper starts from zero too.
+ *   - Every other selector is prefixed, inside `@media(max-width:700px)`
+ *     as well. Class names are unchanged: the stored section HTML
+ *     (backend/app/services/content_drop/report_sanitize.py allows exactly the
+ *     31 classes the sections use) matches them as delivered.
+ *   - The two `@media print` blocks are left out (print-only, and one hides
+ *     every <button> on the page).
+ *
+ * The report keeps its own light palette in every app theme: it is a
+ * delivered document, shown as one. Usage — the stored sections are the
+ * inner HTML of the delivered <section> elements:
+ *
+ *   <div class="report-wrap">
+ *     <section id="overview">{section.html}</section> …
+ *   </div>
+ *
+ * Header, table of contents, gemstone/lever-table and footer rules are kept
+ * for completeness (nothing in the stored sections uses them).
+ * ──────────────────────────────────────────────────────────────────── */
+.report-wrap *{margin:0;padding:0;box-sizing:border-box}
+/* Theming: override --accent / --accent-light (e.g. amber #d4842a / #fef3e2) to retheme a whole report. */
+.report-wrap{--navy:#1a2744;--teal:#0e8c7f;--teal-light:#e8f5f3;--amber:#d4842a;--amber-light:#fef3e2;--red:#c53030;--red-light:#fde8e8;--bg:#f5f7fa;--white:#fff;--text:#2d3748;--text-light:#718096;--border:#e2e8f0;--accent:#0e8c7f;--accent-light:#e8f5f3}
+.report-wrap{font-family:'Inter',system-ui,sans-serif;color:var(--text);line-height:1.7;background:var(--white)}
+.report-wrap .report-header{background:var(--navy);color:#fff;padding:3rem 2rem;position:relative;overflow:hidden}
+.report-wrap .report-header::after{content:'';position:absolute;right:-60px;top:-60px;width:300px;height:300px;border-radius:50%;background:var(--accent);opacity:.15}
+.report-wrap .report-header .badge{display:inline-block;background:var(--accent);color:#fff;font-size:.7rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:.3rem .7rem;border-radius:3px;margin-bottom:1rem}
+.report-wrap .report-header h1{font-size:2.2rem;font-weight:700;line-height:1.2;max-width:700px;margin-bottom:.5rem}
+.report-wrap .report-header .subtitle{color:rgba(255,255,255,.7);font-size:1rem;max-width:600px}
+.report-wrap .report-header .meta{margin-top:1.5rem;font-size:.8rem;color:rgba(255,255,255,.5)}
+.report-wrap .container{max-width:900px;margin:0 auto;padding:0 1.5rem}
+.report-wrap nav.toc{background:var(--bg);border-bottom:1px solid var(--border);padding:1.2rem 0;position:sticky;top:0;z-index:10}
+.report-wrap nav.toc ol{list-style:none;display:flex;flex-wrap:wrap;gap:.5rem 1.2rem;max-width:900px;margin:0 auto;padding:0 1.5rem;justify-content:center}
+.report-wrap nav.toc li a{font-size:.78rem;color:var(--text-light);text-decoration:none;font-weight:500;letter-spacing:.02em}
+.report-wrap nav.toc li a:hover{color:var(--accent)}
+.report-wrap section{padding:2.5rem 0;border-bottom:1px solid var(--border)}
+.report-wrap section:last-of-type{border-bottom:none}
+.report-wrap h2{font-size:1.4rem;font-weight:700;color:var(--navy);margin-bottom:1rem;padding-bottom:.5rem;border-bottom:2px solid var(--accent)}
+.report-wrap h3{font-size:1.05rem;font-weight:600;color:var(--navy);margin:1.5rem 0 .5rem}
+.report-wrap p{margin-bottom:1rem}
+.report-wrap .insight{background:var(--teal-light);border-left:3px solid var(--teal);padding:1rem 1.2rem;margin:1.5rem 0;border-radius:0 4px 4px 0;font-size:.9rem}
+.report-wrap .insight strong{color:var(--teal)}
+.report-wrap .warning{background:var(--amber-light);border-left:3px solid var(--amber);padding:1rem 1.2rem;margin:1.5rem 0;border-radius:0 4px 4px 0;font-size:.9rem}
+.report-wrap .warning strong{color:var(--amber)}
+.report-wrap .risk{background:var(--red-light);border-left:3px solid var(--red);padding:1rem 1.2rem;margin:1.5rem 0;border-radius:0 4px 4px 0;font-size:.9rem}
+.report-wrap .risk strong{color:var(--red)}
+.report-wrap table{width:100%;border-collapse:collapse;margin:1.5rem 0;font-size:.85rem}
+.report-wrap thead th{background:var(--navy);color:#fff;text-align:left;padding:.6rem .8rem;font-weight:600;font-size:.75rem;letter-spacing:.03em;text-transform:uppercase}
+.report-wrap tbody td{padding:.6rem .8rem;border-bottom:1px solid var(--border);vertical-align:top}
+.report-wrap tbody tr:nth-child(even){background:var(--bg)}
+.report-wrap .pro{color:var(--teal);font-weight:600}
+.report-wrap .con{color:var(--red);font-weight:600}
+.report-wrap .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin:1.5rem 0}
+.report-wrap .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;margin:1.5rem 0}
+.report-wrap .card{background:var(--bg);padding:1.2rem;border-radius:6px;border:1px solid var(--border)}
+.report-wrap .card h4{font-size:.85rem;font-weight:600;color:var(--navy);margin-bottom:.5rem}
+.report-wrap .card p{font-size:.85rem;margin-bottom:0;color:var(--text-light)}
+.report-wrap .stat{text-align:center;padding:1.5rem 1rem}
+.report-wrap .stat .num,.report-wrap .stat .value{font-size:2rem;font-weight:700;color:var(--accent);line-height:1}
+.report-wrap .stat .label{font-size:.75rem;color:var(--text-light);margin-top:.3rem;text-transform:uppercase;letter-spacing:.04em}
+.report-wrap .chain-diagram{display:flex;align-items:center;gap:0;margin:1.5rem 0;flex-wrap:wrap}
+.report-wrap .chain-step{background:var(--bg);border:1px solid var(--border);padding:.8rem 1rem;border-radius:4px;font-size:.8rem;text-align:center;flex:1;min-width:120px}
+.report-wrap .chain-step strong{display:block;font-size:.75rem;color:var(--accent);text-transform:uppercase;letter-spacing:.03em;margin-bottom:.2rem}
+.report-wrap .chain-arrow{font-size:1.2rem;color:var(--text-light);padding:0 .3rem;flex-shrink:0}
+.report-wrap .supplier-tag{display:inline-block;font-size:.7rem;padding:.15rem .5rem;border-radius:10px;margin:.1rem;font-weight:500}
+.report-wrap .tag-producer{background:#dcfce7;color:#166534}
+.report-wrap .tag-distributor{background:#fef3c7;color:#92400e}
+.report-wrap .tag-integrated{background:#dbeafe;color:#1e40af}
+.report-wrap .src{font-size:.75rem;color:var(--text-light);font-style:italic;margin-top:1rem;padding-top:.5rem;border-top:1px dashed var(--border)}
+.report-wrap .src a{color:var(--accent)}
+.report-wrap .kraljic-wrap{display:flex;gap:2rem;align-items:flex-start;margin:1.5rem 0;flex-wrap:wrap}
+.report-wrap .kraljic-wrap .analysis{flex:1;min-width:250px}
+/* Gemstone */
+.report-wrap .gemstone-section{margin:2rem 0;padding:1.5rem;background:var(--bg);border-radius:8px;border:1px solid var(--border)}
+.report-wrap .gemstone-section h4{font-size:.95rem;font-weight:700;color:var(--navy);margin-bottom:.3rem}
+.report-wrap .gemstone-section .gem-subtitle{font-size:.8rem;color:var(--accent);font-weight:600;margin-bottom:.8rem}
+.report-wrap .lever-table{width:100%;border-collapse:collapse;font-size:.82rem;margin-top:.5rem}
+.report-wrap .lever-table thead th{background:var(--navy);color:#fff;padding:.6rem .7rem;text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:.03em}
+.report-wrap .lever-table thead th.score-col{background:#475569;text-align:center;font-size:.65rem;min-width:55px;padding:.6rem .3rem}
+.report-wrap .lever-table tbody td{padding:.6rem .7rem;border-bottom:1px solid var(--border);vertical-align:top;color:var(--text)}
+.report-wrap .lever-table tbody tr:nth-child(even){background:rgba(245,247,250,.5)}
+.report-wrap .lever-table tbody tr:hover{background:rgba(14,140,127,.04)}
+.report-wrap .lever-table .score-cell{text-align:center;vertical-align:middle;padding:.4rem;position:relative}
+.report-wrap .lever-table .score-cell .score-box{display:inline-block;width:36px;height:28px;border:1.5px dashed #cbd5e1;border-radius:4px;background:#fff;vertical-align:middle}
+.report-wrap .score-cb{width:18px;height:18px;accent-color:#0e8c7f;cursor:pointer}
+.report-wrap .score-dd{width:48px;height:30px;border:1.5px solid #e2e8f0;border-radius:4px;background:#fff;text-align:center;font-size:.82rem;font-weight:600;color:#1a2744;font-family:Inter,sans-serif;cursor:pointer;outline:none}
+.report-wrap .score-dd:focus{border-color:#0e8c7f}
+.report-wrap .printable-note{font-size:.75rem;color:var(--text-light);text-align:center;margin:1rem 0;font-style:italic}
+.report-wrap .footer{background:var(--navy);color:rgba(255,255,255,.5);padding:2rem;text-align:center;font-size:.75rem}
+@media(max-width:700px){.report-wrap .grid-2,.report-wrap .grid-3{grid-template-columns:1fr}.report-wrap .report-header h1{font-size:1.6rem}.report-wrap .chain-diagram{flex-direction:column}.report-wrap .chain-arrow{transform:rotate(90deg)}.report-wrap .kraljic-wrap{flex-direction:column}}
+/* ---- Phase 0 template upgrade: components referenced by the report-gen skill ---- */
+.report-wrap .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin:1.5rem 0}
+.report-wrap .stat-grid .stat{background:var(--accent-light);border:1px solid var(--border);border-radius:6px}
+.report-wrap .pestel-table{width:100%;border-collapse:collapse;margin:1.5rem 0;font-size:.85rem}
+.report-wrap .pestel-table thead th{background:var(--navy);color:#fff;text-align:left;padding:.6rem .8rem;font-weight:600;font-size:.75rem;letter-spacing:.03em;text-transform:uppercase}
+.report-wrap .pestel-table tbody td{padding:.6rem .8rem;border-bottom:1px solid var(--border);vertical-align:top}
+.report-wrap .pestel-table tbody tr:nth-child(even){background:var(--bg)}
+.report-wrap .pestel-table tbody td:first-child{font-weight:600;color:var(--navy);white-space:nowrap}
+.report-wrap .porter-card,.report-wrap .driver-card,.report-wrap .app-card{background:var(--bg);padding:1.2rem;border-radius:6px;border:1px solid var(--border)}
+.report-wrap .porter-card h4,.report-wrap .driver-card h4,.report-wrap .app-card h4{font-size:.85rem;font-weight:600;color:var(--navy);margin-bottom:.5rem}
+.report-wrap .porter-card p,.report-wrap .driver-card p,.report-wrap .app-card p{font-size:.85rem;margin-bottom:0;color:var(--text-light)}
+.report-wrap .app-card ul{margin:.3rem 0 0 1.1rem;padding:0;font-size:.85rem;color:var(--text-light)}
+.report-wrap .supplier-table{width:100%;border-collapse:collapse;margin:1.5rem 0;font-size:.85rem}
+.report-wrap .supplier-table thead th{background:var(--navy);color:#fff;text-align:left;padding:.6rem .8rem;font-weight:600;font-size:.75rem;letter-spacing:.03em;text-transform:uppercase}
+.report-wrap .supplier-table tbody td{padding:.6rem .8rem;border-bottom:1px solid var(--border);vertical-align:top}
+.report-wrap .supplier-table tbody tr:nth-child(even){background:var(--bg)}
+.report-wrap .cost-bar{display:grid;grid-template-columns:200px 1fr 66px;align-items:center;gap:.6rem;margin:.45rem 0;font-size:.8rem}
+.report-wrap .cost-bar .label{text-align:right;color:var(--text)}
+.report-wrap .cost-bar .track{display:flex;align-items:center;width:100%}.report-wrap .cost-bar .fill{height:16px;background:var(--accent);min-width:3px}.report-wrap .cost-bar .fill.lo{border-radius:3px 0 0 3px}.report-wrap .cost-bar .fill.hi{opacity:.34;border-radius:0 3px 3px 0}.report-wrap .cost-bar .track .fill.lo:only-child{border-radius:3px}
+.report-wrap .cost-bar .weight{font-weight:600;color:var(--navy)}
+/* Optional components (from the chlor-alkali exemplar) */
+.report-wrap .ecu-box{background:linear-gradient(135deg,#1a2744 0%,#2d4a7a 100%);color:#fff;padding:1.5rem;border-radius:8px;margin:1.5rem 0;text-align:center}
+.report-wrap .ecu-box .ratio{font-size:2rem;font-weight:700;letter-spacing:-.02em}
+.report-wrap .ecu-box .explain{font-size:.85rem;color:rgba(255,255,255,.7);margin-top:.5rem}
+.report-wrap .seesaw{display:flex;align-items:center;justify-content:center;gap:1.5rem;margin:1.5rem 0;padding:1.5rem;background:var(--bg);border-radius:8px}
+.report-wrap .seesaw-side{text-align:center;flex:1}
+.report-wrap .seesaw-side .product{font-weight:700;font-size:1rem;color:var(--navy)}
+.report-wrap .seesaw-side .direction{font-size:1.8rem;line-height:1}
+.report-wrap .seesaw-center{font-size:.8rem;color:var(--text-light);font-weight:500}
+/* .tag-integrated default above is #dbeafe/#1e40af; indigo variant used by the chlor-alkali exemplar: */
+.report-wrap .tag-integrated-alt{background:#e0e7ff;color:#3730a3}
+@media(max-width:700px){.report-wrap .stat-grid{grid-template-columns:1fr 1fr}.report-wrap .cost-bar{grid-template-columns:110px 1fr 58px}.report-wrap .seesaw{flex-direction:column}}
+
+/* ── Additions for the in-app viewer (not in the delivered template) ───── */
+/* Header crumb line: the delivered header sets these as an inline style. */
+.report-wrap .report-header .ixr-hdr-crumb{font-size:.75rem;color:rgba(255,255,255,.6);margin:0 0 .4rem;letter-spacing:.04em}
+.report-wrap .report-header h1{color:#fff}
+.report-wrap .footer p{margin-bottom:.5rem}
+.report-wrap .footer p:last-child{margin-bottom:0}
+/* The Kraljic SVG is authored at a fixed 260px; keep it inside narrow columns. */
+.report-wrap svg{max-width:100%;height:auto}
+/* Kraljic quadrant labels. Every delivered chart (171 reports) draws the four
+   labels as its first four <text>s, centred in their quadrant (y=70 / y=180),
+   and the position dot (cy 42–175) often sits on one of them. Move the labels
+   to the outer edge of their quadrant: top pair to y≈24, bottom pair to
+   y≈226. Display only; the SVG itself is unchanged. The two axis captions
+   (5th and 6th <text>, one with a rotate attribute) are not touched. The
+   report SVGs are all this chart (viewBox 0 0 260 260); 2 of them are not
+   inside .kraljic-wrap, hence the viewBox selector. */
+.report-wrap svg[viewBox="0 0 260 260"] text:nth-of-type(1),
+.report-wrap svg[viewBox="0 0 260 260"] text:nth-of-type(2){transform:translateY(-46px)}
+.report-wrap svg[viewBox="0 0 260 260"] text:nth-of-type(3),
+.report-wrap svg[viewBox="0 0 260 260"] text:nth-of-type(4){transform:translateY(46px)}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * Report viewer frame (prefix `ixr-`) — app UI AROUND the document, so it
+ * uses the theme tokens (styles.css) and never sits inside .report-wrap.
+ * ════════════════════════════════════════════════════════════════════ */
+.ixr-viewer {
+  --ixr-top: calc(var(--ix-sticky-top, 54px) + var(--ixr-dh-h, 0px));
+  display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 28px;
+  align-items: start; min-width: 0;
+}
+.ixr-viewer.no-toc { grid-template-columns: minmax(0, 1fr); }
+.ixr-main { min-width: 0; display: flex; flex-direction: column; gap: 14px; max-width: 980px; }
+.ixr-lead { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+/* Contents rail */
+.ixr-toc {
+  position: sticky; top: calc(var(--ixr-top) + 16px);
+  max-height: calc(100vh - var(--ixr-top) - 32px); overflow-y: auto; overscroll-behavior: contain;
+  padding: 2px 0 8px;
+}
+.ixr-toc-title {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--card-eyebrow); padding: 0 10px 8px;
+}
+.ixr-toc-list, .ixr-toc-sub { list-style: none; margin: 0; padding: 0; }
+.ixr-toc-link {
+  display: flex; gap: 8px; align-items: baseline; width: 100%;
+  padding: 6px 10px; border: none; border-left: 2px solid var(--border);
+  background: transparent; cursor: pointer; text-align: left;
+  font-family: inherit; font-size: 12px; line-height: 1.35; color: var(--text-secondary);
+}
+.ixr-toc-link:hover { color: var(--text); background: var(--surface2); }
+.ixr-toc-link:focus-visible, .ixr-toc-sublink:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ixr-toc-link.is-active { color: var(--text); font-weight: 600; border-left-color: var(--accent); background: var(--accent-dim); }
+.ixr-toc-num { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 10.5px; min-width: 10px; }
+.ixr-toc-link.is-active .ixr-toc-num { color: var(--accent); }
+.ixr-toc-sub { border-left: 2px solid var(--border); padding: 2px 0 6px; }
+.ixr-toc-sublink {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  width: 100%; padding: 3px 10px 3px 28px; border: none; background: transparent; cursor: pointer;
+  text-align: left; font-family: inherit; font-size: 11px; line-height: 1.4; color: var(--muted);
+}
+.ixr-toc-sublink:hover { color: var(--text); }
+.ixr-toc-foot { font-size: 10.5px; color: var(--muted); padding: 12px 10px 0; }
+
+/* The sheet: the delivered document keeps its own white palette in every
+   theme, so it is framed like paper on the app background. */
+.ixr-paper {
+  background: #fff; border-radius: 10px; overflow: hidden; min-width: 0;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 10px 30px rgba(15, 23, 42, .07);
+}
+[data-theme="default"] .ixr-paper, [data-theme="amber"] .ixr-paper,
+:root:not([data-theme]) .ixr-paper {
+  border-color: rgba(255, 255, 255, .08);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .4), 0 18px 48px rgba(0, 0, 0, .55);
+}
+.ixr-paper > .report-wrap > .container { padding-bottom: 1rem; }
+/* Section jumps land below the sticky nav + detail header. */
+.ixr-paper .report-wrap section,
+.ixr-paper .report-wrap h3 { scroll-margin-top: calc(var(--ixr-top) + 16px); }
+
+/* A single fragment (Strategy panels): no sheet unless asked for. */
+.ixr-fragment { background: transparent; }
+.ixr-fragment.is-paper { background: #fff; border-radius: 8px; padding: 1rem 1.25rem; border: 1px solid var(--border); }
+
+/* Caveat banner (ReportCaveat) */
+.ixr-caveat {
+  display: flex; gap: 11px; align-items: flex-start;
+  border: 1px solid var(--border); border-left: 3px solid var(--accent3);
+  background: var(--warn-bg); border-radius: 0 8px 8px 0;
+  padding: 10px 14px; font-size: 12px; line-height: 1.6; color: var(--text-secondary);
+}
+.ixr-caveat-icon {
+  flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; margin-top: 1px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; font-style: italic; font-family: Georgia, serif;
+  background: var(--accent3); color: var(--bg);
+}
+.ixr-caveat-body { min-width: 0; }
+.ixr-caveat-body p { margin: 0; }
+.ixr-caveat-body strong { color: var(--text); font-weight: 600; }
+.ixr-caveat-body a { color: var(--accent4); text-decoration: none; font-weight: 500; }
+.ixr-caveat-body a:hover { text-decoration: underline; }
+.ixr-caveat-current { color: var(--text); font-weight: 600; }
+.ixr-caveat-this { font-weight: 400; color: var(--muted); }
+
+@media (max-width: 1100px) {
+  .ixr-viewer { grid-template-columns: minmax(0, 1fr); }
+  .ixr-toc { position: static; max-height: none; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+  .ixr-toc-sub { display: none; }
+}
+@media (max-width: 700px) {
+  .ixr-paper { border-radius: 0; }
+}

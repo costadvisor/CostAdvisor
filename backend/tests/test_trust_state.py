@@ -751,6 +751,11 @@ def test_the_queue_does_not_swallow_the_whole_library(db, tenant_a):
         pytest.skip("not enough loaded combos to make the ratio meaningful")
     queued = sum(report.by_grade.get(g, 0) for g in GRADES_NEEDING_REVIEW)
     assert queued < report.considered, "everything is queued"
+    # Medium means "resolves through a proxy". The grade reads the type-code
+    # registry's proxy_status, and a library whose registry marks no code as a
+    # proxy (the September drop has no proxy signal) cannot land anything there.
+    if db.query(TypeCode).filter(TypeCode.proxy_status == "proxy").first() is None:
+        pytest.skip("the loaded library carries no proxy signal, so no combo can grade medium")
     assert report.by_grade.get(GRADE_MEDIUM, 0) > 0, (
         "no combo landed at medium — the proxy tier is not doing its job of "
         "keeping softer signals out of the queue"
@@ -832,19 +837,27 @@ def test_the_queue_doubles_as_the_cross_library_coverage_index(db, tenant_a, cli
         c = client_as(tenant_a)
         base = f"/api/formulas/review-queue?team_id={tenant_a['team_id']}"
 
+        def codes(query):
+            """Every template code the query returns, page by page: a loaded
+            library holds more than one page (limit caps at 500)."""
+            found, offset = set(), 0
+            while True:
+                page = c.get(f"{base}&{query}&limit=500&offset={offset}").json()
+                found |= {r["template_code"] for r in page["rows"]}
+                offset += 500
+                if offset >= page["total"]:
+                    return found
+
         # Scoped by grade so the assertion does not depend on how many combos
         # the library happens to hold — the point is the filter's presence, not
         # a page position.
-        high = {r["template_code"] for r in
-                c.get(f"{base}&grade={GRADE_HIGH}&limit=500").json()["rows"]}
+        high = codes(f"grade={GRADE_HIGH}")
         assert clean_tpl.code in high, "a clean combo must appear in the index"
 
-        blocked = {r["template_code"] for r in
-                   c.get(f"{base}&grade={GRADE_BLOCKED}&limit=500").json()["rows"]}
+        blocked = codes(f"grade={GRADE_BLOCKED}")
         assert bad_tpl.code in blocked
 
-        queued_high = {r["template_code"] for r in
-                       c.get(f"{base}&grade={GRADE_HIGH}&needs_review=true&limit=500").json()["rows"]}
+        queued_high = codes(f"grade={GRADE_HIGH}&needs_review=true")
         assert clean_tpl.code not in queued_high, "the explicit queue must still exclude clean combos"
 
         # And the index is strictly the larger of the two.

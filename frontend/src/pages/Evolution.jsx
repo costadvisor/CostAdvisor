@@ -4,6 +4,7 @@ import EvoChart from '../components/EvoChart';
 import { PIE_COLORS, INCOTERMS } from '../utils/constants';
 import api, { formatApiError } from '../api';
 import exportCsv from '../utils/exportCsv';
+import { curSym } from '../utils/currency';
 
 function qLabel(y, q) { return `Q${q}-${String(y).slice(-2)}`; }
 
@@ -140,7 +141,7 @@ export default function Evolution() {
   const gapComponents = data_gaps?.length
     ? [...new Set(data_gaps.map(g => g.component_label))]
     : [];
-  const sym = currency === 'EUR' ? '\u20AC' : '$';
+  const sym = curSym(currency);
 
   // Quarter picker options bounded by available index data
   const quarterOpts = (data.available_from_year && data.available_to_year)
@@ -265,6 +266,7 @@ export default function Evolution() {
             actual={actual}
             refCost={reference_cost}
             componentSeries={componentSeries}
+            currencySymbol={sym}
           />
         </div>
 
@@ -335,7 +337,7 @@ export default function Evolution() {
                 {periods.map((p, i) => <td key={i} className="center" style={{ color: 'var(--accent)' }}>{sym}{p.theoretical.toFixed(3)}</td>)}
               </tr>
               <tr>
-                <td>Gap ($)</td>
+                <td>Gap ({sym.trim() || '$'})</td>
                 {periods.map((p, i) => <td key={i} className="center" style={{ color: p.gap > 0 ? 'var(--accent2)' : p.gap < 0 ? 'var(--accent)' : 'var(--muted)' }}>{p.gap !== null ? `${p.gap > 0 ? '+' : ''}${sym}${p.gap.toFixed(3)}` : '\u2014'}</td>)}
               </tr>
               <tr>

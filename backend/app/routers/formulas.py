@@ -3,7 +3,6 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -37,10 +36,12 @@ from app.schemas.formula_template import (
     FormulaResolveOut,
     ResolvedLineOut,
     FormulaEvaluateOut,
+    TaxonomyRef,
 )
 from app.schemas.negotiation_position import NegotiationResponseOut
 from app.constants.trust import GRADE_CAVEATS
 from app.services.audit import log_event, log_platform_event
+from app.services.catalog_visibility import platform_or_team_listed_clause, status_badge
 from app.services.trust import (
     QUEUE_ORDERS, apply_assessment, assess, recompute_all as trust_recompute_all,
     review_queue, sign_off as trust_sign_off,
@@ -136,9 +137,12 @@ def _trust_rollups(db: Session, template_ids: list[uuid.UUID]) -> dict:
     """
     if not template_ids:
         return {}
+    # Withdrawn combos are no longer priced by the source: they leave the
+    # rollup as they leave every list.
     rows = (
         db.query(FormulaRegionCoverage)
-        .filter(FormulaRegionCoverage.template_id.in_(template_ids))
+        .filter(FormulaRegionCoverage.template_id.in_(template_ids),
+                FormulaRegionCoverage.withdrawn_at.is_(None))
         .all()
     )
     acc: dict = {}
@@ -177,36 +181,83 @@ def _trust_rollups(db: Session, template_ids: list[uuid.UUID]) -> dict:
     return out
 
 
-def _enrich_with_emails(db: Session, templates: list[FormulaTemplate]) -> list[FormulaTemplateOut]:
-    """Batch-load creator emails + taxonomy names to avoid N+1 queries."""
+def _taxonomy_refs(db: Session, templates: list[FormulaTemplate]) -> dict:
+    """template id -> (line, sub-family, family) display refs. Four batch
+    queries, whatever the number of templates.
+
+    The line is the template's own; a team fork without one takes its
+    origin's (forks inherit the line). The family is the template's own,
+    else the line's. A template on no line (off-axis, card-only, a team's
+    hand-built formula) has a family or nothing.
+    """
     from app.models.chemical_family import ChemicalFamily
+    from app.models.product_line import ProductLine
     from app.models.subfamily import Subfamily
 
+    origin_ids = {t.origin_id for t in templates
+                  if t.product_line_id is None and t.origin_id is not None}
+    origin_line = dict(
+        db.query(FormulaTemplate.id, FormulaTemplate.product_line_id)
+        .filter(FormulaTemplate.id.in_(origin_ids)).all()
+    ) if origin_ids else {}
+    line_of = {t.id: t.product_line_id or origin_line.get(t.origin_id) for t in templates}
+
+    line_ids = {i for i in line_of.values() if i is not None}
+    lines = {
+        row.id: row
+        for row in db.query(ProductLine.id, ProductLine.name, ProductLine.family_id,
+                            ProductLine.subfamily_id)
+        .filter(ProductLine.id.in_(line_ids)).all()
+    } if line_ids else {}
+    sub_ids = {row.subfamily_id for row in lines.values() if row.subfamily_id is not None}
+    subs = dict(
+        db.query(Subfamily.id, Subfamily.name).filter(Subfamily.id.in_(sub_ids)).all()
+    ) if sub_ids else {}
+    family_ids = {t.family_id for t in templates if t.family_id is not None}
+    family_ids |= {row.family_id for row in lines.values()}
+    families = {
+        row.id: row
+        for row in db.query(ChemicalFamily.id, ChemicalFamily.code, ChemicalFamily.name)
+        .filter(ChemicalFamily.id.in_(family_ids)).all()
+    } if family_ids else {}
+
+    out = {}
+    for t in templates:
+        line = lines.get(line_of[t.id])
+        family = families.get(t.family_id if t.family_id is not None
+                              else (line.family_id if line else None))
+        sub_id = line.subfamily_id if line else None
+        out[t.id] = {
+            "product_line": TaxonomyRef(id=line.id, name=line.name) if line else None,
+            # An unnamed sub-family still has an id; its name stays null.
+            "subfamily": TaxonomyRef(id=sub_id, name=subs.get(sub_id)) if sub_id else None,
+            "family": TaxonomyRef(id=family.id, name=family.name) if family else None,
+            "family_code": family.code if family else None,
+            "family_name": family.name if family else None,
+        }
+    return out
+
+
+def _enrich_with_emails(db: Session, templates: list[FormulaTemplate]) -> list[FormulaTemplateOut]:
+    """Batch-load creator emails, taxonomy and trust rollups (no N+1)."""
     creator_ids = list({t.created_by for t in templates})
     email_map = {
         u.id: u.email
         for u in db.query(User).filter(User.id.in_(creator_ids)).all()
     } if creator_ids else {}
-    family_ids = list({t.family_id for t in templates if t.family_id is not None})
-    family_map = {
-        f.id: (f.code, f.name)
-        for f in db.query(ChemicalFamily).filter(ChemicalFamily.id.in_(family_ids)).all()
-    } if family_ids else {}
-    sub_ids = list({t.subfamily_id for t in templates if t.subfamily_id is not None})
-    sub_map = {
-        s.id: s.name
-        for s in db.query(Subfamily).filter(Subfamily.id.in_(sub_ids)).all()
-    } if sub_ids else {}
-
+    refs = _taxonomy_refs(db, templates)
     trust_map = _trust_rollups(db, [t.id for t in templates])
 
     result = []
     for t in templates:
         out = FormulaTemplateOut.model_validate(t)
         out.creator_email = email_map.get(t.created_by)
-        if t.family_id in family_map:
-            out.family_code, out.family_name = family_map[t.family_id]
-        out.subfamily_name = sub_map.get(t.subfamily_id)
+        ref = refs[t.id]
+        out.family_code, out.family_name = ref["family_code"], ref["family_name"]
+        out.family = ref["family"]
+        out.subfamily = ref["subfamily"]
+        out.product_line = ref["product_line"]
+        out.status = status_badge(t.supply_status)
         out.trust_summary = trust_map.get(t.id)
         result.append(out)
     return result
@@ -218,12 +269,17 @@ def list_formulas(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Listed platform templates plus this team's own (design §2.3).
+
+    The platform side applies the one visibility rule: a pointer, duplicate,
+    absorbed or withdrawn card, or one with no live combo, is not listed. A
+    by-id read (`GET /{template_id}` and the per-template routes) still opens
+    it, so an existing link to such a card keeps working.
+    """
     require_permission(db, current_user, team_id, "formulas.view")
     templates = (
         db.query(FormulaTemplate)
-        .filter(
-            or_(FormulaTemplate.team_id == None, FormulaTemplate.team_id == team_id)  # noqa: E711
-        )
+        .filter(platform_or_team_listed_clause(team_id))
         .order_by(FormulaTemplate.team_id.nullsfirst(), FormulaTemplate.name)
         .all()
     )
@@ -261,7 +317,7 @@ def create_formula(
     db.commit()
 
     refreshed = db.query(FormulaTemplate).filter(FormulaTemplate.id == template.id).first()
-    out = FormulaTemplateOut.model_validate(refreshed)
+    out = _enrich_with_emails(db, [refreshed])[0]
     out.creator_email = current_user.email
     return out
 
@@ -302,7 +358,7 @@ def update_formula(
     db.commit()
 
     refreshed = db.query(FormulaTemplate).filter(FormulaTemplate.id == template_id).first()
-    out = FormulaTemplateOut.model_validate(refreshed)
+    out = _enrich_with_emails(db, [refreshed])[0]
     out.creator_email = current_user.email
     return out
 
@@ -340,8 +396,9 @@ def fork_formula(
         created_by=current_user.id,
         name=source.name,
         code=source.code,
+        # The fork sits where its origin sits in the supply taxonomy.
         family_id=source.family_id,
-        subfamily_id=source.subfamily_id,
+        product_line_id=source.product_line_id,
         catalog_meta=source.catalog_meta,
         description=source.description,
         expression=source.expression,
@@ -358,7 +415,8 @@ def fork_formula(
             commodity_id=c.commodity_id, input_template_id=c.input_template_id,
             region=c.region, weight_pct=c.weight_pct, is_proxy=c.is_proxy, sort_order=c.sort_order,
         ))
-    # Copy per-region coverage (base price / margin).
+    # Copy per-region coverage (base price / margin). A combo the source has
+    # withdrawn is not copied: the fork starts from what is priced today.
     #
     # **A platform sign-off does not carry into a fork** — the open call SCRUM-78
     # asks to be made explicitly. The platform expert vouched for the platform
@@ -367,7 +425,9 @@ def fork_formula(
     # fingerprint is dropped for the same reason, and the grade is recomputed
     # below from the fork's own rows so a later edit regrades the fork and not
     # its origin.
-    for cov in db.query(FormulaRegionCoverage).filter(FormulaRegionCoverage.template_id == source.id).all():
+    for cov in db.query(FormulaRegionCoverage).filter(
+            FormulaRegionCoverage.template_id == source.id,
+            FormulaRegionCoverage.withdrawn_at.is_(None)).all():
         db.add(FormulaRegionCoverage(
             template_id=fork.id, region=cov.region, base_price=cov.base_price,
             currency=cov.currency, margin_pct=cov.margin_pct,
@@ -387,7 +447,7 @@ def fork_formula(
     db.commit()
 
     refreshed = db.query(FormulaTemplate).filter(FormulaTemplate.id == fork.id).first()
-    out = FormulaTemplateOut.model_validate(refreshed)
+    out = _enrich_with_emails(db, [refreshed])[0]
     out.creator_email = current_user.email
     return out
 
@@ -1148,3 +1208,25 @@ def resolve_formula(
             for l in lines
         ],
     )
+
+
+# Declared last: `/{template_id}` would otherwise shadow the one-segment GET
+# routes above (`/review-queue`, `/can-edit-platform`).
+@router.get("/{template_id}", response_model=FormulaTemplateOut)
+def get_formula(
+    template_id: uuid.UUID,
+    team_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """One template by id: a platform template (listed or not) or one of this
+    team's own.
+
+    The list applies the catalogue's visibility rule; a by-id read does not,
+    so a team's existing link to an absorbed, pointer or duplicate card still
+    opens (design §2.3). A pointer or duplicate names its replacement in
+    `redirect_to`.
+    """
+    require_permission(db, current_user, team_id, "formulas.view")
+    template = _get_visible_template(db, template_id, team_id)
+    return _enrich_with_emails(db, [template])[0]

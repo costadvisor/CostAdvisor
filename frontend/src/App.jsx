@@ -46,6 +46,16 @@ import NegotiationPrepArea from './pages/workspace/NegotiationPrepArea';
 import IntelligenceArea from './pages/workspace/IntelligenceArea';
 import IntelligenceComboArea from './pages/workspace/IntelligenceComboArea';
 import WhatsLeft from './pages/WhatsLeft';
+import ProductsPage from './pages/intel/ProductsPage';
+import ProductDetailPage from './pages/intel/ProductDetailPage';
+import LinesPage from './pages/intel/LinesPage';
+import LineDetailPage from './pages/intel/LineDetailPage';
+import CategoriesPage from './pages/intel/CategoriesPage';
+import IndustryDetailPage from './pages/intel/IndustryDetailPage';
+import SuppliersPage from './pages/intel/SuppliersPage';
+import SupplierDetailPage from './pages/intel/SupplierDetailPage';
+import StrategyLandingPage from './pages/strategy/StrategyLandingPage';
+import StrategyCategoryPage from './pages/strategy/StrategyCategoryPage';
 import { useAuth } from './AuthContext';
 
 export default function App() {
@@ -101,11 +111,27 @@ export default function App() {
             <Route path="/negotiate" element={<NegotiateArea />} />
             <Route path="/negotiate/:costModelId/prep" element={<NegotiationPrepArea />} />
             <Route path="/negotiate/:costModelId" element={<NegotiateDetailArea />} />
-            <Route path="/intelligence" element={<IntelligenceArea />} />
+            {/* Intelligence layer (demo build, DEMO_BUILD_SPEC §7). The static
+                segments below outrank the `:costModelId` param route — react-router
+                6 ranks by specificity, not order — so /intelligence/products never
+                resolves as a cost model id. */}
+            <Route path="/intelligence" element={<Navigate to="/intelligence/products" replace />} />
+            <Route path="/intelligence/products" element={<ProductsPage />} />
+            <Route path="/intelligence/products/:pid" element={<ProductDetailPage />} />
+            <Route path="/intelligence/lines" element={<LinesPage />} />
+            <Route path="/intelligence/lines/:lineRef" element={<LineDetailPage />} />
+            <Route path="/intelligence/categories" element={<CategoriesPage />} />
+            <Route path="/intelligence/categories/:industrySlug" element={<IndustryDetailPage />} />
+            <Route path="/intelligence/suppliers" element={<SuppliersPage />} />
+            <Route path="/intelligence/suppliers/:id" element={<SupplierDetailPage />} />
+            {/* The Wave 3 combo grid used to own /intelligence; it keeps a home here. */}
+            <Route path="/intelligence/combos" element={<IntelligenceArea />} />
             {/* Combo grain is the library's own; the cost-model route resolves a
                 product to the same combo and reports how it got there. */}
             <Route path="/intelligence/combo/:templateId/:region" element={<IntelligenceComboArea />} />
             <Route path="/intelligence/:costModelId" element={<IntelligenceComboArea />} />
+            <Route path="/strategy" element={<StrategyLandingPage />} />
+            <Route path="/strategy/:slug" element={<StrategyCategoryPage />} />
 
             {/* Was the index of six clickable mockups; all six are built, so it
                 now lists only what no coding session can close. */}

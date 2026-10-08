@@ -1,6 +1,11 @@
 """
 Seed script: Add Jacobi activated carbon indexes, products, supplier, and cost models
 from the Excel files (indices costing + proposition formules).
+
+Commodity indexes are resolved by name. The run refuses before writing
+anything when a cost-model line names an index that neither exists nor is
+created here, or when a name it would write values to belongs to a content
+series (`commodity_key` set): demo values never land on a licensed series.
 """
 import uuid
 from datetime import datetime, timezone
@@ -159,7 +164,6 @@ INDEX_VALUES = [
 
 # ─── 2. Chemical family ──────────────────────────────────────────────────────
 
-CHEMICAL_FAMILY = "Activated Carbon"
 
 # ─── 3. Products (from Proposition formules) ─────────────────────────────────
 
@@ -229,13 +233,36 @@ SUPPLIER_NAME = "Jacobi Carbons"
 SUPPLIER_COUNTRY = "Sweden"
 
 
+class MissingReferenceData(RuntimeError):
+    """An index the demo needs is missing, or is a content series."""
+
+
+def check_commodities(existing: dict[str, str | None]) -> None:
+    """`existing` maps every commodity name in the database to its
+    `commodity_key`. Raises before any write (see the module docstring)."""
+    created = {row[0] for row in NEW_COMMODITIES}
+    written = created | {name for name, _region, _values in INDEX_VALUES}
+    used = {name for cm in COST_MODELS for _label, name, _w in cm["components"] if name}
+    missing = sorted(n for n in used if n not in existing and n not in created)
+    content = sorted(n for n in written | used if existing.get(n) is not None)
+    if missing or content:
+        problems = []
+        if missing:
+            problems.append(f"missing: {', '.join(missing)}")
+        if content:
+            problems.append(f"owned by the content load: {', '.join(content)}")
+        raise MissingReferenceData("Jacobi demo commodity indexes: " + "; ".join(problems))
+
+
 def run():
     with engine.begin() as conn:
         # ── 1. Insert commodity indexes ──────────────────────────────────
         commodity_ids = {}
 
         # Get existing commodity ids
-        rows = conn.execute(text("SELECT id, name FROM commodity_indexes")).fetchall()
+        rows = conn.execute(text(
+            "SELECT id, name, commodity_key FROM commodity_indexes")).fetchall()
+        check_commodities({r[1]: r[2] for r in rows})
         for r in rows:
             commodity_ids[r[1]] = r[0]
 
@@ -277,18 +304,8 @@ def run():
                 inserted_vals += 1
         print(f"  Upserted {inserted_vals} index values")
 
-        # ── 3. Chemical family ───────────────────────────────────────────
-        row = conn.execute(text(
-            "SELECT id FROM chemical_families WHERE name = :name"
-        ), {"name": CHEMICAL_FAMILY}).fetchone()
-        if row:
-            family_id = row[0]
-            print(f"  Chemical family exists: {CHEMICAL_FAMILY} (id={family_id})")
-        else:
-            family_id = conn.execute(text(
-                "INSERT INTO chemical_families (name) VALUES (:name) RETURNING id"
-            ), {"name": CHEMICAL_FAMILY}).scalar()
-            print(f"  Created chemical family: {CHEMICAL_FAMILY} (id={family_id})")
+        # Products get no chemical family: families are the platform taxonomy,
+        # loaded from the content drop, and a seed must not add its own.
 
         # ── 4. Supplier ──────────────────────────────────────────────────
         row = conn.execute(text(
@@ -316,12 +333,12 @@ def run():
             else:
                 pid = str(uuid.uuid4())
                 conn.execute(text(
-                    "INSERT INTO products (id, team_id, created_by, name, formula, unit, chemical_family_id, created_at, updated_at) "
-                    "VALUES (:id, :tid, :uid, :name, :formula, :unit, :fid, :now, :now)"
+                    "INSERT INTO products (id, team_id, created_by, name, formula, unit, created_at, updated_at) "
+                    "VALUES (:id, :tid, :uid, :name, :formula, :unit, :now, :now)"
                 ), {
                     "id": pid, "tid": TEAM_ID, "uid": CREATED_BY,
                     "name": p["name"], "formula": p["formula"], "unit": p["unit"],
-                    "fid": family_id, "now": now,
+                    "now": now,
                 })
                 product_ids[p["name"]] = pid
                 print(f"  Created product: {p['name']} (id={pid})")

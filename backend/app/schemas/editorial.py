@@ -74,7 +74,7 @@ class BlockOut(BaseModel):
     template_id: uuid.UUID | None = None
     commodity_id: int | None = None
     family_id: int | None = None
-    subfamily_id: int | None = None
+    product_line_id: int | None = None
     body_format: str
     provenance: str
     badge: ProvenanceBadge

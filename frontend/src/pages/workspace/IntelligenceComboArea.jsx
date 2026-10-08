@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Sparkline } from './wsCharts';
@@ -8,9 +8,11 @@ import { Sparkline } from './wsCharts';
  * The ID card, at formula x region combo grain (Wave 3, SCRUM-75 + 76 + 77).
  *
  * **Two calls, by design.** The derived half is one endpoint (series, drivers,
- * cycle, seasonality, volatility, trust); the composed editorial + dimensions
- * half is another. Neither is a copy of the other, and folding them into one
- * would put a second source of truth behind half the page.
+ * cycle, seasonality, volatility, trust); the dimensions half is another.
+ * Neither is a copy of the other, and folding them into one would put a second
+ * source of truth behind half the page. The written intelligence (makers,
+ * notes, drivers) is not repeated here: it lives on the catalogue product
+ * page, and this page links to it.
  *
  * Three things the old page got wrong that this fixes:
  *   - it computed a cycle percentile over whatever history it happened to have
@@ -20,9 +22,10 @@ import { Sparkline } from './wsCharts';
  *   - it rendered an unconditional "not yet reviewed by an in-house chemistry
  *     expert". That caveats combos nobody questioned and vouches for none of
  *     them; the caveat now comes from the combo's own trust grade.
- *   - its second tab was a placeholder waiting for editorial persistence. That
- *     store exists now, so the tab renders real blocks — and says plainly when
- *     there are none, rather than implying the content was reviewed away.
+ *   - its second tab was a placeholder waiting for editorial persistence. It now
+ *     shows the formula's dimension tags and links to the product page, and
+ *     says plainly when there is nothing, rather than implying the content
+ *     was reviewed away.
  * ──────────────────────────────────────────────────────────────────── */
 
 const GRADE = {
@@ -41,21 +44,6 @@ const CYCLE_COLOR = {
 };
 
 const MONTHS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
-
-const BLOCK_LABEL = {
-  functionalities: 'Functionality',
-  applications: 'Applications',
-  suppliers: 'Suppliers',
-  supplier_note: 'Supplier note',
-  compliance: 'Compliance',
-  macro_drivers: 'Macro drivers',
-  substitution: 'Substitution',
-  supply: 'Supply',
-  demand: 'Demand',
-  synthesis_route: 'Synthesis route',
-  current_events: 'Current events',
-  narrative: 'Narrative',
-};
 
 const KIND_LABEL = {
   functionality: 'Functionality',
@@ -313,30 +301,44 @@ function DerivedTab({ d, onFixAnchor }) {
   );
 }
 
-/* ── Tab 2: the composed editorial + dimensions half ──────────────────────── */
+/* ── Tab 2: dimensions, and the way to the product page ──────────────────── */
 
-function ContextTab({ card, dims, code }) {
-  const blocks = Object.entries(card?.blocks || {});
+function ProductPageLink({ pid }) {
+  return (
+    <Card title="Product page"
+      sub="Makers, market, notes and drivers for this product are on its catalogue page.">
+      <Link className="ca-btn ca-btn-primary ca-btn-sm" style={{ textDecoration: 'none' }}
+        to={`/intelligence/products/${encodeURIComponent(pid)}`}>
+        Open the product page
+      </Link>
+    </Card>
+  );
+}
+
+function ContextTab({ dims, code, productPid }) {
   const dimEntries = Object.entries(dims?.dimensions || {})
     .filter(([, terms]) => (terms || []).length > 0);
 
-  if (blocks.length === 0 && dimEntries.length === 0) {
+  if (dimEntries.length === 0) {
     return (
-      <div className="ca-card" style={{ padding: 32, textAlign: 'center' }}>
-        <div style={{ fontSize: 13, marginBottom: 8 }}>No context recorded for {code}</div>
-        {/* Says which of the two halves is missing and why, rather than letting
-            "nothing here" read as "reviewed and found empty". */}
-        <div style={{ fontSize: 11, color: 'var(--muted)', maxWidth: 540, margin: '0 auto', lineHeight: 1.6 }}>
-          Editorial blocks and dimension assertions both have somewhere to live now, but
-          nothing has been authored or asserted against this formula. An empty card means
-          "not written yet", not "reviewed and found to have nothing".
+      <>
+        {productPid && <ProductPageLink pid={productPid} />}
+        <div className="ca-card" style={{ padding: 32, textAlign: 'center' }}>
+          <div style={{ fontSize: 13, marginBottom: 8 }}>No dimension tags recorded for {code}</div>
+          {/* Says what is missing, rather than letting "nothing here" read as
+              "reviewed and found empty". */}
+          <div style={{ fontSize: 11, color: 'var(--muted)', maxWidth: 540, margin: '0 auto', lineHeight: 1.6 }}>
+            Nothing has been asserted against this formula yet. An empty card means
+            "not written yet", not "reviewed and found to have nothing".
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   return (
     <>
+      {productPid && <ProductPageLink pid={productPid} />}
       {dimEntries.length > 0 && (
         <Card title="Dimensions" sub="What this formula is tagged as, and where each tag came from.">
           {dimEntries.map(([kind, terms]) => (
@@ -361,36 +363,6 @@ function ContextTab({ card, dims, code }) {
         </Card>
       )}
 
-      {blocks.map(([blockType, b]) => (
-        <Card key={blockType}
-          title={BLOCK_LABEL[blockType] || blockType.replace(/_/g, ' ')}
-          sub={card.resolved_from?.[blockType]}>
-          {/* The provenance badge and its caveat ship together with the block. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-            <span className="ca-badge" style={{
-              background: b.badge?.reviewed ? 'var(--success-bg)' : 'var(--neutral-bg)',
-              color: b.badge?.reviewed ? 'var(--accent)' : 'var(--muted)',
-            }}>
-              {b.badge?.label || b.provenance}
-            </span>
-            {b.badge?.caveat && (
-              <span style={{ fontSize: 10, color: 'var(--accent3)' }}>{b.badge.caveat}</span>
-            )}
-            <span style={{ fontSize: 10, color: 'var(--muted)', marginLeft: 'auto' }}>
-              v{b.current_version_no ?? '—'}
-            </span>
-          </div>
-          {b.body_text && (
-            <div style={{ fontSize: 12, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{b.body_text}</div>
-          )}
-          {b.body_json && (
-            <pre style={{
-              fontSize: 10, background: 'var(--surface2)', padding: 10,
-              borderRadius: 6, overflow: 'auto', maxHeight: 240,
-            }}>{JSON.stringify(b.body_json, null, 2)}</pre>
-          )}
-        </Card>
-      ))}
     </>
   );
 }
@@ -405,8 +377,8 @@ export default function IntelligenceComboArea() {
 
   const [tab, setTab] = useState('derived');
   const [derived, setDerived] = useState(null);
-  const [card, setCard] = useState(null);
   const [dims, setDims] = useState(null);
+  const [productPid, setProductPid] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -424,21 +396,35 @@ export default function IntelligenceComboArea() {
       .finally(() => setLoading(false));
   }, [activeTeamId, templateId, region, costModelId]);
 
-  // Call 2 — the composed editorial + dimensions half, keyed on the formula code
-  // the first call resolved. Deliberately separate: neither is a copy of the
-  // other, and one endpoint returning both would put a second source of truth
-  // behind half the page.
+  // Call 2 — the dimensions half, keyed on the formula code the first call
+  // resolved. Deliberately separate: neither is a copy of the other, and one
+  // endpoint returning both would put a second source of truth behind half
+  // the page.
   const code = derived?.template_code;
   useEffect(() => {
     if (!activeTeamId || !code) return;
-    const enc = encodeURIComponent(code);
-    const p = { team_id: activeTeamId };
-    api.get(`/api/editorial/cards/formula/${enc}`,
-      { params: { ...p, ...(derived?.coverage_region ? { region: derived.coverage_region } : {}) } })
-      .then(({ data }) => setCard(data)).catch(() => setCard(null));
-    api.get(`/api/dimensions/subjects/formula/${enc}`, { params: p })
+    setDims(null);
+    api.get(`/api/dimensions/subjects/formula/${encodeURIComponent(code)}`, { params: { team_id: activeTeamId } })
       .then(({ data }) => setDims(data)).catch(() => setDims(null));
-  }, [activeTeamId, code, derived?.coverage_region]);
+  }, [activeTeamId, code]);
+
+  // The catalogue product page answers by PID. A platform card's code is its
+  // PID, and a team fork keeps its origin's code; a team's own formula has no
+  // product page, so it gets no link.
+  const derivedTemplateId = derived?.template_id;
+  useEffect(() => {
+    setProductPid(null);
+    if (!activeTeamId || !derivedTemplateId) return;
+    let alive = true;
+    api.get(`/api/formulas/${derivedTemplateId}`, { params: { team_id: activeTeamId } })
+      .then(({ data }) => {
+        if (!alive) return;
+        const onCatalogue = data.team_id == null || data.origin_id != null;
+        setProductPid(onCatalogue && data.code ? data.code : null);
+      })
+      .catch(() => { if (alive) setProductPid(null); });
+    return () => { alive = false; };
+  }, [activeTeamId, derivedTemplateId]);
 
   const title = derived
     ? `${derived.template_code || 'Formula'} · ${derived.coverage_region || derived.region_requested}`
@@ -447,7 +433,7 @@ export default function IntelligenceComboArea() {
   return (
     <div className="ca-page ca-fade-in">
       <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ marginBottom: 10 }}
-        onClick={() => navigate(params.get('from') === 'portfolio' ? '/portfolio' : '/intelligence')}>
+        onClick={() => navigate(params.get('from') === 'portfolio' ? '/portfolio' : '/intelligence/combos')}>
         ← Back
       </button>
 
@@ -480,7 +466,7 @@ export default function IntelligenceComboArea() {
         <DerivedTab d={derived} onFixAnchor={() => navigate('/formulas')} />
       )}
       {derived && tab === 'context' && (
-        <ContextTab card={card} dims={dims} code={derived.template_code} />
+        <ContextTab dims={dims} code={derived.template_code} productPid={productPid} />
       )}
     </div>
   );

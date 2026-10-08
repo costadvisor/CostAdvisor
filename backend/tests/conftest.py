@@ -168,6 +168,67 @@ def _make_jwt(user_id: uuid.UUID) -> str:
     )
 
 
+@pytest.fixture(autouse=True)
+def _restore_active_calibration():
+    """Put the active volatility ladder back after every test.
+
+    Lifted from upstream's `test_index_dossier.py` so it guards the whole suite.
+    `recompute_volatility_calibration` deactivates whatever ladder is active and
+    commits a new active row. A test that recomputes would otherwise leave
+    `active_calibration()` pointing at a ladder fitted to its fixture series, and
+    every later percentile read (test_intelligence, the content index loader's
+    own ladder) would sit on the wrong scale.
+
+    So the ladders a test adds are deleted with their breakpoints, and the row
+    that was active before is made active again. The fixture uses its own
+    session and restores `bypass_rls_var`, so it changes nothing a test sees.
+    """
+    def _with_bypass(fn):
+        prior = bypass_rls_var.get()
+        bypass_rls_var.set(True)
+        s = SessionLocal()
+        try:
+            return fn(s)
+        finally:
+            s.close()
+            bypass_rls_var.set(prior)
+
+    def _snapshot(s):
+        active = s.execute(text(
+            "SELECT id FROM volatility_calibrations WHERE is_active")).scalar()
+        ids = {r[0] for r in s.execute(text("SELECT id FROM volatility_calibrations"))}
+        s.rollback()
+        return active, ids
+
+    prior_active, before = _with_bypass(_snapshot)
+    yield
+
+    def _restore(s):
+        after = {r[0] for r in s.execute(text("SELECT id FROM volatility_calibrations"))}
+        created = after - before
+        if not created:
+            current = s.execute(text(
+                "SELECT id FROM volatility_calibrations WHERE is_active")).scalar()
+            if current == prior_active:
+                s.rollback()
+                return
+        for cid in created:
+            s.execute(text("DELETE FROM volatility_breakpoints WHERE calibration_id = :i"),
+                      {"i": str(cid)})
+            s.execute(text("DELETE FROM volatility_calibrations WHERE id = :i"),
+                      {"i": str(cid)})
+        # Reactivate only after the replacements are gone: a partial unique
+        # index allows exactly one active row.
+        if prior_active is not None:
+            s.execute(text("UPDATE volatility_calibrations SET is_active = false "
+                           "WHERE is_active AND id <> :i"), {"i": str(prior_active)})
+            s.execute(text("UPDATE volatility_calibrations SET is_active = true WHERE id = :i"),
+                      {"i": str(prior_active)})
+        s.commit()
+
+    _with_bypass(_restore)
+
+
 @pytest.fixture
 def db():
     """Raw session with RLS bypassed — for test setup/teardown/assertions."""
@@ -254,3 +315,49 @@ def tenant_a(user_factory):
 @pytest.fixture
 def tenant_b(user_factory):
     return user_factory()
+
+
+@pytest.fixture(scope="session")
+def content_loaded():
+    """The test database holds a real load of the current content drop.
+
+    For tests that read loaded content (design §5.6). Checks that a
+    `content_loads` row exists and that the latest one names the commit in the
+    drop's `_manifest.json` (read by `tests/content_drop_expect.py`). It never
+    skips: a test that needs content and finds none, or finds an older load,
+    is looking at a stale test database, so every test that asks for this
+    fixture fails with the rebuild instruction. Returns the latest row as a
+    dict (`id`, `source_commit`, `source_date`, `finished_at`, `drop_dir`).
+    """
+    from tests import content_drop_expect as expect
+
+    rebuild = (
+        "Rebuild the test database: build the package database with "
+        "`scripts/ops/rebuild_env.py build ... --drop-dir <drop>`, then "
+        "`dropdb <db>_test; createdb -T <db> <db>_test`."
+    )
+    try:
+        commit = expect.source_commit()
+    except expect.DropMissing as exc:
+        pytest.fail(f"content_loaded: {exc}", pytrace=False)
+
+    prior = bypass_rls_var.get()
+    bypass_rls_var.set(True)
+    s = SessionLocal()
+    try:
+        row = s.execute(text(
+            "SELECT id, source_commit, source_date, finished_at, drop_dir "
+            "FROM content_loads ORDER BY id DESC LIMIT 1")).mappings().first()
+        s.rollback()
+    finally:
+        s.close()
+        bypass_rls_var.set(prior)
+
+    if row is None:
+        pytest.fail("content_loaded: the test database has no content load "
+                    f"(content_loads is empty). {rebuild}", pytrace=False)
+    if row["source_commit"] != commit:
+        pytest.fail(f"content_loaded: the test database was loaded from "
+                    f"{row['source_commit']}, but the drop at {expect.drop_dir()} is {commit}. "
+                    f"{rebuild}", pytrace=False)
+    return dict(row)

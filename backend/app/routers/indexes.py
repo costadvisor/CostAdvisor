@@ -17,8 +17,6 @@ from app.models.index_data import (
 from app.models.cost_model import CostModel, FormulaVersion, FormulaComponent
 from app.models.product import Product
 from app.models.supplier import Supplier
-from app.models.chemical_family import ChemicalFamily
-from app.models.subfamily import Subfamily
 from app.routers.auth import get_current_user
 from app.services.permissions import require_permission as _require_permission
 from app.schemas.index_data import (
@@ -27,7 +25,7 @@ from app.schemas.index_data import (
     CellOverrideRequest, BulkOverrideRequest,
     FilterOptionsOut, IndexImpactItem, IndexImpactResponse,
     IndexValuePublicOut, PublicQuarterPoint, ProxyLogicUpdate, CompositeUpdate,
-    IndexProjectionOut, IndexUsageItem,
+    IndexProjectionOut,
 )
 from app.services.data_resolver import resolve_index_values
 from app.services.file_parser import parse_index_upload
@@ -307,37 +305,6 @@ def list_commodities(
         item.regions = sorted(region_map.get(row.id, ()))
         out.append(item)
     return out
-
-
-@router.get("/usage", response_model=list[IndexUsageItem])
-def list_index_usage(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """commodity_id -> real family/subfamily, in one query, off the FK
-    map_index_families.py populates — the read path a grid needs, with no
-    per-row join through FormulaTemplateComponent (that join only matters for
-    the mapping pass itself, not for reading the result back). Platform-grain
-    like /api/resolution: this is a fact about the shared catalog, not a
-    team's own data, so no team_id parameter."""
-    rows = (
-        db.query(CommodityIndex, ChemicalFamily, Subfamily)
-        .filter(CommodityIndex.family_id.isnot(None))
-        .outerjoin(ChemicalFamily, ChemicalFamily.id == CommodityIndex.family_id)
-        .outerjoin(Subfamily, Subfamily.id == CommodityIndex.subfamily_id)
-        .all()
-    )
-    return [
-        IndexUsageItem(
-            commodity_id=ci.id,
-            family_id=fam.id if fam else None,
-            family_code=fam.code if fam else None,
-            family_name=fam.name if fam else None,
-            subfamily_id=sub.id if sub else None,
-            subfamily_name=sub.name if sub else None,
-        )
-        for ci, fam, sub in rows
-    ]
 
 
 @router.post("/commodities", response_model=CommodityIndexOut)

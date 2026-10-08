@@ -1,11 +1,13 @@
 import { PIE_COLORS } from '../utils/constants';
 
-/* `height` sets the viewBox height (default 230, unchanged for existing callers).
+/* `currencySymbol` prefixes the y-axis prices (default '$', unchanged for callers
+ * that do not pass it); pass the model's own symbol, e.g. '€' for EUR.
+ * `height` sets the viewBox height (default 230, unchanged for existing callers).
  * Because the SVG renders at `width: 100%` with `height: auto`, the viewBox aspect
  * ratio decides the on-screen height — on a 1250px-wide card the default becomes
  * ~327px tall, which is a lot of room to give a chart that has only one flat line
  * to draw. Callers with nothing to compare can pass something shorter. */
-export default function EvoChart({ periods, theoretical, actual, refCost, componentSeries, height = 230 }) {
+export default function EvoChart({ periods, theoretical, actual, refCost, componentSeries, height = 230, currencySymbol = '$' }) {
   const W = 880, H = height;
   const PAD = { l: 50, r: 16, t: 16, b: 34 };
 
@@ -60,7 +62,7 @@ export default function EvoChart({ periods, theoretical, actual, refCost, compon
         <g key={i}>
           <line x1={PAD.l} y1={yScale(v)} x2={W - PAD.r} y2={yScale(v)} stroke="var(--chart-grid)" strokeWidth="1" />
           <text x={PAD.l - 6} y={yScale(v) + 3.5} fill="var(--muted)" fontSize="9" textAnchor="end" fontFamily="'JetBrains Mono', monospace">
-            ${Math.round(v)}
+            {currencySymbol}{Math.round(v)}
           </text>
         </g>
       ))}

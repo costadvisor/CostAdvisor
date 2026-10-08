@@ -3,20 +3,54 @@ import uuid
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
 from app.models.user import User
-from app.models.cost_model import CostModel
+from app.models.cost_model import CostModel, FormulaVersion
 from app.models.price_data import ActualPrice
 from app.models.actual_volume import ActualVolume
 from app.routers.auth import get_current_user
 from app.schemas.costing import EvolutionRequest, DataGap
-from app.services.costing_engine import calculate_should_cost, calculate_evolution, calculate_forward_should_cost
+from app.services.costing_engine import (
+    calculate_should_cost, calculate_evolution, calculate_forward_should_cost, _current_quarter,
+    _default_period_range,
+)
+from app.services.data_resolver import get_single_index_value, index_lookup_cache
 from app.services.fx_converter import convert_price
 from app.services.permissions import require_permission
 
 router = APIRouter()
+
+# Every read below runs inside `index_lookup_cache()`: one request asks for the
+# same (commodity, region, quarter) index value many times over (each cost
+# model, each period of its evolution, the base quarter once per period), and
+# the memo answers the repeats. Opened after the permission check, closed when
+# the response is built; see data_resolver.index_lookup_cache.
+
+
+def _team_cost_models(db: Session, team_id: uuid.UUID) -> list[CostModel]:
+    """The team's cost models with what every portfolio endpoint reads on each
+    one (formula versions + components, product, supplier) loaded up front,
+    instead of one lazy load per model and attribute."""
+    return (
+        db.query(CostModel)
+        .options(
+            selectinload(CostModel.formula_versions).selectinload(FormulaVersion.components),
+            joinedload(CostModel.product),
+            joinedload(CostModel.supplier),
+        )
+        .filter(CostModel.team_id == team_id)
+        .all()
+    )
+
+
+def _should_cost_today(db: Session, cm: CostModel) -> float:
+    """The should-cost at the current quarter — what "should-cost now" means on
+    every portfolio view. With no target quarter, calculate_should_cost
+    evaluates at the formula's base quarter, i.e. returns the base price."""
+    now_y, now_q = _current_quarter()
+    return calculate_should_cost(db, cm, target_year=now_y, target_quarter=now_q).should_cost
 
 
 class PortfolioModelSummary(BaseModel):
@@ -56,8 +90,31 @@ def portfolio_summary(
     current_user: User = Depends(get_current_user),
 ):
     require_permission(db, current_user, team_id, "costing.view")
+    with index_lookup_cache():
+        return _portfolio_summary(db, team_id, reporting_currency)
 
-    cost_models = db.query(CostModel).filter(CostModel.team_id == team_id).all()
+
+def _portfolio_summary(db: Session, team_id: uuid.UUID, reporting_currency: str) -> PortfolioResponse:
+    cost_models = _team_cost_models(db, team_id)
+
+    # Latest actual price and total volume of every model, in two queries
+    # rather than two per model. (cost_model_id, year, quarter) is unique on
+    # both tables, so "latest" is unambiguous.
+    cm_ids = [cm.id for cm in cost_models]
+    latest_price_by_cm: dict[uuid.UUID, float] = {}
+    total_volume_by_cm: dict[uuid.UUID, float] = {}
+    if cm_ids:
+        for cm_id, price in (
+            db.query(ActualPrice.cost_model_id, ActualPrice.price)
+            .filter(ActualPrice.cost_model_id.in_(cm_ids))
+            .order_by(ActualPrice.cost_model_id, ActualPrice.year.desc(), ActualPrice.quarter.desc())
+        ):
+            latest_price_by_cm.setdefault(cm_id, float(price))
+        for cm_id, volume in (
+            db.query(ActualVolume.cost_model_id, ActualVolume.volume)
+            .filter(ActualVolume.cost_model_id.in_(cm_ids))
+        ):
+            total_volume_by_cm[cm_id] = total_volume_by_cm.get(cm_id, 0.0) + float(volume)
 
     summaries = []
     total_exposure = 0.0
@@ -65,23 +122,25 @@ def portfolio_summary(
     largest_exposure_id = None
     models_flagged = 0
 
+    # "Should-cost today" = the should-cost at the current quarter, as the
+    # Portfolio and product pages compute it. With no target quarter,
+    # calculate_should_cost evaluates at the formula's base quarter, i.e.
+    # returns the base price, and every gap below would mix the index move
+    # since the base date into the supplier gap.
+    now_y, now_q = _current_quarter()
+
     for cm in cost_models:
         fv = cm.current_formula
         if not fv:
             continue
 
         # Compute current should-cost
-        sc_result = calculate_should_cost(db, cm)
+        sc_result = calculate_should_cost(db, cm, target_year=now_y, target_quarter=now_q)
         current_sc = sc_result.should_cost
+        # Latest quarter with index data for this model (flags and FX below).
+        _, _, to_y, to_q = _default_period_range(db, cm)
 
-        # Get latest actual price
-        latest_price = (
-            db.query(ActualPrice)
-            .filter(ActualPrice.cost_model_id == cm.id)
-            .order_by(ActualPrice.year.desc(), ActualPrice.quarter.desc())
-            .first()
-        )
-        latest_actual = float(latest_price.price) if latest_price else None
+        latest_actual = latest_price_by_cm.get(cm.id)
 
         gap = (latest_actual - current_sc) if latest_actual is not None else None
         base_price = float(fv.base_price)
@@ -89,10 +148,8 @@ def portfolio_summary(
 
         # Calculate cumulative impact if volumes exist
         cumulative_impact = None
-        volumes = db.query(ActualVolume).filter(ActualVolume.cost_model_id == cm.id).all()
-        if volumes and gap is not None:
-            total_vol = sum(float(v.volume) for v in volumes)
-            cumulative_impact = gap * total_vol
+        if cm.id in total_volume_by_cm and gap is not None:
+            cumulative_impact = gap * total_volume_by_cm[cm.id]
 
         # Flags
         flag_price_drift = abs(gap_pct) > 10 if gap_pct is not None else False
@@ -100,16 +157,15 @@ def portfolio_summary(
 
         # Check if indices moved >5% since base date without new formula version
         if fv.components:
-            from app.services.data_resolver import get_single_index_value
             for comp in fv.components:
                 if comp.commodity_id:
+                    # The same (commodity, region, quarter) recurs across
+                    # models on one recipe: the request memo answers repeats.
                     ref_val = get_single_index_value(
                         db, cm.team_id, comp.commodity_id, cm.region,
                         fv.base_year, fv.base_quarter
                     )
                     # Check most recent quarter
-                    from app.services.costing_engine import _default_period_range
-                    _, _, to_y, to_q = _default_period_range(db, cm)
                     cur_val = get_single_index_value(
                         db, cm.team_id, comp.commodity_id, cm.region, to_y, to_q
                     )
@@ -128,8 +184,6 @@ def portfolio_summary(
         fx_exposure = exposure
         if cm.currency != reporting_currency and exposure > 0:
             try:
-                from app.services.costing_engine import _default_period_range
-                _, _, to_y, to_q = _default_period_range(db, cm)
                 fx_exposure = convert_price(db, exposure, cm.currency, reporting_currency, to_y, to_q)
             except Exception:
                 fx_exposure = exposure
@@ -218,14 +272,18 @@ def priority_matrix(
     volatility). Spend exposure = current should-cost × trailing-4-quarter volume,
     converted to the reporting currency for cross-product comparability."""
     require_permission(db, current_user, team_id, "costing.view")
+    with index_lookup_cache():
+        return _priority_matrix(db, team_id, reporting_currency)
 
-    cost_models = db.query(CostModel).filter(CostModel.team_id == team_id).all()
+
+def _priority_matrix(db: Session, team_id: uuid.UUID, reporting_currency: str) -> PriorityMatrixResponse:
+    cost_models = _team_cost_models(db, team_id)
     rows = []
     for cm in cost_models:
         fv = cm.current_formula
         if not fv:
             continue
-        current_sc = calculate_should_cost(db, cm).should_cost
+        current_sc = _should_cost_today(db, cm)
 
         # Should-cost series over the default trailing range → QoQ volatility.
         evo = calculate_evolution(db, cm, EvolutionRequest(cost_model_id=cm.id))
@@ -251,7 +309,6 @@ def priority_matrix(
         sc_reporting = current_sc
         if cm.currency != reporting_currency:
             try:
-                from app.services.costing_engine import _default_period_range
                 _, _, to_y, to_q = _default_period_range(db, cm)
                 sc_reporting = convert_price(db, current_sc, cm.currency, reporting_currency, to_y, to_q, team_id=team_id)
             except Exception:
@@ -314,7 +371,7 @@ def _buy_signal(db: Session, cm: CostModel) -> BuyWindow | None:
     fv = cm.current_formula
     if not fv:
         return None
-    current = calculate_should_cost(db, cm).should_cost
+    current = _should_cost_today(db, cm)
     evo = calculate_evolution(db, cm, EvolutionRequest(cost_model_id=cm.id))
     series = [p.theoretical for p in evo.periods if p.theoretical]
     prior = series[-5:-1]   # the up-to-4 quarters *before* the latest point
@@ -341,8 +398,9 @@ def buy_windows(
     """Per-product buy-now-or-wait signal across the portfolio (Scrum 22).
     Sorted cheapest-relative-to-recent first (best buying opportunities up top)."""
     require_permission(db, current_user, team_id, "costing.view")
-    cost_models = db.query(CostModel).filter(CostModel.team_id == team_id).all()
-    rows = [w for cm in cost_models if (w := _buy_signal(db, cm)) is not None]
+    with index_lookup_cache():
+        cost_models = _team_cost_models(db, team_id)
+        rows = [w for cm in cost_models if (w := _buy_signal(db, cm)) is not None]
     rows.sort(key=lambda w: (w.deviation_pct is None, w.deviation_pct if w.deviation_pct is not None else 0))
     return rows
 
@@ -358,7 +416,8 @@ def buy_window_for_model(
     if not cm:
         raise HTTPException(status_code=404, detail="Cost model not found")
     require_permission(db, current_user, cm.team_id, "costing.view")
-    signal = _buy_signal(db, cm)
+    with index_lookup_cache():
+        signal = _buy_signal(db, cm)
     if signal is None:
         raise HTTPException(status_code=400, detail="Cost model has no formula")
     return signal
@@ -397,8 +456,12 @@ def _lock_hold_verdict(db: Session, cm: CostModel, horizon_quarters: int) -> Loc
         region=cm.region, currency=cm.currency, horizon_quarters=horizon_quarters,
     )
     forward = calculate_forward_should_cost(db, cm, horizon_quarters)
+    # "Current" is the should-cost at the current quarter, as on every other
+    # portfolio view. calculate_should_cost with no target quarter evaluates at
+    # the formula's base quarter, i.e. returns the base price, which made the
+    # verdict compare the forecast with the base-date price.
     if forward.insufficient or forward.forecast_should_cost is None:
-        current = calculate_should_cost(db, cm).should_cost if cm.current_formula else 0.0
+        current = _should_cost_today(db, cm) if cm.current_formula else 0.0
         return LockHoldVerdict(
             **base, horizon_year=forward.horizon_year, horizon_quarter=forward.horizon_quarter,
             current_should_cost=round(current, 4), forecast_should_cost=None, deviation_pct=None,
@@ -406,7 +469,7 @@ def _lock_hold_verdict(db: Session, cm: CostModel, horizon_quarters: int) -> Loc
             data_gaps=forward.data_gaps,
         )
 
-    current = calculate_should_cost(db, cm).should_cost
+    current = _should_cost_today(db, cm)
     dev = (forward.forecast_should_cost - current) / current * 100 if current else 0.0
     # Percent only, per the ticket — the underlying values are index levels,
     # not currency, so no fabricated money-saving figure is quoted here.
@@ -439,4 +502,5 @@ def buy_window_verdict(
     if not cm:
         raise HTTPException(status_code=404, detail="Cost model not found")
     require_permission(db, current_user, cm.team_id, "costing.view")
-    return _lock_hold_verdict(db, cm, horizon_quarters)
+    with index_lookup_cache():
+        return _lock_hold_verdict(db, cm, horizon_quarters)

@@ -1,0 +1,199 @@
+/* ──────────────────────────────────────────────────────────────────────
+ * Intelligence › Suppliers (directory + supplier page). Prefix `ixs-`.
+ * Builds on styles/intel.css (`ix-`); theme colours are var(--…) only.
+ * Imported from SuppliersPage.jsx and SupplierDetailPage.jsx.
+ * ──────────────────────────────────────────────────────────────────── */
+
+/* ── Family palette ────────────────────────────────────────────────── */
+/* Twelve categorical hues for product families (card strip, chips, family
+   bars). Dark themes (Mint, Amber) first; the light themes get deeper
+   twins. Assigned by family rank, see supplierUtils.js. */
+:root {
+  --ixs-fam-0: #74b9ff;
+  --ixs-fam-1: #ff9f5a;
+  --ixs-fam-2: #4fdc8f;
+  --ixs-fam-3: #b3a9ff;
+  --ixs-fam-4: #ff7676;
+  --ixs-fam-5: #4fd8d8;
+  --ixs-fam-6: #ffd166;
+  --ixs-fam-7: #fd79a8;
+  --ixs-fam-8: #9fb4e6;
+  --ixs-fam-9: #c5d86d;
+  --ixs-fam-10: #d4a574;
+  --ixs-fam-11: #a3adb8;
+}
+[data-theme="light"],
+[data-theme="staminachem"] {
+  --ixs-fam-0: #2a6ebf;
+  --ixs-fam-1: #d35400;
+  --ixs-fam-2: #1e8449;
+  --ixs-fam-3: #6a4ab8;
+  --ixs-fam-4: #c0392b;
+  --ixs-fam-5: #138d90;
+  --ixs-fam-6: #c8911a;
+  --ixs-fam-7: #b03a7a;
+  --ixs-fam-8: #1b2b4b;
+  --ixs-fam-9: #7d8c1e;
+  --ixs-fam-10: #8b5a2b;
+  --ixs-fam-11: #7b8794;
+}
+
+/* ── Directory ─────────────────────────────────────────────────────── */
+.ixs-page .ix-page-header { margin-bottom: 14px; }
+
+.ixs-min-pills { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 16px 8px; }
+.ixs-min-pills .ix-pill { padding: 3px 10px; }
+
+.ixs-active { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 16px; }
+.ixs-active-chip { cursor: pointer; font-family: inherit; }
+.ixs-active-chip:hover { background: var(--surface2); }
+.ixs-active-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ixs-active-x { font-size: 13px; line-height: 1; margin-left: 2px; }
+button.ix-link.ixs-active-clear { font-size: 10.5px; margin-left: 4px; }
+
+.ixs-grid { transition: opacity .15s; }
+.ixs-grid.is-refreshing { opacity: .6; }
+
+.ix-card.ixs-card { padding: 14px 15px 12px; }
+.ixs-card .ix-card-top { margin-bottom: 2px; }
+.ix-card-name.ixs-card-name { font-size: 16px; margin-bottom: 0; -webkit-line-clamp: 2; }
+.ix-card-meta.ixs-card-meta { font-size: 10.5px; margin-bottom: 10px; }
+.ixs-card-meta > span:not(.ix-dot-sep) { white-space: nowrap; }
+.ixs-card-meta .ix-dot-sep { opacity: .6; }
+
+.ixs-fam-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.ixs-fam-tag { max-width: 100%; }
+.ix-tag.ixs-fam-tag, .ix-tag.ixs-fam-more { font-size: 10px; padding: 1px 7px; }
+.ix-tag.ixs-fam-tag.is-selected { border-color: var(--accent); color: var(--text); font-weight: 600; }
+.ixs-card-ind-hit { color: var(--text); font-weight: 600; }
+.ixs-fam-dot { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; display: inline-block; }
+.ix-tag.ixs-fam-more { color: var(--muted); }
+
+.ix-seg-strip.ixs-strip { height: 4px; margin: 10px 0 0; }
+.ixs-strip > span { display: block; }
+
+.ixs-card-ind {
+  margin: 10px 0 10px; font-size: 10.5px; line-height: 1.5; min-width: 0; color: var(--text-secondary);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ixs-card-ind-label {
+  font-size: 9px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase;
+  color: var(--muted); margin-right: 6px;
+}
+
+.ix-card-foot.ixs-card-foot { align-items: center; margin-top: auto; padding-top: 9px; }
+.ixs-hq { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ixs-card-foot .ix-region-chips { flex-shrink: 0; flex-wrap: nowrap; }
+
+.ixs-more {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  margin: 20px 0 8px; font-size: 11px;
+}
+
+.ixs-generic {
+  margin-top: 26px; padding: 12px 14px;
+  border: 1px dashed var(--border-light); border-radius: var(--radius);
+  background: var(--neutral-bg-soft);
+}
+.ixs-generic-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 11px; line-height: 1.55; margin-bottom: 8px; }
+.ixs-generic-title {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; color: var(--text-secondary);
+}
+.ixs-generic-list { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.ix-tag.ixs-generic-tag { gap: 6px; }
+.ixs-generic-count { font-size: 9px; font-weight: 700; color: var(--muted); }
+button.ix-link.ixs-generic-more { font-size: 10.5px; margin-left: 4px; }
+
+/* ── Supplier page ─────────────────────────────────────────────────── */
+.ixs-dh-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.ix-kpis.ixs-kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+
+button.ix-link.ixs-panel-more { margin-top: 10px; font-size: 10.5px; }
+
+/* HBars rows become buttons when clickable and inherit the font size; keep
+   them at the chart's own 11px. */
+.ixs-bars .ix-hbars { font-size: 11px; }
+.ixs-bars button.ix-hbar-row { border-radius: 4px; }
+.ixs-bars button.ix-hbar-row:hover .ix-hbar-label { color: var(--accent); text-decoration: underline; }
+.ixs-bars button.ix-hbar-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Region presence tiles */
+.ixs-regions { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+.ixs-region {
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+  background: var(--surface2); border-top: 3px solid var(--rg, var(--border));
+}
+.ixs-region-name { font-size: 10.5px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
+.ixs-region-val { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; color: var(--text); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ixs-region-lbl { font-size: 10px; color: var(--muted); margin-top: 3px; }
+
+/* Competitor table */
+.ixs-comp td { padding-top: 7px; padding-bottom: 7px; }
+.ixs-comp .ixs-rank { width: 34px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Competitor names open that supplier: link colour, like .ix-link. */
+.ixs-comp a { color: var(--accent4); font-weight: 600; text-decoration: none; }
+.ixs-comp a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.ixs-comp a:focus-visible { outline: 2px solid var(--accent4); outline-offset: 2px; border-radius: 2px; }
+.ixs-comp .ixs-bar { display: flex; align-items: center; gap: 8px; min-width: 150px; }
+.ixs-comp .ixs-bar-track { flex: 1; height: 6px; border-radius: 3px; background: var(--surface2); overflow: hidden; }
+.ixs-comp .ixs-bar-fill { display: block; height: 100%; border-radius: 3px; background: var(--accent4); }
+.ixs-comp .ixs-bar-val { font-weight: 700; min-width: 20px; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Profile rail */
+.ixs-dl { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px 12px; font-size: 11.5px; margin: 0; }
+.ixs-dl dt { color: var(--muted); font-size: 10.5px; padding-top: 1px; }
+.ixs-dl dd { margin: 0; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.ixs-aliases { display: flex; flex-wrap: wrap; gap: 4px; }
+.ixs-codes { display: flex; flex-wrap: wrap; gap: 4px; }
+.ix-tag.ixs-code { font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+
+/* Index dossier roles (rail) */
+.ixs-roles { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ixs-role + .ixs-role { border-top: 1px solid var(--row-divider); padding-top: 10px; }
+.ixs-role-name { font-size: 11.5px; font-weight: 600; color: var(--text); line-height: 1.4; }
+.ixs-role-meta { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+
+/* Products tab */
+.ixs-prod-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; }
+.ixs-prod-toolbar .ix-input { width: 250px; margin-left: auto; }
+.ixs-prod-toolbar .ix-pill .ix-count { min-width: 0; padding: 2px 5px; }
+
+.ixs-ptable { table-layout: fixed; }
+.ixs-ptable th, .ixs-ptable td { vertical-align: top; }
+.ixs-ptable col.c-prod { width: 36%; }
+.ixs-ptable col.c-role { width: 10%; }
+.ixs-ptable col.c-ev { width: 17%; }
+.ixs-ptable col.c-int { width: 13%; }
+.ixs-ptable col.c-reg { width: 12%; }
+.ixs-ptable col.c-sites { width: 12%; }
+.ixs-pid .ix-badge.sup { margin-left: 2px; }
+.ixs-nowrap { white-space: nowrap; }
+.ixs-not-listed { margin-bottom: 14px; }
+.ixs-ptable tr.ixs-group td {
+  background: var(--surface2); padding-top: 7px; padding-bottom: 7px;
+  border-bottom: 1px solid var(--border);
+}
+.ixs-ptable tbody tr.ixs-group:hover td { background: var(--surface2); }
+.ixs-group-cell { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ixs-group-fam { font-size: 9.5px; font-weight: 600; letter-spacing: .9px; text-transform: uppercase; color: var(--muted); }
+.ixs-group-sep { color: var(--muted); opacity: .6; }
+.ixs-group-line { font-size: 11.5px; font-weight: 700; color: var(--text); text-decoration: none; }
+a.ixs-group-line:hover { color: var(--accent); text-decoration: underline; }
+.ixs-group-count { font-size: 10px; color: var(--muted); }
+
+.ixs-pname { font-weight: 600; color: var(--text); text-decoration: none; }
+a.ixs-pname:hover { color: var(--accent); text-decoration: underline; }
+.ixs-pid { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); margin-top: 2px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.ixs-ptags {
+  font-size: 10.5px; color: var(--text-secondary); margin-top: 4px; line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ixs-ptable .ix-region-chips { flex-wrap: wrap; }
+
+.ixs-foot-note { margin-top: 12px; }
+
+@media (max-width: 1380px) {
+  .ixs-ptable col.c-prod { width: 32%; }
+  .ixs-ptable col.c-ev { width: 19%; }
+}

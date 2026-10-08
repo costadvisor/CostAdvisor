@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, AliasPath, Field
 
 
 class SupplierCreate(BaseModel):
@@ -23,9 +23,12 @@ class SupplierOut(BaseModel):
 class SupplierTrustScoreOut(BaseModel):
     id: int
     supplier_id: int
-    grain: str  # "product" | "subfamily"
+    grain: str  # "product" | "product_line"
     product_id: uuid.UUID | None = None
-    subfamily_id: int | None = None
+    product_line_id: int | None = None
+    # The pooled line's display name, for the trust breakdown.
+    product_line_name: str | None = Field(
+        default=None, validation_alias=AliasPath("product_line", "name"))
     insufficient_data: bool
     score: float | None
     grade: str | None

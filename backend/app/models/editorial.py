@@ -19,10 +19,11 @@ The design decisions, each forced by something in the data:
 including 36 `GRP-*` group pseudo-keys that are roll-ups, not formulas. Under a
 hard FK those rows would not raise — they would simply not be there afterwards,
 and nothing downstream could tell "never authored" from "dropped at import".
-The same reasoning makes `commodity_id` / `family_id` / `subfamily_id`
+The same reasoning makes `commodity_id` / `family_id` / `product_line_id`
 convenience joins rather than identity.
 
-**Four subject types.** `formula | index | subfamily | family`. The index
+**Four subject types.** `formula | index | product_line | family`. A
+`product_line` subject is keyed by the line's `line_key`. The index
 namespace is real and verified clean: all 27 `INDEX_NARRATIVES` keys and all 80
 `INDEX_SOURCE_META` keys resolve to a loaded `commodity_indexes.commodity_key`.
 One polymorphic subject beats three near-identical tables.
@@ -58,7 +59,7 @@ from app.constants.trust import (
 )
 from app.database import Base
 
-SUBJECT_TYPES = ("formula", "index", "subfamily", "family")
+SUBJECT_TYPES = ("formula", "index", "product_line", "family")
 
 # The block-type vocabulary, read off the drop rather than invented.
 #
@@ -71,44 +72,49 @@ SUBJECT_TYPES = ("formula", "index", "subfamily", "family")
 #   CURRENT_EVENTS_OUTLOOK    current_events
 #   INDEX_NARRATIVES          index_narrative (why3m + why24m)
 #   INDEX_SOURCE_META         index_source_meta (agency + freq + proxy)
-#   FAMILY_FUNCTIONALITY_*    functionalities at family / subfamily grain
+#   FAMILY_FUNCTIONALITY_*    functionalities at family / product-line grain
+#
+# `suppliers`, `supply` and `demand` are retired (design §2.4, §3.2): supplier
+# rows live in `producer_formulas` only, and the supply/demand splits were
+# ruled invented by the source. No block of those types is written or served.
 BLOCK_TYPES = (
     "functionalities",
     "applications",
-    "suppliers",
     "supplier_note",
     "compliance",
     "macro_drivers",
     "substitution",
-    "supply",
-    "demand",
     "synthesis_route",
     "current_events",
     "negotiation_note",
     "index_narrative",
     "index_source_meta",
 )
+RETIRED_BLOCK_TYPES = ("suppliers", "supply", "demand")
+
+# The block types a **platform** block on a `formula` subject may be served
+# with (design §4.2). Every `/api/editorial/*` read applies it; a platform
+# formula block of any other type answers 404. The content loader writes
+# exactly these types (`content_drop.content.FORMULA_BLOCKS`).
+PUBLIC_FORMULA_BLOCK_TYPES = (
+    "functionalities",
+    "applications",
+    "supplier_note",
+    "compliance",
+    "macro_drivers",
+    "substitution",
+    "synthesis_route",
+    "current_events",
+    "negotiation_note",
+)
+assert set(PUBLIC_FORMULA_BLOCK_TYPES) <= set(BLOCK_TYPES)
+assert not set(RETIRED_BLOCK_TYPES) & set(BLOCK_TYPES)
 
 BODY_FORMATS = ("text", "json")
 
 # The wildcard the dated outlooks use. Stored as NULL — a sentinel string in a
 # region column would collide with the `regions.code` vocabulary.
 REGION_WILDCARD = "*"
-
-
-def subfamily_subject_code(family_name: str, subfamily_name: str) -> str:
-    """The `subfamily` subject key: `"<family>|<subfamily>"`, single pipe.
-
-    Pinned here because the ticket left it open and named the wrong separator:
-    `|||` appears **zero** times anywhere in the drop, while
-    `SUBFAMILY_FUNCTIONALITY_OVERRIDE` keys all 33 of its entries as
-    `Family|Subfamily`. Names rather than codes because `subfamilies.code` is
-    NULL for all 144 platform rows, and a family's `code` is deliberately not
-    unique across forks (a fork keeps its origin's code) — so neither is usable
-    as a bare key. `subfamily_id` carries the resolved identity where it
-    resolves, which is what makes a later rename recoverable.
-    """
-    return f"{family_name}|{subfamily_name}"
 
 
 class EditorialBlock(Base):
@@ -122,7 +128,7 @@ class EditorialBlock(Base):
     __tablename__ = "editorial_blocks"
     __table_args__ = (
         CheckConstraint(
-            "subject_type IN ('formula','index','subfamily','family')",
+            "subject_type IN ('formula','index','product_line','family')",
             name="ck_editorial_subject_type",
         ),
         CheckConstraint(
@@ -149,17 +155,15 @@ class EditorialBlock(Base):
     region: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Convenience joins, not identity. Null wherever the subject has no row in
-    # our taxonomy — which today is most family/subfamily content: only 14 of
-    # 23 drop family names and 4 of 33 `Family|Subfamily` pairs match a platform
-    # taxonomy row (the known deferred reconciliation).
+    # our taxonomy.
     template_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("formula_templates.id", ondelete="SET NULL"), nullable=True)
     commodity_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("commodity_indexes.id", ondelete="SET NULL"), nullable=True)
     family_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("chemical_families.id", ondelete="SET NULL"), nullable=True)
-    subfamily_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("subfamilies.id", ondelete="SET NULL"), nullable=True)
+    product_line_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("product_lines.id", ondelete="SET NULL"), nullable=True, index=True)
 
     body_format: Mapped[str] = mapped_column(String(8), nullable=False, default="text")
     provenance: Mapped[str] = mapped_column(String(16), nullable=False, default="imported")

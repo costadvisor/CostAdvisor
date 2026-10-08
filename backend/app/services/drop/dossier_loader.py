@@ -23,6 +23,9 @@ company record has one master.
 Never deletes: a dossier the drop stops mentioning is reported stale, not
 removed. Child rows *are* replaced as a block, because a partially-updated
 driver list would be worse than either the old or the new one.
+
+The July entry point (`load_dossiers`, which read the 2026-07 drop) was removed
+with the July seed path. The content index loader calls `_load_one` per series.
 """
 from __future__ import annotations
 
@@ -36,7 +39,6 @@ from app.models.index_dossier import (
     IndexChainNode, IndexDossier, IndexDriver, IndexNegotiationPointer,
     IndexProducerRole, IndexRoleFlag, IndexSplit, normalize_signal,
 )
-from app.services.drop.reader import DropNotAvailable, drop_root, read_raw
 from app.services.drop.report import LoadReport, TableDiff
 from app.services.producers import resolve_raw_name
 
@@ -338,111 +340,3 @@ def has_dossier(payload: dict) -> bool:
         isinstance(o, dict) and any(o.get(f) for f in DOSSIER_FIELDS)
         for o in (payload.get("_regional") or {}).values()
     )
-
-
-def _targets_for(key: str, payload: dict, series_ids: dict) -> list[tuple[int, str]]:
-    """Which loaded series this dossier is about.
-
-    A dossier key is a *card* slug, and the series behind it may be named
-    differently or shared. Three shapes in the data:
-
-    * the key IS a series key (27 of 38) — one target;
-    * the key fans out through `regKeys` to several region-baked series
-      (`lab` -> lab-eu/-in/-mea/-apac/-na) — one target each, and the region
-      already lives in the series key, so it is NOT also written to `region`;
-      double-encoding it is exactly the mistake unit 2 avoided;
-    * `regKeys` is `{"multi": <series>}`, meaning the card shares a series with
-      other cards (`naphtha`, `cbfs` and `pta` all resolve to `brent`). Those
-      collide, and the caller reports the loser rather than overwriting.
-    """
-    if key in series_ids:
-        return [(series_ids[key], key)]
-    out = []
-    for series_key in (payload.get("regKeys") or {}).values():
-        if series_key in series_ids and (series_ids[series_key], series_key) not in out:
-            out.append((series_ids[series_key], series_key))
-    return out
-
-
-def load_dossiers(db: Session) -> DossierLoadReport:
-    """Load every structured dossier. Does not commit."""
-    if not drop_root().exists():
-        raise DropNotAvailable("costadvisor-data drop not present")
-
-    out = DossierLoadReport()
-    payloads = read_raw("INDEXES")
-
-    series_ids = {
-        (row.commodity_key or row.name): row.id
-        for row in db.query(CommodityIndex).all()
-    }
-
-    # Which dossier key owns each series' series-wide row. First writer wins and
-    # the rest are reported, so a shared series never silently loses two of the
-    # three dossiers claiming it.
-    claimed: dict[int, str] = {}
-    dossier_keys = 0
-    fanned = 0
-    regional = 0
-
-    candidates = [
-        (key, payload) for key, payload in payloads.items()
-        if isinstance(payload, dict) and has_dossier(payload)
-    ]
-    # **Direct key matches first.** A dossier whose key IS the series key is the
-    # specific one, and a generic key that fans out through `regKeys` must not
-    # take its slot: iterating in source order let `electricity` claim `elec-cn`
-    # and `elec-eu` before their own dedicated dossiers were reached, so the two
-    # most specific dossiers in the file were the ones reported as conflicts.
-    candidates.sort(key=lambda kv: 0 if kv[0] in series_ids else 1)
-
-    for key, payload in candidates:
-        targets = _targets_for(key, payload, series_ids)
-        if not targets:
-            out.unmatched_series.append(key)
-            continue
-        if len(targets) > 1:
-            fanned += 1
-
-        for commodity_id, series_key in targets:
-            owner = claimed.get(commodity_id)
-            if owner is not None and owner != key:
-                out.shared_series_conflicts.append((key, series_key))
-                continue
-            claimed[commodity_id] = key
-            dossier_keys += 1
-            _load_one(db, commodity_id, None, payload, out)
-
-            for region, override in (payload.get("_regional") or {}).items():
-                if not isinstance(override, dict):
-                    continue
-                # An override carries only the fields that differ, so it is
-                # merged onto the base payload — loading it bare would blank
-                # everything the override happens not to mention.
-                merged = {**payload, **override}
-                merged.pop("_regional", None)
-                # Only 10 of the 16 `_regional` carriers have any override with
-                # dossier content, and most of those have just one — the other
-                # regions are card metadata. Storing a row for them would put
-                # empty dossiers in the table that read as "we have nothing to
-                # say about this region" rather than "this region has no
-                # dossier".
-                if not any(merged.get(f) for f in DOSSIER_FIELDS):
-                    continue
-                _load_one(db, commodity_id, region, merged, out)
-                regional += 1
-
-    out.notes.append(
-        f"{dossier_keys} series dossiers and {regional} regional overrides loaded "
-        f"({fanned} dossier keys fanned out across several region-baked series via "
-        "regKeys); computed snapshots (currentVal/change/snapshot/cyclePos/volPct), "
-        "derivable series (season/seasonNote) and prose (dyn*/signals*/notes) "
-        "deliberately not imported"
-    )
-    out.notes.append(
-        "volPct is skipped because it is editorial and self-contradictory — three "
-        "series carry two different values across their own cards (elec-cn 12 and "
-        "55, elec-eu 55 and 65, corn 45 and 48). The ladder is regenerated from "
-        "the series instead"
-    )
-    return out

@@ -19,7 +19,7 @@ def _last_event(db, team_id: uuid.UUID) -> AuditLog | None:
 def test_product_create_logs_event(client_as, tenant_a, db):
     r = client_as(tenant_a).post(
         f"/api/products/?team_id={tenant_a['team_id']}",
-        json={"name": "audit-widget", "formula": None, "chemical_family_id": None},
+        json={"name": "audit-widget", "formula": None, "product_line_id": None},
     )
     assert r.status_code == 201, r.text
     db.expire_all()
