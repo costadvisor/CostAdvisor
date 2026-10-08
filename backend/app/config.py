@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     # Support + signup
     support_email: str = "alexis@staminachem.com"
     allow_signup: bool = True  # Flip to false to restrict to existing users only
+    # Google Workspace domains whose accounts may sign up without a team invite
+    # or an approved access request (our own staff). Comma-separated; empty
+    # string = nobody bypasses the gate. Checked against Google's verified `hd`
+    # claim, never the email text alone (see routers/auth.is_staff_account).
+    staff_email_domains: str = "staminachem.com"
 
     # Observability (wired in Phase 13)
     sentry_dsn: str = ""
