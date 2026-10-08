@@ -152,7 +152,10 @@ def build_script(brief, checked: list[CheckedClaim]) -> list[str]:
         lines.append(f"On “{c.said}” — {c.note}")
 
     close = f"We are ready to settle at {_money(brief.current_should_cost, cur, unit)}."
-    if brief.current_floor is not None:
+    # Only when the floor sits below the target. A recipe that models no
+    # margin at all has floor == should-cost, and the sentence would then tell
+    # the buyer the target itself leaves the supplier nothing.
+    if brief.current_floor is not None and brief.current_floor < brief.current_should_cost:
         close += (f" Below {_money(brief.current_floor, cur, unit)} there is no margin left in the chain, "
                   "so that is not a number we expect you to accept.")
     lines.append(close)

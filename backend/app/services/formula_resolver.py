@@ -158,6 +158,10 @@ def flatten_components(
                 "depth": _depth,
                 "via_template_id": template_id,
                 "line_region": matched_region,
+                # Which part of the cost the line is (feedstock, utility,
+                # fixed, packaging, margin). The costing engine reads it to
+                # keep the recipe's own margin line out of the floor.
+                "cost_category": c.cost_category,
             })
     return lines
 
@@ -354,6 +358,66 @@ class EffectiveLine:
     # a sub-model that quietly vanished would silently rescale every other
     # line, and one that quietly rode flat would look like a fixed cost.
     unresolved_reason: str | None = None
+    # The catalogue line's cost category ("margin", "feedstock", ...), or None
+    # for a line with no catalogue origin. A tracking line gets it from the
+    # live recipe; a snapshot line by matching back to the template it was
+    # copied from (see `_snapshot_cost_categories`).
+    cost_category: str | None = None
+
+
+# FormulaComponent.label is VARCHAR(64); copies of longer catalogue line names
+# are cut to this length (demo_buyer, CostModelBuilder via the API).
+_LABEL_LEN = 64
+
+
+def _snapshot_cost_categories(db: Session | None, fv) -> dict[int, str]:
+    """Cost category per snapshot component (keyed by `id()` of the row, so a
+    not-yet-flushed component works too), matched back to the catalogue.
+
+    A frozen line keeps the template it came from (`via_template_id`, or the
+    version's linked combo for older rows) and its name, but not its category.
+    Match on (template, region, name cut to the label length); then the
+    template-level set; then any region when that name has one category only.
+    No match leaves the line uncategorised, which is the old behaviour.
+    One query per version, only when a line has catalogue provenance.
+    """
+    if db is None:
+        return {}
+    fallback_tid = None
+    if getattr(fv, "source_coverage_id", None) is not None:
+        cov = db.get(FormulaRegionCoverage, fv.source_coverage_id)
+        fallback_tid = cov.template_id if cov is not None else None
+    wanted = {}
+    for c in fv.components:
+        if c.component_type == "model" or c.child_cost_model_id is not None:
+            continue
+        tid = c.via_template_id or fallback_tid
+        if tid is not None and c.label:
+            wanted[id(c)] = (tid, c.line_region, c.label)
+    if not wanted:
+        return {}
+    rows = (
+        db.query(FormulaTemplateComponent.template_id, FormulaTemplateComponent.region,
+                 FormulaTemplateComponent.name, FormulaTemplateComponent.cost_category)
+        .filter(FormulaTemplateComponent.template_id.in_({t for t, _, _ in wanted.values()}),
+                FormulaTemplateComponent.cost_category.isnot(None))
+        .all()
+    )
+    exact: dict[tuple, str] = {}
+    any_region: dict[tuple, set] = {}
+    for tid, region, name, cat in rows:
+        key = name[:_LABEL_LEN]
+        exact.setdefault((tid, region, key), cat)
+        any_region.setdefault((tid, key), set()).add(cat)
+    out: dict[int, str] = {}
+    for cid, (tid, region, label) in wanted.items():
+        cat = exact.get((tid, region, label)) or exact.get((tid, None, label))
+        if cat is None:
+            cats = any_region.get((tid, label), set())
+            cat = next(iter(cats)) if len(cats) == 1 else None
+        if cat is not None:
+            out[cid] = cat
+    return out
 
 
 # Scrum 27 — how deep one cost model may nest inside another. Same number and
@@ -385,6 +449,7 @@ def _effective_lines_from_snapshot(
     rather than silently flattened away.
     """
     lines: list[EffectiveLine] = []
+    categories = _snapshot_cost_categories(db, fv)
     for c in fv.components:
         weight = float(c.weight)
 
@@ -463,6 +528,7 @@ def _effective_lines_from_snapshot(
             is_proxy=c.is_proxy,
             via_cost_model_id=via_id,
             via_cost_model_name=via_name,
+            cost_category=categories.get(id(c)),
         ))
     return lines
 
@@ -568,6 +634,7 @@ def get_effective_lines(db: Session, fv, cost_model) -> tuple[list[EffectiveLine
             line_region=l["line_region"],
             is_proxy=l["is_proxy"],
             type_code_id=l.get("type_code_id"),
+            cost_category=l.get("cost_category"),
         )
         for l in raw_lines
     ]

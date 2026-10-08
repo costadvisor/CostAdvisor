@@ -858,11 +858,20 @@ def calculate_brief(
     # already bakes in an assumed acceptable margin, so it's a ceiling of
     # "fair," not a walk-away number. Converted the same way `theoretical`
     # is (same FX/unit pipeline), at the same final period.
+    # "Before margin" means both margins: the version's own (`_apply_margin`
+    # is not applied to the indexed cost) and the recipe's margin line. A
+    # catalogue recipe carries the supplier margin as a fixed line inside its
+    # weights (and the version then has margin 0), so without taking that line
+    # out the floor would simply equal the should-cost.
     current_floor = None
     if last_period and last_indexed_cost_raw is not None:
         floor_y, floor_q = periods[-1][0], periods[-1][1]
+        recipe_margin = _recipe_margin_cost(
+            db, fv, cost_model, region, ref_year, ref_quarter, floor_y, floor_q, base_price
+        )
         current_floor = round(_apply_unit(
-            _apply_fx(db, last_indexed_cost_raw, model_ccy, out_ccy, floor_y, floor_q, team_id=cost_model.team_id),
+            _apply_fx(db, last_indexed_cost_raw - recipe_margin, model_ccy, out_ccy,
+                      floor_y, floor_q, team_id=cost_model.team_id),
             model_unit, out_unit,
         ), 4)
 
@@ -1108,6 +1117,63 @@ def _compute_indexed_cost(
             ratio = 1.0
         indexed_cost += comp_base * weight * ratio
     return indexed_cost
+
+
+# The catalogue's cost category for a supplier-margin line
+# (`formula_template_components.cost_category`).
+MARGIN_CATEGORY = "margin"
+
+
+def _is_own_margin_line(line) -> bool:
+    """A margin line of this recipe itself: the supplier's own margin.
+
+    A margin line met deeper down (inside a chained input template, depth > 0,
+    or inside a nested cost model) is an upstream supplier's margin. For this
+    supplier it is a cost, so it stays in the floor.
+    """
+    return (getattr(line, "cost_category", None) == MARGIN_CATEGORY
+            and not line.depth
+            and line.via_cost_model_id is None)
+
+
+def _recipe_margin_cost(
+    db: Session,
+    fv,
+    cost_model: CostModel,
+    region: str,
+    ref_year: int,
+    ref_quarter: int,
+    target_year: int,
+    target_quarter: int,
+    base_price: float,
+) -> float:
+    """The part of `_compute_indexed_cost` that is the recipe's own margin line(s).
+
+    Same comp_base x weight x ratio arithmetic, restricted to the lines
+    `_is_own_margin_line` accepts, so `indexed cost - this` is the recipe's
+    cost before margin. 0.0 when the recipe has no margin line (a hand-built
+    model) or is an advanced expression (no discrete lines to tell apart).
+    """
+    formula_type = getattr(fv, 'formula_type', 'simple') or 'simple'
+    if formula_type == 'advanced':
+        return 0.0
+    comp_base = _component_base(base_price, fv.margin_type, fv.margin_value)
+    lines, _fallback_reason = get_effective_lines(db, fv, cost_model)
+    total = 0.0
+    for line in lines:
+        if not _is_own_margin_line(line):
+            continue
+        ratio = 1.0
+        if line.commodity_id:
+            ref_val = get_single_index_value(
+                db, cost_model.team_id, line.commodity_id, region, ref_year, ref_quarter
+            )
+            cur_val = get_single_index_value(
+                db, cost_model.team_id, line.commodity_id, region, target_year, target_quarter
+            )
+            ratio = (cur_val / ref_val) if (ref_val and cur_val) else 1.0
+        total += comp_base * float(line.weight) * ratio
+    return total
 
 
 def _period_label(year: int, quarter: int) -> str:
