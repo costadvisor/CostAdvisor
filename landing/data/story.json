@@ -1,0 +1,688 @@
+{
+ "_comment": "Every illustrative number on the homepage lives here. Aquaverde, Supplier A, Supplier B and Supplier C are fictional. Checked by tests/story.test.mjs; the build writes these values into the HTML. The four index levels and 12-month moves are set close to the public series the page shows (iron & steel scrap, natural gas and industrial electricity, alkalies & chlorine, the EU labour cost index), so the example never contradicts the real data beside it.",
+ "label": "Illustrative example. Aquaverde, Supplier A and Supplier B are fictional, and their prices are illustrative. The library structure, the index sources and the counts on this page are real.",
+ "buyer": "Aquaverde",
+ "buyer_desc": "a water utility",
+ "site": "Rotterdam",
+ "product": "Ferric chloride 40%",
+ "family": "Inorganic Chemicals",
+ "product_line": "Oxidative ferric-salt manufacture",
+ "industry": "Municipal Water",
+ "buying_category": "Coagulation",
+ "regions": [
+  "EU",
+  "NA",
+  "CN",
+  "APAC",
+  "IN",
+  "MEA"
+ ],
+ "supplier": "Supplier A",
+ "supplier_2": "Supplier B",
+ "incoterm": "DAP",
+ "currency": "EUR",
+ "unit": "t",
+ "quarter": "Q2 2026",
+ "start": {
+  "price": 300,
+  "label": "Jan 2023"
+ },
+ "recipe": [
+  {
+   "key": "iron",
+   "label": "Iron source",
+   "weight": 0.26,
+   "level": 105,
+   "chg12m": 0.12,
+   "color": "#0EA5E9",
+   "aligned_with": [
+    "iron-scrap-na"
+   ]
+  },
+  {
+   "key": "acid",
+   "label": "Hydrochloric acid",
+   "weight": 0.28,
+   "level": 82,
+   "chg12m": 0.06,
+   "color": "#10B981",
+   "aligned_with": [
+    "alkalies-chlorine-ppi"
+   ]
+  },
+  {
+   "key": "energy",
+   "label": "Energy",
+   "weight": 0.11,
+   "level": 90,
+   "chg12m": -0.03,
+   "color": "#F59E0B",
+   "aligned_with": [
+    "natgas-na",
+    "elec-na"
+   ]
+  },
+  {
+   "key": "labour",
+   "label": "Labour",
+   "weight": 0.12,
+   "level": 115,
+   "chg12m": 0.035,
+   "color": "#8B5CF6",
+   "aligned_with": [
+    "lci-eu"
+   ]
+  }
+ ],
+ "freight": {
+  "label": "Freight & delivery (DAP)",
+  "short": "Freight & delivery",
+  "weight": 0.1,
+  "eur": 30,
+  "color": "#64748B",
+  "note": "DAP Rotterdam, set by the Incoterm"
+ },
+ "margin": {
+  "label": "Margin",
+  "weight": 0.13,
+  "eur": 39,
+  "color": "#94A3B8"
+ },
+ "slider": {
+  "min": 60,
+  "max": 160
+ },
+ "presets": [
+  {
+   "id": "energy",
+   "label": "Energy shock",
+   "note": "energy +40",
+   "set": {
+    "energy": 130
+   }
+  },
+  {
+   "id": "acid",
+   "label": "Acid slump",
+   "note": "acid −20",
+   "set": {
+    "acid": 62
+   }
+  },
+  {
+   "id": "reset",
+   "label": "Back to Q2 2026",
+   "note": "",
+   "set": {
+    "iron": 105,
+    "acid": 82,
+    "energy": 90,
+    "labour": 115
+   }
+  }
+ ],
+ "price": 339,
+ "volume_t_yr": 2200,
+ "verdict_band_pct": 5,
+ "expect": {
+  "should_cost": 291,
+  "should_cost_exact": 290.88,
+  "floor": 252,
+  "floor_exact": 251.88,
+  "gap": 48,
+  "annual_gap": 105600,
+  "index_now": 97,
+  "donut": [
+   82,
+   69,
+   30,
+   41,
+   30,
+   39
+  ]
+ },
+ "quarters": [
+  "Q3-24",
+  "Q4-24",
+  "Q1-25",
+  "Q2-25",
+  "Q3-25",
+  "Q4-25",
+  "Q1-26",
+  "Q2-26"
+ ],
+ "should_series": [
+  273.5,
+  272.5,
+  276,
+  278,
+  281,
+  285,
+  293.5,
+  291
+ ],
+ "price_series": [
+  276,
+  275.5,
+  279.5,
+  284.5,
+  288,
+  301.5,
+  325,
+  339
+ ],
+ "gap_opened": "Q4 2025",
+ "year_moves": {
+  "should_cost_rise": 13,
+  "price_rise": 54.5
+ },
+ "signal": {
+  "index_move": -2.5,
+  "price_move": 14
+ },
+ "index_monthly": {
+  "from": "2023-01",
+  "to": "2026-06",
+  "values": [
+   100,
+   99,
+   97.9,
+   96.9,
+   96,
+   95.3,
+   94.6,
+   94,
+   93.6,
+   93.2,
+   92.9,
+   92.6,
+   92.3,
+   92,
+   91.8,
+   91.6,
+   91.4,
+   91.2,
+   91,
+   91.2,
+   91.3,
+   91,
+   90.7,
+   90.8,
+   91.4,
+   92,
+   92.6,
+   92.5,
+   92.7,
+   92.8,
+   93.3,
+   93.7,
+   94,
+   94.5,
+   95,
+   95.5,
+   96.9,
+   98,
+   98.6,
+   97.4,
+   96.6,
+   97
+  ],
+  "outlook": [
+   96.7,
+   96.3,
+   96,
+   95.7,
+   95,
+   94.7
+  ]
+ },
+ "outlook_eur": {
+  "months": [
+   "Jul",
+   "Aug",
+   "Sep",
+   "Oct",
+   "Nov",
+   "Dec"
+  ],
+  "values": [
+   290,
+   289,
+   288,
+   287,
+   285,
+   284
+  ],
+  "kind": "modelled"
+ },
+ "buy_window": {
+  "avg4q": 284,
+  "pct": 2.3,
+  "verdict": "Neutral",
+  "band_pct": 3
+ },
+ "alert_threshold": 25,
+ "monitor_rows": [
+  {
+   "product": "Ferric chloride 40%",
+   "supplier": "Supplier A",
+   "should": 291,
+   "actual": 339,
+   "status": "Alert"
+  },
+  {
+   "product": "Polyaluminium chloride 18%",
+   "supplier": "Supplier A",
+   "should": 486,
+   "actual": 507,
+   "status": "Watch"
+  },
+  {
+   "product": "Caustic soda 50%",
+   "supplier": "Supplier C",
+   "should": 382,
+   "actual": 391,
+   "status": "Watch"
+  },
+  {
+   "product": "Ferric chloride 40%",
+   "supplier": "Supplier B",
+   "should": 291,
+   "actual": 299,
+   "status": "Watch"
+  },
+  {
+   "product": "Aluminium sulphate liquid",
+   "supplier": "Supplier A",
+   "should": 272,
+   "actual": 276,
+   "status": "On track"
+  }
+ ],
+ "claims": [
+  {
+   "id": "acid30",
+   "text": "Hydrochloric acid is up 30% on the year",
+   "short": "Acid +30%",
+   "line": "acid",
+   "claimed": 30,
+   "expect": "overstated"
+  },
+  {
+   "id": "energy8",
+   "text": "Energy is up 8%",
+   "short": "Energy +8%",
+   "line": "energy",
+   "claimed": 8,
+   "expect": "contradicted"
+  },
+  {
+   "id": "labour4",
+   "text": "Labour went up 4%",
+   "short": "Labour +4%",
+   "line": "labour",
+   "claimed": 4,
+   "expect": "already_priced"
+  },
+  {
+   "id": "iron20",
+   "text": "Iron is up 20%",
+   "short": "Iron +20%",
+   "line": "iron",
+   "claimed": 20,
+   "expect": "overstated"
+  }
+ ],
+ "matrix": {
+  "median_x": 0.4,
+  "median_y": 0.42,
+  "focus": {
+   "x": 0.74,
+   "y": 0.88,
+   "label": "Ferric chloride 40%",
+   "quadrant": "Act now"
+  },
+  "dots": [
+   [
+    0.12,
+    0.62
+   ],
+   [
+    0.28,
+    0.55
+   ],
+   [
+    0.33,
+    0.7
+   ],
+   [
+    0.52,
+    0.58
+   ],
+   [
+    0.86,
+    0.5
+   ],
+   [
+    0.58,
+    0.3
+   ],
+   [
+    0.9,
+    0.22
+   ],
+   [
+    0.66,
+    0.12
+   ],
+   [
+    0.08,
+    0.15
+   ],
+   [
+    0.22,
+    0.3
+   ],
+   [
+    0.35,
+    0.08
+   ]
+  ]
+ },
+ "strategy": {
+  "category": "Coagulants",
+  "kraljic": "Leverage",
+  "kraljic_dot": [
+   0.3,
+   0.74
+  ],
+  "annual_spend": 2350000,
+  "supplier_shares": [
+   {
+    "name": "Supplier A",
+    "share": 0.67
+   },
+   {
+    "name": "Supplier B",
+    "share": 0.33
+   }
+  ],
+  "opportunities": 19,
+  "plotted": 17,
+  "objectives": [
+   "Cost reduction",
+   "Cash / working capital",
+   "Supply security",
+   "Quality",
+   "Innovation",
+   "Sustainability & ESG",
+   "Simplification"
+  ],
+  "objectives_selected": [
+   "Cost reduction",
+   "Supply security"
+  ]
+ },
+ "impact_ease": [
+  {
+   "n": 1,
+   "ease": 4,
+   "impact": 3,
+   "type": "volume lever",
+   "obj": [
+    "Cost reduction",
+    "Simplification"
+   ]
+  },
+  {
+   "n": 2,
+   "ease": 4.25,
+   "impact": 3,
+   "type": "volume lever",
+   "obj": [
+    "Cost reduction"
+   ]
+  },
+  {
+   "n": 3,
+   "ease": 5,
+   "impact": 3,
+   "type": "pricing lever",
+   "obj": [
+    "Cost reduction"
+   ]
+  },
+  {
+   "n": 4,
+   "ease": 3,
+   "impact": 5,
+   "type": "pricing lever",
+   "obj": [
+    "Cost reduction"
+   ]
+  },
+  {
+   "n": 5,
+   "ease": 3,
+   "impact": 4.6,
+   "type": "pricing lever",
+   "obj": [
+    "Cost reduction",
+    "Cash / working capital"
+   ]
+  },
+  {
+   "n": 6,
+   "ease": 3.45,
+   "impact": 4,
+   "type": "pricing lever",
+   "obj": [
+    "Cost reduction"
+   ]
+  },
+  {
+   "n": 7,
+   "ease": 2,
+   "impact": 3,
+   "type": "sourcing lever",
+   "obj": [
+    "Supply security",
+    "Cost reduction"
+   ]
+  },
+  {
+   "n": 8,
+   "ease": 3.85,
+   "impact": 4.25,
+   "type": "sourcing lever",
+   "obj": [
+    "Supply security"
+   ]
+  },
+  {
+   "n": 9,
+   "ease": 4.5,
+   "impact": 3,
+   "type": "volume lever",
+   "obj": [
+    "Simplification"
+   ]
+  },
+  {
+   "n": 10,
+   "ease": 3.25,
+   "impact": 4.45,
+   "type": "specification lever",
+   "obj": [
+    "Cost reduction",
+    "Quality"
+   ]
+  },
+  {
+   "n": 11,
+   "ease": 2.4,
+   "impact": 4.2,
+   "type": "specification lever",
+   "obj": [
+    "Quality",
+    "Innovation"
+   ]
+  },
+  {
+   "n": 12,
+   "ease": 4.6,
+   "impact": 4,
+   "type": "relationship lever",
+   "obj": [
+    "Supply security"
+   ]
+  },
+  {
+   "n": 13,
+   "ease": 1.6,
+   "impact": 2.2,
+   "type": "relationship lever",
+   "obj": [
+    "Supply security"
+   ]
+  },
+  {
+   "n": 14,
+   "ease": 4.4,
+   "impact": 1.8,
+   "type": "volume lever",
+   "obj": [
+    "Simplification",
+    "Cash / working capital"
+   ]
+  },
+  {
+   "n": 15,
+   "ease": 2.6,
+   "impact": 1.6,
+   "type": "specification lever",
+   "obj": [
+    "Sustainability & ESG"
+   ]
+  },
+  {
+   "n": 16,
+   "ease": 3.6,
+   "impact": 2.4,
+   "type": "sourcing lever",
+   "obj": [
+    "Supply security",
+    "Sustainability & ESG"
+   ]
+  },
+  {
+   "n": 17,
+   "ease": 4.8,
+   "impact": 4.6,
+   "type": "pricing lever",
+   "obj": [
+    "Cost reduction"
+   ]
+  }
+ ],
+ "today": "2026-10-09",
+ "timeline": {
+  "from": "2026-07-01",
+  "to": "2026-12-31"
+ },
+ "actions": [
+  {
+   "title": "Share should-cost evidence with Supplier A",
+   "owner": "CM",
+   "start": "2026-07-15",
+   "due": "2026-10-30",
+   "status": "In progress",
+   "progress": 0.6
+  },
+  {
+   "title": "Ask for an index-linked price clause",
+   "owner": "CM",
+   "start": "2026-11-02",
+   "due": "2026-12-15",
+   "status": "Not started",
+   "progress": 0
+  },
+  {
+   "title": "Request a reference quote from a second maker",
+   "owner": "BY",
+   "start": "2026-10-19",
+   "due": "2026-11-27",
+   "status": "Not started",
+   "progress": 0
+  },
+  {
+   "title": "Jar-test ferric chloride against PAC",
+   "owner": "QA",
+   "start": "2026-08-03",
+   "due": "2026-11-13",
+   "status": "In progress",
+   "progress": 0.4
+  },
+  {
+   "title": "Align both ferric chloride contract end dates",
+   "owner": "BY",
+   "start": "2026-07-01",
+   "due": "2026-09-30",
+   "status": "Overdue",
+   "progress": 0.7
+  }
+ ],
+ "handoffs": [
+  {
+   "from": 1,
+   "to": 2,
+   "chip": "recipe · 5 cost lines",
+   "text": "Add to portfolio copies the recipe into your private workspace. Nothing flows back."
+  },
+  {
+   "from": 2,
+   "to": 3,
+   "chip": "should-cost · €291/t · every quarter",
+   "text": "Monitor puts it next to every invoice from Supplier A."
+  },
+  {
+   "from": 3,
+   "to": 4,
+   "chip": "gap · €48/t ≈ €105,600 a year",
+   "text": "Before you call Supplier A: which way is the market going?"
+  },
+  {
+   "from": 4,
+   "to": 5,
+   "chip": "timing · act now · outlook easing",
+   "text": "Now build the case."
+  },
+  {
+   "from": 5,
+   "to": 6,
+   "chip": "position · floor €252 · target €291",
+   "text": "One price is a negotiation. The category is a strategy."
+  },
+  {
+   "from": 6,
+   "to": 7,
+   "chip": "plan · 2 objectives · 19 opportunities",
+   "text": "A strategy is only as good as its next action."
+  },
+  {
+   "from": 7,
+   "to": 2,
+   "chip": "new starting point · the agreed price",
+   "text": "Back to Model: the next quarter starts here."
+  }
+ ],
+ "baton": [
+  "recipe · 5 cost lines",
+  "should-cost €291/t",
+  "gap €48/t ≈ €105,600/yr",
+  "act now · outlook easing",
+  "floor €252 · target €291",
+  "2 objectives · 19 opportunities",
+  "agreed price → next round"
+ ]
+}

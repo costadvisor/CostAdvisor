@@ -1,0 +1,39 @@
+{
+ "_comment": "Per-host flags (plan E1). The build reads one block (SITE_ENV=dev or www). In this prototype, core.js picks the block from the hostname, and ?site=www previews the www block on any host. A claim flag stays false until its check (plan Part H) is done on production or its owner decision is taken; tests/story.test.mjs fails if a rolling_out key matches no element on the page.",
+ "dev": {
+  "host": "dev.costadvisor.org",
+  "noindex": true,
+  "rolling_out": [],
+  "claims": {
+   "db_row_level_security": false,
+   "alert_channels": [],
+   "ai_cost_modeler": false,
+   "ai_assisted_research": false,
+   "show_sources_under_review": false
+  },
+  "demo": {
+   "calendar": false,
+   "slotless_post": false
+  },
+  "contact_email": "hello@costadvisor.org",
+  "demo_minutes": 30
+ },
+ "www": {
+  "host": "costadvisor.org",
+  "noindex": false,
+  "rolling_out": ["discover", "floor", "claim-check", "script", "plan", "act", "mod-pricelist", "mod-ai"],
+  "claims": {
+   "db_row_level_security": false,
+   "alert_channels": [],
+   "ai_cost_modeler": false,
+   "ai_assisted_research": false,
+   "show_sources_under_review": false
+  },
+  "demo": {
+   "calendar": false,
+   "slotless_post": false
+  },
+  "contact_email": "hello@costadvisor.org",
+  "demo_minutes": 30
+ }
+}
