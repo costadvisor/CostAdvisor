@@ -1,0 +1,58 @@
+/* ── Tokens ─────────────────────────────────────────────────────────────
+   Unchanged from today's page (01_current_audit.md §8.1), plus the two additions
+   from the plan (B0): named chart colours and the "half" colours.
+   Light theme only, as today. */
+:root{
+  --bg:#eef2f5;--surface:#ffffff;--surface2:#eef3f5;
+  --glass:rgba(255,255,255,.82);--border:#dbe3e8;
+  --blue:#007068;--teal:#00A99D;--green:#0A714F;
+  --amber:#805D11;--red:#BC2929;--purple:#7c5cbf;
+  /* Steel blue: large text and fills only (about 3.4:1 on white). */
+  --accent-blue:#2596be;
+  --ink:#062a26;--ink2:#0a3a34;
+  --text:#0f2228;--muted:#54666d;--dim:#63737a;
+  /* Each web font is followed by size-matched local fallbacks (base.css), so the late swap to the
+     web font barely moves the text: no layout shift, and deep links keep their place. */
+  --font-display:'Space Grotesk','SG Fallback','SG Fallback R','SG Fallback D',system-ui,sans-serif;
+  --font-sans:'Inter','Inter Fallback','Inter Fallback R','Inter Fallback D',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono','JBM Fallback',ui-monospace,monospace;
+  --radius:16px;--radius-sm:9px;
+  --shadow-sm:0 1px 3px rgba(8,40,36,.06),0 1px 2px rgba(8,40,36,.04);
+  --shadow:0 6px 22px rgba(8,40,36,.08),0 2px 6px rgba(8,40,36,.05);
+  --shadow-lg:0 18px 48px rgba(8,40,36,.13),0 6px 16px rgba(8,40,36,.07);
+  --safe-top:env(safe-area-inset-top,0px);
+  --safe-bottom:env(safe-area-inset-bottom,0px);
+
+  /* Named chart colours (were hard-coded). Bright on purpose: fills, lines, dots. */
+  --chart-should:#10B981;
+  --chart-price:#EF4444;
+  --chart-1:#0EA5E9;
+  --chart-2:#F59E0B;
+  --chart-3:#8B5CF6;
+  --chart-4:#94A3B8;
+
+  /* Half colours (plan B0): market library = steel blue, your workspace = teal-green,
+     Strategy (where the two meet again) = amber. Reused from today's tinted step cards. */
+  --lib:#2596be;            /* rules, dots, fills, large text */
+  --lib-ink:#1b6f8d;        /* small text on white, AA */
+  --lib-tint:rgba(37,150,190,.09);
+  --lib-line:rgba(37,150,190,.35);
+  --ws:#10B981;
+  --ws-ink:#0A714F;
+  --ws-tint:rgba(16,185,129,.10);
+  --ws-line:rgba(16,185,129,.35);
+  --plan:#F59E0B;
+  --plan-ink:#805D11;
+  --plan-tint:rgba(245,158,11,.11);
+  --plan-line:rgba(245,158,11,.4);
+
+  --teal-tint:rgba(0,169,157,.07);
+  --teal-tint2:rgba(0,169,157,.12);
+  --teal-line:rgba(0,169,157,.25);
+  --price-tint:rgba(239,68,68,.12);
+  --price-line:rgba(239,68,68,.28);
+
+  --nav-h:64px;
+  --container:1180px;
+  --container-wide:1320px;
+}

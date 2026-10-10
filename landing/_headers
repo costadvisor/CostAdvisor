@@ -1,5 +1,8 @@
+# PROTOTYPE: the build adds "X-Robots-Tag: noindex" to this block when SITE_ENV=dev (plan F2).
+# api.frankfurter.app left connect-src: the page no longer calls it. 'unsafe-inline' can go once the
+# font loader's onload attribute is replaced by a listener (the onclick attributes are already gone).
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://api.costadvisor.org https://api-dev.costadvisor.org https://api.frankfurter.app https://*.cloudflareinsights.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://api.costadvisor.org https://api-dev.costadvisor.org https://*.cloudflareinsights.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
   Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff

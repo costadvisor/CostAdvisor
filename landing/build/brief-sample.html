@@ -1,0 +1,141 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Negotiation brief — illustrative sample — CostAdvisor</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>/* ── Tokens ─────────────────────────────────────────────────────────────
+   Unchanged from today's page (01_current_audit.md §8.1), plus the two additions
+   from the plan (B0): named chart colours and the "half" colours.
+   Light theme only, as today. */
+:root{
+  --bg:#eef2f5;--surface:#ffffff;--surface2:#eef3f5;
+  --glass:rgba(255,255,255,.82);--border:#dbe3e8;
+  --blue:#007068;--teal:#00A99D;--green:#0A714F;
+  --amber:#805D11;--red:#BC2929;--purple:#7c5cbf;
+  /* Steel blue: large text and fills only (about 3.4:1 on white). */
+  --accent-blue:#2596be;
+  --ink:#062a26;--ink2:#0a3a34;
+  --text:#0f2228;--muted:#54666d;--dim:#63737a;
+  /* Each web font is followed by size-matched local fallbacks (base.css), so the late swap to the
+     web font barely moves the text: no layout shift, and deep links keep their place. */
+  --font-display:'Space Grotesk','SG Fallback','SG Fallback R','SG Fallback D',system-ui,sans-serif;
+  --font-sans:'Inter','Inter Fallback','Inter Fallback R','Inter Fallback D',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono','JBM Fallback',ui-monospace,monospace;
+  --radius:16px;--radius-sm:9px;
+  --shadow-sm:0 1px 3px rgba(8,40,36,.06),0 1px 2px rgba(8,40,36,.04);
+  --shadow:0 6px 22px rgba(8,40,36,.08),0 2px 6px rgba(8,40,36,.05);
+  --shadow-lg:0 18px 48px rgba(8,40,36,.13),0 6px 16px rgba(8,40,36,.07);
+  --safe-top:env(safe-area-inset-top,0px);
+  --safe-bottom:env(safe-area-inset-bottom,0px);
+
+  /* Named chart colours (were hard-coded). Bright on purpose: fills, lines, dots. */
+  --chart-should:#10B981;
+  --chart-price:#EF4444;
+  --chart-1:#0EA5E9;
+  --chart-2:#F59E0B;
+  --chart-3:#8B5CF6;
+  --chart-4:#94A3B8;
+
+  /* Half colours (plan B0): market library = steel blue, your workspace = teal-green,
+     Strategy (where the two meet again) = amber. Reused from today's tinted step cards. */
+  --lib:#2596be;            /* rules, dots, fills, large text */
+  --lib-ink:#1b6f8d;        /* small text on white, AA */
+  --lib-tint:rgba(37,150,190,.09);
+  --lib-line:rgba(37,150,190,.35);
+  --ws:#10B981;
+  --ws-ink:#0A714F;
+  --ws-tint:rgba(16,185,129,.10);
+  --ws-line:rgba(16,185,129,.35);
+  --plan:#F59E0B;
+  --plan-ink:#805D11;
+  --plan-tint:rgba(245,158,11,.11);
+  --plan-line:rgba(245,158,11,.4);
+
+  --teal-tint:rgba(0,169,157,.07);
+  --teal-tint2:rgba(0,169,157,.12);
+  --teal-line:rgba(0,169,157,.25);
+  --price-tint:rgba(239,68,68,.12);
+  --price-line:rgba(239,68,68,.28);
+
+  --nav-h:64px;
+  --container:1180px;
+  --container-wide:1320px;
+}
+
+@page{size:A4;margin:0}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-sans);color:var(--text);font-size:11pt;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.page{width:210mm;height:297mm;padding:16mm 16mm 14mm;position:relative;page-break-after:always;overflow:hidden}
+.page:last-child{page-break-after:auto}
+.top{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid var(--teal);padding-bottom:8px;margin-bottom:14px}
+.brand{font-family:var(--font-display);font-weight:700;font-size:14pt}.brand b{color:var(--blue)}
+.stamp{font-family:var(--font-mono);font-size:8.5pt;font-weight:600;color:#805D11;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.45);border-radius:20px;padding:2px 10px}
+h1{font-family:var(--font-display);font-size:20pt;line-height:1.15;margin-bottom:4px}
+h2{font-family:var(--font-display);font-size:12.5pt;margin:16px 0 8px}
+.meta{font-family:var(--font-mono);font-size:8.5pt;color:var(--muted)}
+.pos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.pos div{border:1px solid var(--border);border-radius:8px;padding:8px 10px}
+.k{display:block;font-family:var(--font-mono);font-size:7.5pt;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.v{display:block;font-family:var(--font-mono);font-size:17pt;font-weight:700}
+.s{display:block;font-size:8pt;color:var(--dim)}
+.say{margin-top:8px;font-size:10pt}
+table{width:100%;border-collapse:collapse;font-size:9.5pt}
+th,td{padding:5px 6px;border-bottom:1px solid var(--border);text-align:left}
+th{font-family:var(--font-mono);font-size:7.5pt;color:var(--muted);text-transform:uppercase;background:var(--surface2)}
+td.n{text-align:right;font-family:var(--font-mono)}
+.chart{border:1px solid var(--border);border-radius:8px;padding:8px 10px}
+.chart svg{width:100%;height:auto}
+.gapchart .grid{stroke:rgba(0,0,0,.08)}.gapchart .ln-should{stroke:#10B981;stroke-width:2.2;fill:none}.gapchart .ln-price{stroke:#EF4444;stroke-width:2.2;fill:none}
+.gapchart .stop-price-a{stop-color:#EF4444;stop-opacity:.22}.gapchart .stop-price-b{stop-color:#EF4444;stop-opacity:.04}.gapchart .pt-price{fill:#EF4444}.gapchart .pt-should{fill:#10B981}
+.lab{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:7.5pt;color:var(--dim);margin-top:2px}
+.leg{font-family:var(--font-mono);font-size:8pt;color:var(--muted);margin-bottom:4px}
+.leg i{display:inline-block;width:12px;height:2px;vertical-align:middle;margin:0 4px 0 10px}
+.script{background:var(--ink);color:#d8f3ef;border-radius:8px;padding:12px 14px;font-family:var(--font-mono);font-size:9pt;line-height:1.55}
+.script li{margin:0 0 6px 16px}
+.note{font-size:8.5pt;color:var(--muted);line-height:1.5;margin-top:8px}
+.pf span{white-space:nowrap}
+.pf{position:absolute;left:16mm;right:16mm;bottom:9mm;display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:7.5pt;color:#805D11;border-top:1px solid var(--border);padding-top:5px}
+.v-o{color:#805D11}.v-p{color:var(--green)}.v-c{color:var(--red)}
+</style></head><body>
+<section class="page">
+  <div class="top"><span class="brand"><b>Cost</b>Advisor · Negotiation brief</span><span class="stamp">Illustrative sample</span></div>
+  <h1>Ferric chloride 40% · Supplier A</h1>
+  <p class="meta">Aquaverde (fictional) · Rotterdam · DAP · Q2 2026 · EUR/t · about 2,200 t a year</p>
+  <h2>Negotiation position</h2>
+  <div class="pos">
+    <div><span class="k">Floor</span><span class="v" style="color:var(--blue)">€252</span><span class="s">cost before margin: a minimum, not a target</span></div>
+    <div><span class="k">Target · the should-cost</span><span class="v" style="color:var(--green)">€291</span><span class="s">open near here</span></div>
+    <div><span class="k">Their price</span><span class="v" style="color:var(--red)">€339</span><span class="s">€48/t above should-cost</span></div>
+  </div>
+  <p class="say">Defensible range €252–€291. Open near should-cost; treat the floor as your walk-away point, not your opening offer. Annual gap ≈ €105,600 (€48 × 2,200 t).</p>
+  <h2>Cost drivers</h2>
+  <table><thead><tr><th>Cost line</th><th>Weight</th><th>Index (Jan 2023 = 100)</th><th>12-month move</th><th>€/t today</th></tr></thead><tbody>
+    <tr><td>Iron source</td><td class="n">26%</td><td class="n">105</td><td class="n">+12.0%</td><td class="n">€82</td></tr><tr><td>Hydrochloric acid</td><td class="n">28%</td><td class="n">82</td><td class="n">+6.0%</td><td class="n">€69</td></tr><tr><td>Energy</td><td class="n">11%</td><td class="n">90</td><td class="n">−3.0%</td><td class="n">€30</td></tr><tr><td>Labour</td><td class="n">12%</td><td class="n">115</td><td class="n">+3.5%</td><td class="n">€41</td></tr>
+    <tr><td>Freight & delivery (DAP), fixed</td><td class="n">10%</td><td class="n">—</td><td class="n">—</td><td class="n">€30</td></tr>
+    <tr><td>Margin (fixed)</td><td class="n">13%</td><td class="n">—</td><td class="n">—</td><td class="n">€39</td></tr>
+    <tr><td><b>Should-cost</b></td><td></td><td></td><td></td><td class="n"><b>€291</b></td></tr>
+  </tbody></table>
+  <p class="note">Each index line = €300 starting price (Jan 2023) × weight × index ÷ 100. Freight and delivery to Rotterdam (DAP) and the margin are fixed lines; the floor is the should-cost minus the margin. Illustrative weights, not the library recipe.</p>
+  <h2>Price evolution · quarterly</h2>
+  <div class="chart"><p class="leg">€/t ·<i style="background:#10B981"></i>Should-cost €273.5 → €291<i style="background:#EF4444"></i>Supplier A €276 → €339</p><svg class="gapchart" viewBox="0 0 640 170"  aria-hidden="true" focusable="false"><defs><linearGradient id="b-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="stop-price-a"/><stop offset="1" class="stop-price-b"/></linearGradient></defs><line class="grid" x1="0" x2="640" y1="42.5" y2="42.5"/><line class="grid" x1="0" x2="640" y1="85" y2="85"/><line class="grid" x1="0" x2="640" y1="127.5" y2="127.5"/><polygon fill="url(#b-g)" points="4,155.2 94.3,156.3 184.6,147.5 274.9,136.6 365.1,128.9 455.4,99.3 545.7,47.7 636,17 636,122.3 545.7,116.8 455.4,135.5 365.1,144.3 274.9,150.8 184.6,155.2 94.3,162.9 4,160.7"/><path class="ln-should draw-path" d="M4 160.7 L94.3 162.9 L184.6 155.2 L274.9 150.8 L365.1 144.3 L455.4 135.5 L545.7 116.8 L636 122.3" fill="none"/><path class="ln-price draw-path" d="M4 155.2 L94.3 156.3 L184.6 147.5 L274.9 136.6 L365.1 128.9 L455.4 99.3 L545.7 47.7 L636 17" fill="none"/><circle class="pt-price" cx="4" cy="155.2" r="2.6"/><circle class="pt-price" cx="94.3" cy="156.3" r="2.6"/><circle class="pt-price" cx="184.6" cy="147.5" r="2.6"/><circle class="pt-price" cx="274.9" cy="136.6" r="2.6"/><circle class="pt-price" cx="365.1" cy="128.9" r="2.6"/><circle class="pt-price" cx="455.4" cy="99.3" r="2.6"/><circle class="pt-price" cx="545.7" cy="47.7" r="2.6"/><circle class="pt-price" cx="636" cy="17" r="2.6"/><circle class="pt-should" cx="4" cy="160.7" r="2.6"/><circle class="pt-should" cx="94.3" cy="162.9" r="2.6"/><circle class="pt-should" cx="184.6" cy="155.2" r="2.6"/><circle class="pt-should" cx="274.9" cy="150.8" r="2.6"/><circle class="pt-should" cx="365.1" cy="144.3" r="2.6"/><circle class="pt-should" cx="455.4" cy="135.5" r="2.6"/><circle class="pt-should" cx="545.7" cy="116.8" r="2.6"/><circle class="pt-should" cx="636" cy="122.3" r="2.6"/></svg><div class="lab"><span>Q3-24</span><span>Q4-24</span><span>Q1-25</span><span>Q2-25</span><span>Q3-25</span><span>Q4-25</span><span>Q1-26</span><span>Q2-26</span></div></div>
+  <p class="note">In a year, the should-cost rose about €13 a tonne; Supplier A's price rose €54.50. The gap opened in Q4 2025.</p>
+  <footer class="pf"><span>Illustrative sample · Aquaverde and Supplier A are fictional</span><span>costadvisor.org · 1/2</span></footer>
+</section>
+<section class="page">
+  <div class="top"><span class="brand"><b>Cost</b>Advisor · Negotiation brief</span><span class="stamp">Illustrative sample</span></div>
+  <h2 style="margin-top:0">Supplier A's claims, checked against the indexes</h2>
+  <table><thead><tr><th>They said</th><th>Index, 12 months</th><th>Verdict</th></tr></thead><tbody>
+    <tr><td>“Hydrochloric acid is up 30% on the year”</td><td class="n">+6.0%</td><td class="v-o"><b>Overstated</b></td></tr><tr><td>“Energy is up 8%”</td><td class="n">−3.0%</td><td class="v-c"><b>Contradicted — it moved the other way</b></td></tr><tr><td>“Labour went up 4%”</td><td class="n">+3.5%</td><td class="v-p"><b>Real, and already inside the should-cost</b></td></tr><tr><td>“Iron is up 20%”</td><td class="n">+12.0%</td><td class="v-o"><b>Overstated</b></td></tr>
+  </tbody></table>
+  <p class="note">Rules: within 2 points of the index = already priced; under 0.5% = did not move; opposite sign = contradicted. Index moves explain about €13 of the €54.50 increase in a year; the €48 above the should-cost is not explained by the indexes in the recipe, nor by freight and delivery.</p>
+  <h2>Call script</h2>
+  <ol class="script">
+    <li>“We have modelled ferric chloride 40% bottom-up from published indexes. The defensible number is €291/t; your current price is €339/t, €48/t above that.”</li>
+    <li>“Labour is up 3.5% on the index. That is real, and it is already inside the should-cost.”</li>
+    <li>“We are ready to settle at €291/t. Below €252/t there is no margin left in the chain, so that is not a number we expect you to accept.”</li>
+  </ol>
+  <p class="note">Every figure comes from the calculation engine, not from a language model.</p>
+  <h2>How these numbers are built</h2>
+  <p class="note" style="font-size:9.5pt;color:var(--text)">Should-cost = starting price × Σ (weight × index ÷ index at start) + margin, then Incoterm and exchange rate. Floor = should-cost − margin. Indexes are monthly, base 100 = January 2023; the library is built mostly on public statistics and exchange benchmarks, each series naming its source where one is documented. Full method: costadvisor.org/method</p>
+  <h2>See it on your own product</h2>
+  <p class="note" style="font-size:10pt;color:var(--text)">Bring one product and one price you pay. In a 30-minute demo we build its should-cost, its gap, its floor and this brief, on the call. Book at costadvisor.org/demo</p>
+  <footer class="pf"><span>Illustrative sample · Aquaverde and Supplier A are fictional</span><span>costadvisor.org · 2/2</span></footer>
+</section>
+</body></html>

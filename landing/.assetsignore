@@ -1,0 +1,4 @@
+# Not served by the static-assets Worker (kept in the repo for builds and tests)
+build/
+tests/
+wrangler.jsonc
