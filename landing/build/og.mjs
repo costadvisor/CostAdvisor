@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const st = JSON.parse(fs.readFileSync(path.join(root, 'data/story.json'), 'utf8'));
+// The library layer is real data (data/library.snapshot.json); the workspace layer is the illustrative story.
+const lib = JSON.parse(fs.readFileSync(path.join(root, 'data/library.snapshot.json'), 'utf8'));
 await import(path.join(root, 'assets/js/svg.js'));
 const S = globalThis.CASvg;
 const eur = (n) => '€' + Math.round(n).toLocaleString('en-US');
@@ -21,7 +23,7 @@ const eur = (n) => '€' + Math.round(n).toLocaleString('en-US');
 const parts = st.recipe.map((l) => st.start.price * l.weight * l.level / 100);
 const should = parts.reduce((a, b) => a + b, 0) + st.freight.eur + st.margin.eur;
 const gap = Math.round(st.price - should), floor = should - st.margin.eur;
-const spark = S.sparkline({ id: 'og1', w: 200, h: 54, actual: st.index_monthly.values, outlook: st.index_monthly.outlook, cls: 'ln-lib', min: 89.5, max: 100.5 });
+const spark = S.sparkline({ id: 'og1', w: 200, h: 54, actual: lib.card.series.actual, outlook: lib.card.series.forecast, cls: 'ln-lib', min: 94, max: 105.5 });
 const gapc = S.gapChart({ id: 'og2', w: 420, h: 84, should: st.should_series, price: st.price_series, min: 264, max: 344, dots: false });
 const tokens = fs.readFileSync(path.join(root, 'assets/css/tokens.css'), 'utf8');
 const logo = 'data:image/png;base64,' + fs.readFileSync(path.join(root, 'logo.png')).toString('base64');
@@ -81,6 +83,9 @@ h1 .b{display:block;color:var(--blue)}
 .next{display:flex;flex-wrap:wrap;gap:4px 7px;align-items:center;margin-top:9px;padding-top:8px;border-top:1px dashed var(--border);font-family:var(--font-mono);font-size:12px;font-weight:600}
 .next .nk{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:500}
 .next i{font-style:normal;color:var(--blue)}
+.hd{display:flex;align-items:center;white-space:nowrap}.hd .tag,.hd .note{white-space:nowrap}.hd .illus,.hd .real{margin-left:auto;font-size:12px;padding:2px 9px;white-space:nowrap}
+.real{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--lib-ink);background:#fff;border:1px solid var(--lib-line);border-radius:20px;padding:2px 9px}
+.real::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--lib)}
 .fict{position:absolute;right:56px;top:504px;width:470px;font-size:13px;color:var(--muted);text-align:center}
 </style></head><body>
 <div class="dots"></div><div class="glow"></div><div class="topbar"></div>
@@ -93,20 +98,20 @@ h1 .b{display:block;color:var(--blue)}
 </div>
 <p class="foot">a StaminaChem company · <b>costadvisor.org</b></p>
 <div class="card">
-  <div class="bar"><i style="background:#ef4444"></i><i style="background:#f59e0b"></i><i style="background:#10b981"></i><span class="t">${st.product}</span><span class="illus">Illustrative</span></div>
+  <div class="bar"><i style="background:#ef4444"></i><i style="background:#f59e0b"></i><i style="background:#10b981"></i><span class="t">${st.product}</span></div>
   <div class="layer lib">
-    <div><span class="tag l1">Market library</span><span class="note">same for every buyer</span></div>
-    <div class="row"><div><span class="k">Should-cost index · Europe</span><span class="big">${st.expect.index_now.toFixed(1)}<small>Jan 2023 = 100</small></span></div><div class="sp">${spark}</div></div>
+    <div class="hd"><span class="tag l1">Market library</span><span class="note">same for all</span><span class="real">Real · ${lib.data_to_label}</span></div>
+    <div class="row"><div><span class="k">Should-cost index · Europe</span><span class="big">${lib.card.series.actual.at(-1).toFixed(1)}<small>Jan 2023 = 100</small></span></div><div class="sp">${spark}</div></div>
   </div>
   <div class="join"><span class="ln"></span><span class="p">+ Add to portfolio</span><span class="ln"></span></div>
   <div class="layer ws">
-    <div><span class="tag w1">Your workspace</span><span class="note">${st.buyer} · private</span></div>
+    <div class="hd"><span class="tag w1">Your workspace</span><span class="note">${st.buyer} · private</span><span class="illus">Illustrative</span></div>
     <div class="nums"><div><span class="k">Should-cost</span><b class="pos">${eur(should)}/t</b></div><div><span class="k">${st.supplier} · ${st.incoterm}</span><b class="neg">${eur(st.price)}/t</b></div><span class="badge">▲ ${eur(gap)}/t above</span></div>
     <div class="chart">${gapc}</div>
     <p class="next"><span class="nk">Then</span><span>Brief · floor ${eur(floor)}</span><i>›</i><span>${st.strategy.category} plan</span><i>›</i><span>${st.actions.length} actions</span></p>
   </div>
 </div>
-<p class="fict">${st.buyer} and ${st.supplier} are fictional. Every number adds up.</p>
+<p class="fict">Library data is real, to ${lib.data_to_label}. ${st.buyer} and ${st.supplier} are fictional; every number adds up.</p>
 </body></html>`;
 
 const htmlPath = path.join(root, 'build/og-cover.html');

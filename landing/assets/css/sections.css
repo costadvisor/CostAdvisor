@@ -147,7 +147,7 @@
 .rail-skip:hover{color:var(--blue)}
 
 /* ═══ Stages ═══ */
-.stage{padding:26px 0 2px;position:relative}
+.stage{padding:22px 0 2px;position:relative}
 .stage-body{display:grid;grid-template-columns:minmax(0,8fr) minmax(0,4fr);gap:22px;align-items:start}
 .stage-side{display:flex;flex-direction:column;gap:12px;min-width:0}
 .side-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:14px;box-shadow:var(--shadow-sm)}
@@ -328,7 +328,7 @@
 .st-panel{border:1px solid var(--border);border-radius:12px;padding:12px 14px}
 .kj{max-width:220px;margin:4px auto 0}
 .st-chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px;justify-content:center}
-.st-chips span{font-family:var(--font-mono);font-size:10.5px;border:1px solid var(--border);border-radius:5px;padding:1px 6px;color:var(--muted)}
+.st-chips>span{font-family:var(--font-mono);font-size:10.5px;border:1px solid var(--border);border-radius:5px;padding:1px 6px;color:var(--muted)}
 .spend{display:flex;align-items:center;gap:16px;margin-top:12px}
 .spend-donut{width:132px;height:132px;flex-shrink:0;position:relative}
 .spend-txt{display:flex;flex-direction:column;gap:1px;min-width:0}
@@ -850,3 +850,190 @@
   .draw-path{stroke-dashoffset:0;animation:none}
   .js .toast:not(.in){opacity:1;transform:none}
 }
+
+/* ═══ Intelligence thread (10 Oct): the market library feeds every step ═══
+   Blue = the shared market library (real data, dated). Green = your workspace (illustrative).
+   Each stage 02–07 opens its side column with a "From the library" card (.lib-feed); the frame
+   beside it is the workspace (.ws-tag). Inside the frames, ◆ (.lmk) marks a value that came from
+   the library. On wide screens a dashed blue thread links the library cards through the journey. */
+.lmk{color:var(--lib);font-style:normal;font-size:.85em;margin-right:4px}
+.ws-tag,.lib-tag{font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:#fff;padding:2px 7px;border-radius:5px;white-space:nowrap;flex-shrink:0}
+.ws-tag{background:var(--ws-ink)}.lib-tag{background:var(--lib-ink)}
+.frame.lib-frame::before{background:linear-gradient(90deg,var(--lib),var(--teal))}
+.real-pill.sm{font-size:10px;padding:1px 8px}
+/* The library card */
+.stage-body{row-gap:12px}
+.lib-feed{position:relative;z-index:1;min-width:0;background:linear-gradient(var(--lib-tint),var(--lib-tint)) var(--surface);border:1px solid var(--lib-line);border-left:3px solid var(--lib);border-radius:14px;padding:11px 14px 12px;box-shadow:var(--shadow-sm)}
+.lib-feed::before{content:'';position:absolute;left:50%;top:-5px;width:9px;height:9px;margin-left:-4.5px;background:var(--lib);transform:rotate(45deg);border-radius:1px;box-shadow:0 0 0 3px var(--bg)}
+.lf-head{display:flex;align-items:center;gap:6px 8px;flex-wrap:wrap}
+.lf-tag{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#fff;background:var(--lib-ink);padding:2px 7px;border-radius:5px}
+.lf-head .real-pill{margin-left:auto}
+.lf-what{font-family:var(--font-display);font-weight:700;font-size:15px;line-height:1.3;margin:6px 0 5px;color:var(--text)}
+.lf-what small{font-family:var(--font-mono);font-weight:500;font-size:10.5px;color:var(--muted);margin-left:6px;white-space:nowrap}
+.lf-key{display:flex;align-items:center;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;padding:5px 0;border-top:1px solid var(--lib-line)}
+.lf-key b{font-family:var(--font-mono);font-size:19px;font-weight:700;color:var(--lib-ink);white-space:nowrap}
+.lf-key span{font-size:12.5px;color:var(--muted);line-height:1.35}
+.lf-list{list-style:none;display:flex;flex-direction:column;border-top:1px solid var(--lib-line)}
+.lf-list li{display:flex;justify-content:space-between;align-items:baseline;gap:4px 12px;padding:3px 0;font-size:12.5px;line-height:1.35;border-bottom:1px dashed rgba(37,150,190,.22)}
+.lf-list li:last-child{border-bottom:none}
+.lf-list li>span{color:var(--text);min-width:0}
+.lf-list li>span small{color:var(--muted);font-family:var(--font-mono);font-size:10.5px}
+.lf-list b{font-family:var(--font-mono);font-size:12px;font-weight:600;white-space:nowrap;color:var(--text)}
+.lf-list .chg-up{color:var(--red)}.lf-list .chg-dn{color:var(--green)}
+.lf-sub{font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--lib-ink);font-weight:600;margin:6px 0 3px}
+.lf-foot{display:flex;gap:2px;align-items:flex-start;font-size:12px;color:var(--lib-ink);margin-top:6px;line-height:1.4}
+.lf-chips{list-style:none;display:flex;flex-wrap:wrap;gap:4px}
+.lf-chips li{font-size:11.5px;line-height:1.3;border:1px solid var(--lib-line);background:var(--surface);color:var(--text);border-radius:6px;padding:2px 7px}
+.lf-chips.fam li{border-color:var(--plan-line);background:var(--plan-tint);color:var(--plan-ink);font-weight:600}
+.lf-badge{display:flex;gap:8px;align-items:flex-start;margin-top:8px;padding-top:8px;border-top:1px solid var(--lib-line);font-size:12.5px;line-height:1.45;color:var(--text)}
+.lf-badge .pc-badge{flex-shrink:0}
+.lf-gauge{display:block;position:relative;height:6px;border-radius:3px;margin:5px 0 2px;background:linear-gradient(90deg,rgba(16,185,129,.55),rgba(245,158,11,.55),rgba(239,68,68,.55))}
+.lf-gauge i{position:absolute;top:-4px;width:3px;height:14px;margin-left:-1.5px;border-radius:2px;background:var(--text)}
+.lf-gauge-k{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:10px;color:var(--muted)}
+.lf-d>summary{display:none;list-style:none;cursor:pointer;font-family:var(--font-mono);font-size:11.5px;color:var(--lib-ink);padding:6px 0 0;min-height:32px;align-items:center;justify-content:space-between}
+.lf-d>summary::-webkit-details-marker{display:none}
+.lf-d>summary::after{content:'+';font-size:17px}
+.lf-d[open]>summary::after{content:'−'}
+/* Library card beside the frame: frame spans both rows, card on top of the side column. */
+@media(min-width:1100px){
+  .stage-body{grid-template-rows:auto 1fr}
+  .stage-body>.stage-main{grid-column:1;grid-row:1/span 2}
+  .stage-body>.lib-feed{grid-column:2;grid-row:1}
+  .stage-body>.stage-side{grid-column:2;grid-row:2}
+  /* The thread: a dashed blue line down the right edge of the journey; each library card ties into it. */
+  .journey-stages{position:relative}
+  .journey-stages::before{content:'';position:absolute;z-index:0;top:110px;bottom:150px;right:-14px;border-left:2px dashed var(--lib-line);pointer-events:none}
+  .lib-feed::after{content:'';position:absolute;top:21px;right:-15px;width:13px;border-top:2px dashed var(--lib-line)}
+  .lib-feed::before{left:auto;right:-19px;top:17px;margin-left:0}
+  .side-more.fold-d>summary{display:flex}
+  .side-more.fold-d[open]>summary{margin-bottom:10px}
+}
+/* Stage 02: the hand-off from the library to the workspace, inside the frame */
+.prefill{display:grid;grid-template-columns:minmax(0,1fr) 22px minmax(0,1.15fr);align-items:stretch;margin-bottom:12px}
+.pf-lane{border-radius:10px;padding:8px 11px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.pf-lane.lib{background:var(--lib-tint);border:1px solid var(--lib-line);border-left:3px solid var(--lib)}
+.pf-lane.ws{background:var(--ws-tint);border:1px solid var(--ws-line);border-left:3px solid var(--ws)}
+.pf-k{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase}
+.pf-lane.lib .pf-k{color:var(--lib-ink)}.pf-lane.ws .pf-k{color:var(--ws-ink)}
+.pf-v{font-size:13px;font-weight:600;line-height:1.35}
+.pf-s{font-family:var(--font-mono);font-size:11px;color:var(--muted);line-height:1.45}
+.pf-s b{color:var(--text)}
+.pf-arrow{display:flex;align-items:center;justify-content:center;color:var(--lib);font-weight:700;font-size:16px}
+/* Rail: what the library brings to each step */
+.rl-wrap{display:flex;flex-direction:column;min-width:0}
+.rlib{display:block;font-family:var(--font-mono);font-size:10px;line-height:1.25;color:var(--lib-ink);white-space:nowrap}
+.rlib::before{content:'◆ ';color:var(--lib);font-size:8px}
+.rail-legend .lg.lib+b{font-weight:500}
+/* Discover: real card */
+.pc-anatomy{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px;margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);font-size:12px;color:var(--muted)}
+.pc-anatomy b{font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--lib-ink);margin-right:2px}
+.pc-anatomy>span{border:1px solid var(--lib-line);border-radius:5px;padding:1px 6px;background:var(--surface);color:var(--text);font-size:11.5px}
+.pc-regions .rg b{font-weight:600;margin-left:4px}
+.pc-drivers p{font-size:13.5px;margin-top:4px}
+.pc-drivers small{display:block;font-size:11.5px;color:var(--dim);margin-top:2px}
+.pc-also{display:block;font-size:12px;color:var(--muted);font-weight:400;margin-top:1px}
+/* Act: strategy family on each action */
+.fam-chip{display:inline-block;font-family:var(--font-mono);font-size:9.5px;font-weight:600;color:var(--lib-ink);background:var(--lib-tint);border:1px solid var(--lib-line);border-radius:4px;padding:0 5px;margin-left:6px;white-space:nowrap;vertical-align:1px}
+/* Loop: the library feeds every node */
+.loopring .lr-hub{fill:var(--lib-tint);stroke:var(--lib);stroke-width:1.5}
+.loopring .lr-spoke{stroke:var(--lib);stroke-width:1.3;stroke-dasharray:2 4;opacity:.8}
+.loopring .lr-hubt{font-family:var(--font-mono);font-size:10.5px;font-weight:700;fill:var(--lib-ink);letter-spacing:.5px}
+.loopring .lr-hubs{font-family:var(--font-sans);font-size:9.5px;fill:var(--lib-ink)}
+.half .feeds{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.half .feeds a{font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--lib-ink);border:1px solid var(--lib-line);background:var(--surface);border-radius:5px;padding:1px 6px}
+.half .feeds a:hover{background:var(--lib-tint)}
+/* Coverage: which steps drew on each count */
+.counts li{position:relative}
+.counts .used{position:absolute;top:9px;right:12px;font-family:var(--font-mono);font-size:10px;color:var(--lib-ink);letter-spacing:.2px}
+@media(max-width:1279px){
+  .rlib{display:none}
+}
+@media(max-width:1099px){
+  .lib-feed::before{display:none}
+}
+@media(max-width:759px){
+  .lib-feed{padding:10px 12px 10px}
+  .lf-what{font-size:14.5px;margin:6px 0 4px}
+  .lf-d>summary{display:flex}
+  .lf-key b{font-size:17px}
+  .prefill{grid-template-columns:minmax(0,1fr);gap:4px}
+  .pf-arrow{transform:rotate(90deg);height:14px}
+  .pc-anatomy>span{font-size:11px}
+  .fam-chip,.fam-note{display:none}
+}
+.rlib{font-weight:500}
+.rail-legend small{display:block;font-family:var(--font-mono);font-size:10px;color:var(--lib-ink)}
+.rail-legend span:first-child{flex-wrap:wrap;column-gap:7px}
+.hs-libk{text-transform:none;letter-spacing:0;font-weight:500;color:var(--lib-ink);margin-left:6px;white-space:nowrap}
+.hs-libk i{font-style:normal;color:var(--lib)}
+.hs-n::after{content:'';position:absolute;top:-3px;right:-3px;width:8px;height:8px;background:var(--lib);transform:rotate(45deg);border-radius:1px;box-shadow:0 0 0 2px var(--surface)}
+.mockup-layer .ml-head .real-pill,.mockup-layer .ml-head .pill-illus{margin-left:auto}
+.hero-chip .real-pill,.hero-chip .pill-illus{vertical-align:1px}
+@media(max-width:759px){.hs-libk{display:block;margin:3px 0 0}.hs-n::after{width:7px;height:7px}}
+#discover .side-card{border-left:3px solid var(--lib);background:linear-gradient(var(--lib-tint),var(--lib-tint)) var(--surface)}
+.lf-list li.lf-gauge-row{display:block;padding-top:0}
+.lf-gauge-w{display:block}
+.ws-tag.plan-tag{background:var(--plan-ink)}
+.st-chips em{font-style:normal;font-family:var(--font-mono);font-size:10.5px;color:var(--lib-ink);width:100%;text-align:center}
+.lf-list.lf-steps li{display:block;padding:5px 0}
+.lf-list.lf-steps li b{font-family:var(--font-sans);font-size:12.5px;font-weight:700;white-space:normal;color:var(--lib-ink)}
+.hero-chip .hc-row{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center}
+.pc-anatomy{margin-top:10px;padding-top:8px}
+
+.calc-presets .preset{padding:6px 8px;font-size:12px}
+.calc-presets .preset small{font-size:10px}
+.pf-lane{padding:7px 10px}
+
+.hero-chip{max-width:600px}
+.end-prompt{padding:14px 16px}
+.end-prompt .ep-t{font-size:17px;margin-bottom:10px}
+
+@media(min-width:760px){.stage-head{margin-bottom:14px}.handoff{height:46px}}
+/* Phones: the library cards keep their head, key number and badge; their lists fold (m-fold). */
+@media(max-width:759px){
+  .lib-feed.lf-wide{display:none}
+  .lf-d>summary{min-height:30px;padding-top:4px}
+  .lf-d[open]>summary{margin-bottom:2px}
+  #act .lib-feed .lf-what{margin-bottom:0}
+  .pc-anatomy>span,.pc-drivers small{display:none}
+  .pc-anatomy{margin-top:8px;padding-top:6px}
+  .pc-regions{gap:4px;margin:10px 0}
+  .pc-regions .rg{padding:2px 6px;font-size:10.5px}
+  .pc-also{font-size:11.5px}
+  .prefill{margin-bottom:10px}
+  .pf-arrow{display:none}
+  .pf-lane{padding:6px 9px}
+}
+/* Phones: pay for the library thread (plan F: ≈22,000 px at 390). */
+@media(max-width:759px){
+  .side-more>summary{min-height:44px;padding:9px 14px;font-size:14.5px}
+  .side-more>summary small{display:none}
+  .mod-grid .fd3-item p:not(.tags){display:none}
+  .mod-grid .fd3-item{gap:4px;padding:10px 12px}
+  .pc-legend{display:none}
+  .lib-feed .lf-head .real-pill{font-size:9.5px}
+  .lf-what{font-size:14px}
+  .lf-what small{display:block;margin:1px 0 0}
+  .lf-foot{font-size:11.5px}
+}
+@media(max-width:759px){
+  .lf-what small{display:none}
+  .ho-inner{gap:3px;padding:3px 6px}
+  .ho-text{font-size:12.5px;line-height:1.35}
+  .half dl div.lib-only,.half dl div.ws-only{display:none}
+  .hs-libk{display:none}
+  .pc-title{font-size:19px}
+  .mockup-layer--ws .mockup-metric-grid{display:none}
+  .counts .used{display:none}
+}
+@media(max-width:759px){
+  .lf-lev{display:none}
+  .lib-feed{padding:9px 12px 8px}
+  .lf-what{margin:4px 0 2px}
+  .lf-key{padding:3px 0}
+  .pc-drivers .mockup-label{display:none}
+  .pc-drivers p{margin-top:0}
+}
+.lf-badge{flex-direction:column;gap:5px}
+@media(max-width:759px){.hero-chip a{display:none}}
+.lf-head .ro-chip.ro-sm{margin-left:0}

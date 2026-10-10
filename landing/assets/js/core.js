@@ -198,14 +198,14 @@
       tp.innerHTML = `<svg class="ic ic-sm"><use href="#ic-${paused ? 'play' : 'pause'}"/></svg>`;
     });
 
-    // Side columns fold into "Real data and proof" when they stack under the frame (< 1100 px),
-    // and the call script starts closed on phones (plan B9). Open everywhere without JS.
+    // Side columns fold into "Real data and proof" when they stack under the frame (< 1100 px).
+    // From stage 02 on, the "who decides / proof" disclosures (.fold-d) start closed on every width,
+    // so the "From the library" card leads the side column; the call script starts closed too.
+    // Open everywhere without JS.
     const mqStack = matchMedia('(max-width: 1099px)'), mqPhone = matchMedia('(max-width: 759px)');
     const fold = () => {
-      CA.$$('details.side-more').forEach((d) => { d.open = !mqStack.matches; });
+      CA.$$('details.side-more').forEach((d) => { d.open = !mqStack.matches && !d.classList.contains('fold-d'); });
       CA.$$('details.m-fold').forEach((d) => { d.open = !mqPhone.matches; });
-      const sc = CA.$('.script-card');
-      if (sc) sc.open = !mqPhone.matches;
       if (CA.reanchor) CA.reanchor();
     };
     fold();

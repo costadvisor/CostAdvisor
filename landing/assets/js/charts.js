@@ -34,8 +34,8 @@
         ] },
         options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
           plugins: { legend: { display: false }, tooltip: { callbacks: {
-            label: (x) => ` ${x.dataset.label}: €${x.raw}/t`,
-            afterBody: (items) => { const s = items.find((i) => i.datasetIndex === 0), m = items.find((i) => i.datasetIndex === 1); return s && m ? `Gap: ${s.raw - m.raw >= 0 ? '+' : '−'}€${Math.abs(s.raw - m.raw)}/t` : ''; },
+            label: (x) => ` ${x.dataset.label}: €${Number(x.raw).toFixed(x.raw % 1 ? 2 : 0)}/t`,
+            afterBody: (items) => { const s = items.find((i) => i.datasetIndex === 0), m = items.find((i) => i.datasetIndex === 1); return s && m ? `Gap: ${s.raw - m.raw >= 0 ? '+' : '−'}€${Math.abs(s.raw - m.raw).toFixed(2)}/t` : ''; },
           } } },
           scales: { x: { grid }, y: { grid, suggestedMin: 265, suggestedMax: 345, ticks: { callback: (v) => '€' + v } } } },
       });
@@ -52,7 +52,7 @@
       const shade = { id: 'projShade', beforeDraw(ch) {
         const x = ch.scales.x, a = ch.chartArea, x0 = x.getPixelForValue(n - 1), g = ch.ctx;
         g.save(); g.fillStyle = 'rgba(16,185,129,.07)'; g.fillRect(x0, a.top, a.right - x0, a.bottom - a.top);
-        g.fillStyle = '#0A714F'; g.font = "600 10px 'JetBrains Mono', monospace"; g.fillText('projection · modelled', x0 + 8, a.top + 12); g.restore();
+        g.fillStyle = '#0A714F'; g.font = "600 10px 'JetBrains Mono', monospace"; g.fillText(a.right - x0 < 170 ? 'projection' : 'projection · modelled', x0 + 8, a.top + 12); g.restore();
       } };
       CA.ctx2d(CA.$('#outlookChart'));
       new Chart(CA.$('#outlookChart'), {
@@ -62,7 +62,7 @@
           { label: 'Projection', data: projData, borderColor: SHOULD, backgroundColor: '#fff', borderDash: [6, 5], tension: 0.3, pointRadius: (ctx) => (ctx.dataIndex >= n ? 3 : 0), pointBorderColor: SHOULD, borderWidth: 2.2, spanGaps: false },
         ] },
         options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-          plugins: { legend: { display: false }, tooltip: { filter: (i) => i.raw != null && !(i.datasetIndex === 1 && i.dataIndex === n - 1), callbacks: { label: (x) => ` ${x.datasetIndex ? 'Projection' : 'Should-cost'}: €${x.raw}/t` } } },
+          plugins: { legend: { display: false }, tooltip: { filter: (i) => i.raw != null && !(i.datasetIndex === 1 && i.dataIndex === n - 1), callbacks: { label: (x) => ` ${x.datasetIndex ? 'Projection, library forecast' : 'Should-cost'}: €${Number(x.raw).toFixed(x.raw % 1 ? 2 : 0)}/t` } } },
           scales: { x: { grid, ticks: { autoSkip: innerWidth < 760, maxTicksLimit: innerWidth < 760 ? 5 : 14, maxRotation: 0, font: { size: 9.5 } } }, y: { grid, suggestedMin: 268, suggestedMax: 298, ticks: { callback: (v) => '€' + v } } } },
       });
     }));
