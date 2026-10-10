@@ -1,6 +1,7 @@
 // Prototype of the plan's two guards (Part G1), zero dependencies:
 //   node --test tests/story.test.mjs
-// 1. story.test: recomputes every derived number in data/story.json and checks the page prints it.
+// 1. story.test: recomputes every derived number in data/story.json and checks the page prints it,
+//    and checks every library value against data/library.snapshot.json (the real "from the library" thread).
 // 2. claims lint: fails on banned phrases, maker counts, real supplier, staff or personal e-mail
 //    addresses in visible copy, the sample brief and the social card source.
 // Browser checks (ticker width, deep links, contrast, page height) are in tests/qa.mjs.
@@ -16,6 +17,7 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 const story = JSON.parse(read('data/story.json'));
 const counts = JSON.parse(read('data/counts.snapshot.json'));
 const idx = JSON.parse(read('data/indexes.snapshot.json'));
+const lib = JSON.parse(read('data/library.snapshot.json'));
 const site = JSON.parse(read('data/site.json'));
 const html = read('index.html');
 const subpages = ['method/index.html', 'security/index.html', 'demo/index.html', '404.html'].map(read);
@@ -41,7 +43,12 @@ const start = story.start.price;
 const lines = story.recipe.map((l) => start * l.weight * l.level / 100);
 const fixed = story.freight.eur + story.margin.eur;
 const should = lines.reduce((a, b) => a + b, 0) + fixed;
-const lastYear = story.recipe.reduce((a, l) => a + start * l.weight * (l.level / (1 + l.chg12m)) / 100, 0) + fixed;
+// The real library index (data/library.snapshot.json): base 100 = January 2023, monthly to June 2026.
+const ser = lib.card.series;
+const qavg = (i) => (ser.actual[i] + ser.actual[i + 1] + ser.actual[i + 2]) / 3;
+const qStart = qavg(0);                                    // Q1 2023, Aquaverde's starting quarter
+const qOf = (q) => { const [n, yy] = q.replace('Q', '').split('-').map(Number); return (2000 + yy - 2023) * 12 + (n - 1) * 3; };
+const r2 = (v) => Math.round(v * 100) / 100;
 
 test('weights, freight and margin add up to the starting price', () => {
   const w = story.recipe.reduce((a, l) => a + l.weight, 0) + story.freight.weight + story.margin.weight;
@@ -66,30 +73,82 @@ test('should-cost, floor, gap and annual gap', () => {
   assert.match(html, /should-cost = Σ lines \+ freight \(€30\) \+ margin \(€39\)<\/span><b>= €291<\/b>/, 'formula block prints the freight line');
 });
 
-test('the library index hands Stage 02 an exact number', () => {
-  assert.equal(r1(should / start * 100), story.expect.index_now);        // 97.0
-  const m = story.index_monthly;
-  assert.equal(m.values.length, 42);
-  assert.equal(m.values[0], 100);
-  assert.equal(m.values[41], story.expect.index_now);
-  assert.equal(m.outlook.length, 6);
-  story.outlook_eur.values.forEach((v, i) => assert.equal(r1(v / start * 100), m.outlook[i], `outlook month ${i}`));
-  // the monthly series averages to the quarterly should-cost (Q3-24 … Q2-26)
-  story.quarters.forEach((q, i) => {
-    const mo = m.values.slice(18 + i * 3, 21 + i * 3);
-    assert.ok(Math.abs(mo.reduce((a, b) => a + b, 0) / 3 * start / 100 - story.should_series[i]) <= 1, `monthly vs quarterly ${q}`);
-  });
-  has('97.0'); has('94.7');
+test('the workspace should-cost follows the real library index', () => {
+  assert.equal(ser.actual.length, 42);
+  assert.equal(ser.actual[0], 100);
+  assert.equal(ser.forecast.length, 6);
+  assert.equal(r1(ser.actual.at(-1)), story.expect.library_index_jun);   // 99.2 (June 2026, Europe)
+  assert.equal(r1(qStart), story.expect.library_index_start);            // 102.0 (Q1 2023 average)
+  assert.equal(r1(qavg(39)), story.expect.library_index_now);            // 99.1 (Q2 2026 average)
+  assert.equal(story.start.quarter, 'Q1 2023');
+  // Each quarter's should-cost = starting price × the index's quarterly average ÷ its Q1 2023 average.
+  story.quarters.forEach((q, i) => assert.equal(story.should_series[i], r2(start * qavg(qOf(q)) / qStart), `should-cost ${q}`));
+  const now = story.should_series.at(-1);
+  assert.equal(Math.round(now), story.expect.should_cost);              // €291
+  assert.ok(Math.abs(now - should) < 1, `the calculator (${should.toFixed(2)}) and the library (${now}) agree within €1`);
+  assert.equal(Math.round(story.price - now), story.expect.gap);         // €48 either way
+  assert.equal(Math.round(now - story.margin.eur), story.expect.floor);  // €252 either way
+  // The euro outlook is the library's forecast on the same starting point.
+  story.outlook_eur.values.forEach((v, i) => assert.equal(v, Math.round(start * ser.forecast[i] / qStart), `outlook month ${i}`));
+  has('99.2'); has('94.8'); has('102.0'); has('99.1');
+  has(`€${start} × ${r1(qavg(39)).toFixed(1)} ÷ ${r1(qStart).toFixed(1)} = `);
+  // the cycle shown is the snapshot's own series
+  const c = lib.card.cycle, lo = Math.min(...ser.actual), hi = Math.max(...ser.actual);
+  assert.equal(c.percentile, Math.round((ser.actual.at(-1) - lo) / (hi - lo) * 100));
+  assert.equal(c.low, r1(lo)); assert.equal(c.high, r1(hi));
 });
 
-test('the recipe reproduces last year\'s should-cost (Q2 2025) within €1', () => {
+test('every library value printed on the page equals the snapshot', () => {
+  const card = lib.card;
+  const pct = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v).toFixed(1) + '%';
+  const ord = (n) => n + (n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th');
+  const want = {
+    name: card.name, short: card.short, family: card.family, line: card.line, industry: card.industry, category: card.category,
+    badge: card.badge.label, badge_note: card.badge.note, data_to_label: lib.data_to_label,
+    jun: ser.actual.at(-1).toFixed(1), dec: ser.forecast.at(-1).toFixed(1),
+    q_start: qStart.toFixed(1), q_now: qavg(39).toFixed(1), q_prev: qavg(27).toFixed(1), yoy: pct((qavg(39) / qavg(27) - 1) * 100),
+    m3_from: card.move_3m.from.toFixed(1), m3_to: card.move_3m.to.toFixed(1), m3_pts: pct(card.move_3m.to - card.move_3m.from).replace('%', ' pts'),
+    cyc_pct: ord(card.cycle.percentile), cyc_low: card.cycle.low.toFixed(1), cyc_high: card.cycle.high.toFixed(1), cyc_pos: card.cycle.position,
+    seas_peak: card.seasonality.peak, seas_trough: card.seasonality.trough, seas_spread: card.seasonality.spread_pts.toFixed(1),
+    vol_pct: ord(card.volatility.percentile), vol_label: card.volatility.label,
+    cost_lines: String(card.recipe_line_count), regions_n: String(card.regions.length),
+    cats: String(card.bought_in.categories), inds: String(card.bought_in.industries),
+    report: lib.report.name, report_written: lib.report.written, report_lines: String(lib.report.product_lines), report_sections: String(lib.report.sections.length),
+    levers: String(lib.playbook.levers), levers_apply: String(lib.playbook.levers_apply), families: String(lib.playbook.families.length),
+  };
+  const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const found = [...html.matchAll(/data-l="(\w+)"[^>]*>([^<]*)</g)];
+  assert.ok(found.length > 40, 'the page prints its library values from the snapshot');
+  found.forEach((m) => { assert.ok(m[1] in want, 'known library value ' + m[1]); assert.equal(m[2], esc(want[m[1]]), 'library value ' + m[1]); });
+  // regions, report sections and playbook families come from the snapshot too
+  card.regions.forEach((r) => assert.ok(html.includes(`>${r.code}<b>${r.jun.toFixed(1)}</b>`), 'region ' + r.code));
+  lib.report.sections.forEach((t) => assert.ok(html.includes(`<li>${esc(t)}</li>`), 'report section ' + t));
+  lib.playbook.families.forEach((t) => assert.ok(html.includes(`<li>${esc(t)}</li>`), 'playbook family ' + t));
+  // the story's 19 opportunities are the playbook's 19 levers, 17 of them scored (they apply)
+  assert.equal(story.strategy.opportunities, lib.playbook.levers);
+  assert.equal(story.strategy.plotted, lib.playbook.levers_apply);
+  assert.equal(story.recipe.length + 2, card.recipe_line_count, 'the calculator has as many lines as the library recipe');
+  has(`recipe · ${card.recipe_line_count} cost lines`);
+});
+
+test('the library snapshot publishes no weights, cost lines, codes, makers or internal statuses', () => {
+  const keys = [];
+  const walk = (o) => { if (Array.isArray(o)) o.forEach(walk); else if (o && typeof o === 'object') Object.entries(o).forEach(([k, v]) => { keys.push(k); walk(v); }); };
+  walk(lib);
+  const banned = ['makers', 'producers', 'suppliers', 'share', 'weight', 'weights', 'components', 'stack', 'cost_lines', 'subfamily', 'pid', 'supplier_note', 'dynamics', 'report_text', 'status', 'tier', 'tag', 'series_key'];
+  assert.deepEqual(keys.filter((k) => banned.includes(k)), []);
+  const txt = JSON.stringify(lib);
+  [/BCI-|FECL3|PLAT-/, /iron-scrap|elec-eu|lci-eu|water-eu/, /\blive\b/i, /supply_pending|not_audited|supply_exception/].forEach((re) => assert.ok(!re.test(txt), 'snapshot free of ' + re));
+  assert.ok(['Verified makers', 'Supply pending', 'Makers not yet verified', 'Concentrated supply'].includes(lib.card.badge.label), 'a public badge label');
+});
+
+test('a year of index moves against a year of price moves', () => {
   const q = story.quarters.indexOf('Q2-25');
-  assert.ok(Math.abs(lastYear - story.should_series[q]) <= 1, `${lastYear.toFixed(2)} vs ${story.should_series[q]}`);
-  // "In a year, the should-cost rose about €13 a tonne. Supplier A's price rose €54.50."
-  assert.equal(Math.round(should - lastYear), story.year_moves.should_cost_rise);
+  // "In a year it rose about €6 a tonne. Supplier A's price rose €49."
+  assert.equal(Math.round(story.should_series.at(-1) - story.should_series[q]), story.year_moves.should_cost_rise);
   assert.equal(story.price - story.price_series[q], story.year_moves.price_rise);
-  has(`about €${story.year_moves.should_cost_rise} a tonne`); has('€54.50');
-  has(`Index moves explain about €${story.year_moves.should_cost_rise} of Supplier A's €54.50`);
+  has(`about €${story.year_moves.should_cost_rise} a tonne`); has(`price rose €${story.year_moves.price_rise}`);
+  has(`Index moves explain about €${story.year_moves.should_cost_rise} of Supplier A's €${story.year_moves.price_rise}`);
 });
 
 test('the example agrees with the real index series shown beside it (sign and rough size)', () => {
@@ -112,12 +171,12 @@ test('the example agrees with the real index series shown beside it (sign and ro
 });
 
 test('quarterly series end where the model is', () => {
-  assert.equal(story.should_series.at(-1), story.expect.should_cost);
+  assert.equal(Math.round(story.should_series.at(-1)), story.expect.should_cost);
   assert.equal(story.price_series.at(-1), story.price);
   const n = story.quarters.length;
-  assert.equal(story.should_series[n - 1] - story.should_series[n - 2], story.signal.index_move);
+  assert.equal(r2(story.should_series[n - 1] - story.should_series[n - 2]), story.signal.index_move);
   assert.equal(story.price_series[n - 1] - story.price_series[n - 2], story.signal.price_move);
-  has('−€2.50/t'); has('+€14/t');
+  has(`−€${Math.abs(story.signal.index_move).toFixed(2)}/t`); has(`+€${story.signal.price_move}/t`);
   const opened = story.quarters.find((q, i) => story.price_series[i] - story.should_series[i] > 10);
   assert.equal(opened.replace(/Q(\d)-(\d\d)/, 'Q$1 20$2'), story.gap_opened);
   has(story.gap_opened);
@@ -130,7 +189,7 @@ test('buy window: four prior quarters, ±3% band', () => {
   const pct = (s[n - 1] / avg - 1) * 100;
   assert.equal(r1(pct), story.buy_window.pct);
   assert.equal(Math.abs(pct) < story.buy_window.band_pct ? 'Neutral' : pct < 0 ? 'Buy now' : 'Hold', story.buy_window.verdict);
-  has(`(+${story.buy_window.pct}%)`); has(`average of €${story.buy_window.avg4q}`);
+  has(`(+${story.buy_window.pct.toFixed(1)}%)`); has(`average of €${story.buy_window.avg4q}`);
 });
 
 test('claim verdicts follow the app\'s rules (negotiation_prep.py)', () => {
@@ -187,6 +246,8 @@ test('Strategy and actions', () => {
   assert.equal(story.handoffs.length, 7);
   story.handoffs.forEach((h) => has(h.chip));
   has(`${acts.length} actions`); // the hero card's last row
+  // each action carries the playbook strategy family it came from (a real family name, no lever text)
+  acts.forEach((a) => { assert.ok(lib.playbook.families.includes(a.family), a.title + ' → ' + a.family); assert.ok(html.includes(`◆ ${a.family.replace(/&/g, '&amp;')}</span>`), 'family chip ' + a.family); });
 });
 
 test('the loop returns to 02 Model, never to 01 Discover', () => {
@@ -271,8 +332,20 @@ test('claims lint: no banned phrase, maker count, real supplier, staff name or p
   const ld = [...[html, ...subpages].join('\n').matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => m[1]).join(' ');
   banned.forEach((re) => { const m = ld.match(re); if (m) hits.push(`json-ld: ${re} → "${m[0]}"`); });
   assert.deepEqual(hits, []);
-  // every frame and the rail say "Illustrative"
-  const frames = (html.match(/<figure class="frame/g) || []).length;
-  const pills = (html.match(/<span class="pill-illus">Illustrative<\/span>/g) || []).length;
-  assert.ok(frames === 7 && pills >= frames + 1, `${frames} frames, ${pills} pills`);
+  // every workspace frame and the rail say "Illustrative"; the library frame says real data, dated, and never "Illustrative"
+  const frames = [...html.matchAll(/<figure class="frame([^"]*)"[\s\S]*?<div class="frame-bar">([\s\S]*?)<\/div>/g)].map((m) => ({ lib: /lib-frame/.test(m[1]), bar: m[2] }));
+  assert.equal(frames.length, 7);
+  frames.forEach((f, i) => {
+    if (f.lib) { assert.ok(/real-pill/.test(f.bar) && !/pill-illus/.test(f.bar), 'library frame ' + (i + 1) + ' is labelled real'); assert.match(f.bar, /Jun 2026/); }
+    else assert.ok(/<span class="pill-illus">Illustrative<\/span>/.test(f.bar) && /ws-tag/.test(f.bar), 'workspace frame ' + (i + 1) + ' is labelled illustrative');
+  });
+  assert.equal(frames.filter((f) => f.lib).length, 1);
+  assert.match(html, /<div class="rail-head">[^]*?<span class="pill-illus">Illustrative<\/span>/);
+  // the hero card: library layer real and dated, workspace layer illustrative
+  assert.match(html, /mockup-layer--lib[^]*?<span class="real-pill sm">Real · <span data-l="data_to_label">Jun 2026<\/span><\/span>/);
+  assert.match(html, /mockup-layer--ws">\s*<div class="ml-head"><span class="ml-tag ws">Your workspace<\/span><span class="ml-note">[^<]*<\/span><span class="pill-illus">Illustrative<\/span>/);
+  // a library card in stages 02–07, holding no illustrative money
+  const feeds = [...html.matchAll(/<aside class="lib-feed[^"]*"[\s\S]*?<\/aside>/g)].map((m) => m[0]);
+  assert.equal(feeds.length, 6, 'a library card in stages 02–07');
+  feeds.forEach((f) => assert.ok(!/pill-illus|€\d/.test(f), 'library cards hold no illustrative money'));
 });

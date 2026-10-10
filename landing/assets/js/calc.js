@@ -42,7 +42,7 @@
       lines.forEach((l) => {
         const v = r.lv[l.key];
         CA.$('#sl-' + l.key + '-v').textContent = v;
-        sliders[l.key].setAttribute('aria-valuetext', `${l.label} index ${v}, base 100 = January 2023`);
+        sliders[l.key].setAttribute('aria-valuetext', `${l.label} index ${v}, Q1 2023 = 100`);
         const pct = ((v - sliders[l.key].min) / (sliders[l.key].max - sliders[l.key].min)) * 100;
         sliders[l.key].style.background = `linear-gradient(to right,var(--blue) ${pct}%,var(--surface2) ${pct}%)`;
       });

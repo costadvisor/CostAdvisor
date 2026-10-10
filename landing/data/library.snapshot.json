@@ -1,0 +1,184 @@
+{
+ "_comment": "REAL library data for the landing page (the blue 'from the library' thread). Computed on 10 October 2026 from the current content drop (extracted 8 October 2026 from the research database, commit 5ed3280): for each region, the should-cost index = sum of weight x series(month) / series(Jan 2023) over the index lines, plus the weight of the fixed and margin lines, divided by 100 (base 100 = January 2023), as the app's market tab computes it. Only the composite index is published here: no recipe weights, no cost lines, no series codes, no product codes, no maker names or counts, no report or playbook text. Cycle, seasonality and volatility are the app's own values for the same card (market tab, staging build, 9 October 2026). Report section names are the app's 'In this analysis' labels; playbook family names and counts are structure only. Refresh with the drop.",
+ "as_of": "October 2026",
+ "data_to": "2026-06",
+ "data_to_label": "Jun 2026",
+ "base_label": "Jan 2023 = 100",
+ "card": {
+  "name": "Ferric chloride liquid FeCl3 40%",
+  "short": "Ferric chloride 40%",
+  "family": "Inorganic Chemicals",
+  "line": "Oxidative ferric-salt manufacture",
+  "industry": "Municipal Water",
+  "category": "Coagulation",
+  "bought_in": {
+   "categories": 27,
+   "industries": 25
+  },
+  "badge": {
+   "label": "Verified makers",
+   "note": "Independent makers of this exact product are verified on their own pages."
+  },
+  "drivers": [
+   "iron scrap",
+   "hydrochloric acid",
+   "electricity",
+   "process water",
+   "labour"
+  ],
+  "recipe_line_count": 6,
+  "regions": [
+   {
+    "code": "EU",
+    "jun": 99.2,
+    "dec": 94.8
+   },
+   {
+    "code": "NA",
+    "jun": 92.7,
+    "dec": 88.7
+   },
+   {
+    "code": "CN",
+    "jun": 101.6,
+    "dec": 97.4
+   },
+   {
+    "code": "APAC",
+    "jun": 102.1,
+    "dec": 98.0
+   },
+   {
+    "code": "IN",
+    "jun": 102.8,
+    "dec": 98.7
+   },
+   {
+    "code": "MEA",
+    "jun": 102.2,
+    "dec": 98.0
+   }
+  ],
+  "region": "EU",
+  "series": {
+   "from": "2023-01",
+   "to": "2026-06",
+   "actual": [
+    100.0,
+    101.61,
+    104.53,
+    103.6,
+    101.58,
+    98.02,
+    96.87,
+    96.93,
+    96.99,
+    96.3,
+    97.41,
+    100.46,
+    102.08,
+    100.98,
+    98.16,
+    97.29,
+    97.42,
+    96.13,
+    96.03,
+    95.99,
+    95.69,
+    96.31,
+    96.42,
+    95.73,
+    96.55,
+    98.93,
+    100.74,
+    98.43,
+    96.71,
+    96.28,
+    96.08,
+    96.11,
+    95.87,
+    95.24,
+    95.33,
+    95.99,
+    98.12,
+    100.37,
+    100.62,
+    98.75,
+    99.28,
+    99.2
+   ],
+   "forecast_from": "2026-07",
+   "forecast_to": "2026-12",
+   "forecast": [
+    98.45,
+    97.75,
+    96.98,
+    96.21,
+    95.51,
+    94.78
+   ],
+   "forecast_kind": "modelled"
+  },
+  "quarters": {
+   "Q1-23": 102.05,
+   "Q2-25": 97.14,
+   "Q1-26": 99.7,
+   "Q2-26": 99.07
+  },
+  "move_3m": {
+   "from": 100.6,
+   "to": 99.2,
+   "label": "Mar–Jun 2026"
+  },
+  "cycle": {
+   "window_months": 42,
+   "low": 95.2,
+   "high": 104.5,
+   "current": 99.2,
+   "percentile": 43,
+   "position": "mid-range"
+  },
+  "seasonality": {
+   "peak": "Feb",
+   "trough": "Oct",
+   "spread_pts": 4.4
+  },
+  "volatility": {
+   "percentile": 30,
+   "label": "low to moderate",
+   "mom_sd_pct": 1.5
+  }
+ },
+ "report": {
+  "name": "Coagulants",
+  "written": "August 2026",
+  "product_lines": 4,
+  "sections": [
+   "Overview & market sizing",
+   "How it works",
+   "Applications",
+   "Technology",
+   "Process to price",
+   "Supply landscape",
+   "PESTEL",
+   "Porter's five forces",
+   "Market drivers to watch",
+   "Kraljic positioning"
+  ]
+ },
+ "playbook": {
+  "name": "Coagulants",
+  "levers": 19,
+  "levers_apply": 17,
+  "families": [
+   "Pricing & Conditions",
+   "Volume Concentration",
+   "Global Sourcing",
+   "Product Spec Improvement",
+   "Joint Process Improvement",
+   "Relationship Restructuring",
+   "Category Management",
+   "Differentiation"
+  ]
+ }
+}

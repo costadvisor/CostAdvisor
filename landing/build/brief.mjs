@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const st = JSON.parse(fs.readFileSync(path.join(root, 'data/story.json'), 'utf8'));
+const lib = JSON.parse(fs.readFileSync(path.join(root, 'data/library.snapshot.json'), 'utf8'));
+const qa = (i) => (lib.card.series.actual[i] + lib.card.series.actual[i + 1] + lib.card.series.actual[i + 2]) / 3;
+const qStart = qa(0).toFixed(1), qNow = qa(39).toFixed(1);
+const money = (v) => '€' + (Number.isInteger(v) ? v : v.toFixed(2));
 await import(path.join(root, 'assets/js/svg.js'));
 const S = globalThis.CASvg;
 const eur = (n, d = 0) => '€' + Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -74,16 +78,16 @@ td.n{text-align:right;font-family:var(--font-mono)}
   </div>
   <p class="say">Defensible range ${eur(floor)}–${eur(should)}. Open near should-cost; treat the floor as your walk-away point, not your opening offer. Annual gap ≈ ${eur(gap * st.volume_t_yr)} (${eur(gap)} × ${st.volume_t_yr.toLocaleString('en-US')} t).</p>
   <h2>Cost drivers</h2>
-  <table><thead><tr><th>Cost line</th><th>Weight</th><th>Index (Jan 2023 = 100)</th><th>12-month move</th><th>€/t today</th></tr></thead><tbody>
+  <table><thead><tr><th>Cost line</th><th>Weight</th><th>Index (${st.start.label} = 100)</th><th>12-month move</th><th>€/t today</th></tr></thead><tbody>
     ${lines.map((l) => `<tr><td>${l.label}</td><td class="n">${Math.round(l.weight * 100)}%</td><td class="n">${l.level}</td><td class="n">${pct(l.chg12m * 100)}</td><td class="n">${eur(l.eur)}</td></tr>`).join('')}
     <tr><td>${st.freight.label}, fixed</td><td class="n">${Math.round(st.freight.weight * 100)}%</td><td class="n">—</td><td class="n">—</td><td class="n">${eur(st.freight.eur)}</td></tr>
     <tr><td>Margin (fixed)</td><td class="n">${Math.round(st.margin.weight * 100)}%</td><td class="n">—</td><td class="n">—</td><td class="n">${eur(st.margin.eur)}</td></tr>
     <tr><td><b>Should-cost</b></td><td></td><td></td><td></td><td class="n"><b>${eur(should)}</b></td></tr>
   </tbody></table>
-  <p class="note">Each index line = €${st.start.price} starting price (${st.start.label}) × weight × index ÷ 100. Freight and delivery to ${st.site} (${st.incoterm}) and the margin are fixed lines; the floor is the should-cost minus the margin. Illustrative weights, not the library recipe.</p>
+  <p class="note">Each index line = €${st.start.price} starting price (${st.start.label}) × weight × index ÷ 100. Freight and delivery to ${st.site} (${st.incoterm}) and the margin are fixed lines; the floor is the should-cost minus the margin. Illustrative weights, not the library recipe. The should-cost itself follows the library's real index for this product in Europe: ${qStart} in ${st.start.label}, ${qNow} in Q2 2026, so €${st.start.price} × ${qNow} ÷ ${qStart} = ${eur(st.should_series.at(-1))}.</p>
   <h2>Price evolution · quarterly</h2>
-  <div class="chart"><p class="leg">€/t ·<i style="background:#10B981"></i>Should-cost ${eur(st.should_series[0], Number.isInteger(st.should_series[0]) ? 0 : 1)} → ${eur(should)}<i style="background:#EF4444"></i>${st.supplier} ${eur(st.price_series[0], Number.isInteger(st.price_series[0]) ? 0 : 1)} → ${eur(st.price)}</p>${chart}<div class="lab">${st.quarters.map((q) => `<span>${q}</span>`).join('')}</div></div>
-  <p class="note">In a year, the should-cost rose about €${st.year_moves.should_cost_rise} a tonne; ${st.supplier}'s price rose €${st.year_moves.price_rise.toFixed(2)}. The gap opened in ${st.gap_opened}.</p>
+  <div class="chart"><p class="leg">€/t ·<i style="background:#10B981"></i>Should-cost ${eur(st.should_series[0])} → ${eur(should)}<i style="background:#EF4444"></i>${st.supplier} ${eur(st.price_series[0], Number.isInteger(st.price_series[0]) ? 0 : 1)} → ${eur(st.price)}</p>${chart}<div class="lab">${st.quarters.map((q) => `<span>${q}</span>`).join('')}</div></div>
+  <p class="note">In a year, the should-cost rose about €${st.year_moves.should_cost_rise} a tonne; ${st.supplier}'s price rose ${money(st.year_moves.price_rise)}. The gap opened in ${st.gap_opened}.</p>
   ${foot(1)}
 </section>
 <section class="page">
@@ -92,7 +96,7 @@ td.n{text-align:right;font-family:var(--font-mono)}
   <table><thead><tr><th>They said</th><th>Index, 12 months</th><th>Verdict</th></tr></thead><tbody>
     ${st.claims.map((c) => { const a = st.recipe.find((l) => l.key === c.line).chg12m * 100; const v = check(c.claimed, a); const cls = v.startsWith('Over') ? 'v-o' : v.startsWith('Real') ? 'v-p' : 'v-c'; return `<tr><td>“${c.text}”</td><td class="n">${pct(a)}</td><td class="${cls}"><b>${v}</b></td></tr>`; }).join('')}
   </tbody></table>
-  <p class="note">Rules: within 2 points of the index = already priced; under 0.5% = did not move; opposite sign = contradicted. Index moves explain about €${st.year_moves.should_cost_rise} of the €${st.year_moves.price_rise.toFixed(2)} increase in a year; the ${eur(gap)} above the should-cost is not explained by the indexes in the recipe, nor by freight and delivery.</p>
+  <p class="note">Rules: within 2 points of the index = already priced; under 0.5% = did not move; opposite sign = contradicted. The index moves are the library's public series, 12 months to ${lib.data_to_label}. Index moves explain about €${st.year_moves.should_cost_rise} of the ${money(st.year_moves.price_rise)} increase in a year; the ${eur(gap)} above the should-cost is not explained by the indexes in the recipe, nor by freight and delivery.</p>
   <h2>Call script</h2>
   <ol class="script">
     <li>“We have modelled ${st.product.toLowerCase()} bottom-up from published indexes. The defensible number is ${eur(should)}/t; your current price is ${eur(st.price)}/t, ${eur(gap)}/t above that.”</li>

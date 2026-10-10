@@ -209,6 +209,18 @@
       s += `<text class="lr-label back" x="${mx}" y="${r1(my + 18)}" text-anchor="middle">` +
         lines.map((t, k) => `<tspan x="${mx}" dy="${k ? 14 : 0}">${esc(t)}</tspan>`).join('') + `</text>`;
     }
+    if (o.hub) {
+      // The market library at the centre, with a spoke to every step: it feeds all seven.
+      const hr = o.hub.r || 40, hx = cx, hy = o.hub.cy != null ? o.hub.cy : cy;
+      nodes.forEach((nd, i) => {
+        const p = P(i, r), dx = p[0] - hx, dy = p[1] - hy, L = Math.hypot(dx, dy);
+        s += `<line class="lr-spoke" x1="${r1(hx + (dx / L) * (hr + 3))}" y1="${r1(hy + (dy / L) * (hr + 3))}" x2="${r1(p[0] - (dx / L) * (nodeR + 3))}" y2="${r1(p[1] - (dy / L) * (nodeR + 3))}"/>`;
+      });
+      s += `<circle class="lr-hub" cx="${hx}" cy="${hy}" r="${hr}"/>`;
+      const hl = String(o.hub.label).split('|');
+      s += `<text class="lr-hubt" x="${hx}" y="${r1(hy - (hl.length - 1) * 6.5 + 4)}" text-anchor="middle">` + hl.map((t, k) => `<tspan x="${hx}" dy="${k ? 13 : 0}">${esc(t)}</tspan>`).join('') + `</text>`;
+      if (o.hub.sub) s += `<text class="lr-hubs" x="${hx}" y="${r1(hy + hr + 14)}" text-anchor="middle">${esc(o.hub.sub)}</text>`;
+    }
     nodes.forEach((nd, i) => {
       const p = P(i, r);
       s += `<g class="lr-node ${nd.cls || ''}"><circle cx="${p[0]}" cy="${p[1]}" r="${nodeR}"/><text class="lr-num" x="${p[0]}" y="${r1(p[1] - 2)}" text-anchor="middle">${esc(nd.n)}</text><text class="lr-name" x="${p[0]}" y="${r1(p[1] + 10)}" text-anchor="middle">${esc(nd.label)}</text></g>`;

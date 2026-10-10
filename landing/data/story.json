@@ -1,6 +1,6 @@
 {
- "_comment": "Every illustrative number on the homepage lives here. Aquaverde, Supplier A, Supplier B and Supplier C are fictional. Checked by tests/story.test.mjs; the build writes these values into the HTML. The four index levels and 12-month moves are set close to the public series the page shows (iron & steel scrap, natural gas and industrial electricity, alkalies & chlorine, the EU labour cost index), so the example never contradicts the real data beside it.",
- "label": "Illustrative example. Aquaverde, Supplier A and Supplier B are fictional, and their prices are illustrative. The library structure, the index sources and the counts on this page are real.",
+ "_comment": "Every illustrative number on the homepage lives here. Aquaverde, Supplier A, Supplier B and Supplier C are fictional. Checked by tests/story.test.mjs; the build writes these values into the HTML. The workspace follows the REAL library index in data/library.snapshot.json: Aquaverde's starting point is an illustrative €300/t in Q1 2023 (the app's base price + base quarter), and each quarter's should-cost = €300 × the library index's quarterly average ÷ its Q1 2023 average (102.0), so Q2 2026 (99.1) gives €291. The calculator's four index lines are illustrative weights (not the library recipe); their levels and 12-month moves follow the public series the page shows (iron & steel scrap, alkalies & chlorine, natural gas and industrial electricity, the EU labour cost index), so the example never contradicts the real data beside it.",
+ "label": "Illustrative example. Aquaverde, Supplier A and Supplier B are fictional, and their prices are illustrative. The library data (the product card, its index and forecast, the report and playbook structure), the index sources and the counts on this page are real.",
  "buyer": "Aquaverde",
  "buyer_desc": "a water utility",
  "site": "Rotterdam",
@@ -25,7 +25,8 @@
  "quarter": "Q2 2026",
  "start": {
   "price": 300,
-  "label": "Jan 2023"
+  "label": "Q1 2023",
+  "quarter": "Q1 2023"
  },
  "recipe": [
   {
@@ -33,7 +34,7 @@
    "label": "Iron source",
    "weight": 0.26,
    "level": 105,
-   "chg12m": 0.12,
+   "chg12m": 0.122,
    "color": "#0EA5E9",
    "aligned_with": [
     "iron-scrap-na"
@@ -44,7 +45,7 @@
    "label": "Hydrochloric acid",
    "weight": 0.28,
    "level": 82,
-   "chg12m": 0.06,
+   "chg12m": 0.066,
    "color": "#10B981",
    "aligned_with": [
     "alkalies-chlorine-ppi"
@@ -55,7 +56,7 @@
    "label": "Energy",
    "weight": 0.11,
    "level": 90,
-   "chg12m": -0.03,
+   "chg12m": -0.027,
    "color": "#F59E0B",
    "aligned_with": [
     "natgas-na",
@@ -67,7 +68,7 @@
    "label": "Labour",
    "weight": 0.12,
    "level": 115,
-   "chg12m": 0.035,
+   "chg12m": 0.037,
    "color": "#8B5CF6",
    "aligned_with": [
     "lci-eu"
@@ -131,7 +132,6 @@
   "floor_exact": 251.88,
   "gap": 48,
   "annual_gap": 105600,
-  "index_now": 97,
   "donut": [
    82,
    69,
@@ -139,7 +139,10 @@
    41,
    30,
    39
-  ]
+  ],
+  "library_index_start": 102.0,
+  "library_index_now": 99.1,
+  "library_index_jun": 99.2
  },
  "quarters": [
   "Q3-24",
@@ -152,89 +155,33 @@
   "Q2-26"
  ],
  "should_series": [
-  273.5,
-  272.5,
-  276,
-  278,
-  281,
-  285,
-  293.5,
-  291
+  281.94,
+  282.67,
+  290.28,
+  285.58,
+  282.28,
+  280.81,
+  293.11,
+  291.27
  ],
  "price_series": [
-  276,
-  275.5,
-  279.5,
-  284.5,
-  288,
-  301.5,
+  285,
+  286,
+  293.5,
+  290,
+  291,
+  304,
   325,
   339
  ],
  "gap_opened": "Q4 2025",
  "year_moves": {
-  "should_cost_rise": 13,
-  "price_rise": 54.5
+  "should_cost_rise": 6,
+  "price_rise": 49
  },
  "signal": {
-  "index_move": -2.5,
+  "index_move": -1.84,
   "price_move": 14
- },
- "index_monthly": {
-  "from": "2023-01",
-  "to": "2026-06",
-  "values": [
-   100,
-   99,
-   97.9,
-   96.9,
-   96,
-   95.3,
-   94.6,
-   94,
-   93.6,
-   93.2,
-   92.9,
-   92.6,
-   92.3,
-   92,
-   91.8,
-   91.6,
-   91.4,
-   91.2,
-   91,
-   91.2,
-   91.3,
-   91,
-   90.7,
-   90.8,
-   91.4,
-   92,
-   92.6,
-   92.5,
-   92.7,
-   92.8,
-   93.3,
-   93.7,
-   94,
-   94.5,
-   95,
-   95.5,
-   96.9,
-   98,
-   98.6,
-   97.4,
-   96.6,
-   97
-  ],
-  "outlook": [
-   96.7,
-   96.3,
-   96,
-   95.7,
-   95,
-   94.7
-  ]
  },
  "outlook_eur": {
   "months": [
@@ -246,18 +193,18 @@
    "Dec"
   ],
   "values": [
-   290,
    289,
-   288,
    287,
    285,
-   284
+   283,
+   281,
+   279
   ],
   "kind": "modelled"
  },
  "buy_window": {
-  "avg4q": 284,
-  "pct": 2.3,
+  "avg4q": 285,
+  "pct": 2.0,
   "verdict": "Neutral",
   "band_pct": 3
  },
@@ -597,7 +544,8 @@
    "start": "2026-07-15",
    "due": "2026-10-30",
    "status": "In progress",
-   "progress": 0.6
+   "progress": 0.6,
+   "family": "Pricing & Conditions"
   },
   {
    "title": "Ask for an index-linked price clause",
@@ -605,7 +553,8 @@
    "start": "2026-11-02",
    "due": "2026-12-15",
    "status": "Not started",
-   "progress": 0
+   "progress": 0,
+   "family": "Pricing & Conditions"
   },
   {
    "title": "Request a reference quote from a second maker",
@@ -613,7 +562,8 @@
    "start": "2026-10-19",
    "due": "2026-11-27",
    "status": "Not started",
-   "progress": 0
+   "progress": 0,
+   "family": "Global Sourcing"
   },
   {
    "title": "Jar-test ferric chloride against PAC",
@@ -621,7 +571,8 @@
    "start": "2026-08-03",
    "due": "2026-11-13",
    "status": "In progress",
-   "progress": 0.4
+   "progress": 0.4,
+   "family": "Product Spec Improvement"
   },
   {
    "title": "Align both ferric chloride contract end dates",
@@ -629,14 +580,15 @@
    "start": "2026-07-01",
    "due": "2026-09-30",
    "status": "Overdue",
-   "progress": 0.7
+   "progress": 0.7,
+   "family": "Volume Concentration"
   }
  ],
  "handoffs": [
   {
    "from": 1,
    "to": 2,
-   "chip": "recipe · 5 cost lines",
+   "chip": "recipe · 6 cost lines",
    "text": "Add to portfolio copies the recipe into your private workspace. Nothing flows back."
   },
   {
@@ -677,7 +629,7 @@
   }
  ],
  "baton": [
-  "recipe · 5 cost lines",
+  "recipe · 6 cost lines",
   "should-cost €291/t",
   "gap €48/t ≈ €105,600/yr",
   "act now · outlook easing",
