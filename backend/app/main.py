@@ -24,7 +24,8 @@ from app.routers import (
     negotiation_prep, push, ai_cost_modeler, resolution,
     contracts, radar, editorial, dimensions, index_dossier, seasonality,
     intelligence, support, index_validation,
-    intel_catalogue, intel_reference, strategy, taxonomy,
+    intel_catalogue, intel_reference, strategy, taxonomy, series_health,
+    recipe_line_audit,
 )
 # Imported for its side effect: registers the before_flush listener that
 # auto-registers region codes so the region FK never rejects a user write.
@@ -130,6 +131,10 @@ app.include_router(indexes.router, prefix="/api/indexes", tags=["indexes"])
 # Platform-grain index resolution reads (Scrum 74) — deliberately its own
 # surface rather than a mode of /api/indexes, which is team-scoped.
 app.include_router(resolution.router, prefix="/api/resolution", tags=["resolution"])
+# One shared answer to "is this series usable, and why not" (Jira 208).
+app.include_router(series_health.router, prefix="/api/series-health", tags=["series-health"])
+# Does every recipe line point at a real index with data (Jira 208).
+app.include_router(recipe_line_audit.router, prefix="/api/recipe-audit", tags=["recipe-audit"])
 # Data-quality findings over those same layers (Scrum 34). Same platform
 # grain and the same reasoning for living on its own surface.
 app.include_router(index_validation.router, prefix="/api/validation",

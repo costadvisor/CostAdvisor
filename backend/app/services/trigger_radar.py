@@ -47,10 +47,11 @@ from app.models.alerts import AlertSubscription
 from app.models.contract import Contract, ContractCostModel
 from app.models.cost_model import CostModel
 from app.models.index_data import CommodityIndex, IndexValue
-from app.models.index_layer import TypeCode
+from app.models.index_layer import IndexMonthlyValue, TypeCode
 from app.models.radar import (
     MarketSignal, NegotiationWindow, NegotiationWindowCostModel,
 )
+from app.services.series_health import series_health_bulk
 from app.services.thresholds import Threshold, effective_threshold
 
 # How far ahead a clause deadline has to be to be worth surfacing. Wide enough
@@ -158,19 +159,29 @@ def model_coverage(db: Session, cm: CostModel) -> ModelCoverage:
     out.fallback_reason = fallback
 
     series_keys: dict[int, str | None] = {}
+    usable: set[int] = set()
     ids = {l.commodity_id for l in lines if l.commodity_id}
     if ids:
         series_keys = {
             row.id: (row.commodity_key or row.name)
             for row in db.query(CommodityIndex).filter(CommodityIndex.id.in_(ids)).all()
         }
+        # Jira 208: a line on a series with no actual values is a blind spot,
+        # not coverage — the same read every other screen now uses.
+        usable = {h.commodity_id for h in series_health_bulk(db, commodity_ids=list(ids))
+                  if h.usable}
 
     for line in lines:
         tc, proxy_knowable = _type_code_for_line(db, line)
         # A fixed line has nothing to resolve and is not a blind spot — it is
         # a deliberately non-indexed cost. Only an index-linked line that
-        # cannot reach a series counts against coverage.
-        is_index_line = line.component_type != "fixed"
+        # cannot reach a series counts against coverage. A line with no type
+        # at all and nothing to price from is fixed too: costing treats it so,
+        # and counting it as an unbound index line made every such recipe
+        # read `partial` (Jira 208).
+        is_index_line = line.component_type != "fixed" and not (
+            line.component_type is None and line.commodity_id is None and tc is None
+        )
 
         if not is_index_line:
             out.lines.append(LineResolution(
@@ -185,6 +196,8 @@ def model_coverage(db: Session, cm: CostModel) -> ModelCoverage:
             unresolved_reason = tc.resolution
         elif line.commodity_id is None:
             unresolved_reason = "index-linked line has no bound series"
+        elif line.commodity_id not in usable:
+            unresolved_reason = "series has no actual values"
 
         resolved = unresolved_reason is None
         if not resolved and tc is not None:
@@ -224,8 +237,14 @@ def team_coverage(db: Session, team_id: uuid.UUID) -> list[ModelCoverage]:
 # ── The index-move feed, grouped at the series grain ─────────────────────────
 
 def _latest_two_levels(db: Session, commodity_id: int):
-    """Reused verbatim from the shipped alert rule's shape — the two most recent
-    quarters' level for a series, newest first."""
+    """The two most recent quarters' level for a series, newest first — the
+    shipped alert rule's shape.
+
+    Quarterly `index_values` when the series has them; otherwise the quarter
+    means of its monthly actuals (Jira 208). The drop's series are monthly-only,
+    so reading the quarterly store alone meant no move on any catalogue series
+    could ever open a window.
+    """
     rows = (
         db.query(IndexValue.year, IndexValue.quarter, func.avg(IndexValue.value))
         .filter(IndexValue.commodity_id == commodity_id)
@@ -234,6 +253,18 @@ def _latest_two_levels(db: Session, commodity_id: int):
         .limit(2)
         .all()
     )
+    if not rows:
+        # `//`, not `/`: SQLAlchemy 2 makes `/` true division (month 7 -> 3.0).
+        quarter = (IndexMonthlyValue.month - 1) // 3 + 1
+        rows = (
+            db.query(IndexMonthlyValue.year, quarter, func.avg(IndexMonthlyValue.value))
+            .filter(IndexMonthlyValue.commodity_id == commodity_id,
+                    IndexMonthlyValue.kind == "actual")
+            .group_by(IndexMonthlyValue.year, quarter)
+            .order_by(IndexMonthlyValue.year.desc(), quarter.desc())
+            .limit(2)
+            .all()
+        )
     return [(int(y), int(q), float(v)) for y, q, v in rows]
 
 

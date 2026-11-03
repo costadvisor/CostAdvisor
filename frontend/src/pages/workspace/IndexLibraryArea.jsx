@@ -132,22 +132,31 @@ const STATUS = {
   proxy:   { key: 'proxy',   label: 'Proxy',   color: 'var(--accent4)', bg: 'var(--info-bg)',    hint: 'Estimated from a related free index — an approximation, not a quote.' },
   weak:    { key: 'weak',    label: 'Weak',    color: 'var(--accent3)', bg: 'var(--warn-bg)',    hint: 'Loose proxy. Directionally useful; do not put this in front of a supplier as fact.' },
   blocked: { key: 'blocked', label: 'Blocked', color: 'var(--accent2)', bg: 'var(--danger-bg)',  hint: 'Only published behind a paywall — no free source exists for this feed.' },
-  stale:   { key: 'stale',   label: 'Stale',   color: 'var(--accent3)', bg: 'var(--warn-bg)',    hint: 'Has history, but nothing in the last four quarters.' },
+  stale:   { key: 'stale',   label: 'Stale',   color: 'var(--accent3)', bg: 'var(--warn-bg)',    hint: 'Has history, but the latest actual value is old.' },
   nodata:  { key: 'nodata',  label: 'No data', color: 'var(--muted)',   bg: 'var(--neutral-bg)', hint: 'Tracked, but no source is configured and no values have loaded yet.' },
   composite: { key: 'composite', label: 'Live (proxy)', color: 'var(--accent4)', bg: 'var(--info-bg)', hint: 'Composite / calculated — computed live from other indexes via a formula. A derived value, not a direct feed.' },
 };
 
 // Feed provenance wins when it is the more important caveat (blocked), otherwise
 // data presence does, then proxy fidelity, then staleness.
-function dataStatus({ retrievalStatus, hasValues, staleQuarters = 0, isComposite = false }) {
+//
+// `health` is the shared series-health read (/api/series-health, Jira 208).
+// When present it decides staleness and supplies the reason, so this chip
+// agrees with Resolution, the radar and the recipe audit; without it (FX rows,
+// or the read failed) the old trailing-gap rule still applies. "Has values"
+// stays the team's own view: a team override is data even if the platform
+// series is empty.
+function dataStatus({ retrievalStatus, hasValues, staleQuarters = 0, isComposite = false, health = null }) {
+  const reason = health?.reason ? health.reason[0].toUpperCase() + health.reason.slice(1) : null;
+  const why = (status) => (reason ? { ...status, hint: `${status.hint} ${reason}.` } : status);
   if (retrievalStatus === 'blocked') return STATUS.blocked;
-  if (!hasValues) return STATUS.nodata;
+  if (!hasValues) return health?.state === 'empty' ? { ...STATUS.nodata, hint: `${reason}.` } : STATUS.nodata;
   // A composite value is derived from other indexes — flag it as a computed/proxy value.
   if (isComposite) return STATUS.composite;
-  if (retrievalStatus === 'weak_proxy') return STATUS.weak;
-  if (retrievalStatus === 'good_proxy') return STATUS.proxy;
-  if (staleQuarters >= 4) return STATUS.stale;
-  return STATUS.live;
+  if (retrievalStatus === 'weak_proxy') return why(STATUS.weak);
+  if (retrievalStatus === 'good_proxy') return why(STATUS.proxy);
+  if (health ? health.state === 'stale' : staleQuarters >= 4) return why(STATUS.stale);
+  return why(STATUS.live);
 }
 
 /* ── Number formatting ─────────────────────────────────────────────────────
@@ -255,6 +264,7 @@ export default function IndexLibraryArea() {
   const [loadError, setLoadError] = useState(null);
 
   const [costModels, setCostModels] = useState([]); // team's cost models, for auto-follow
+  const [healthById, setHealthById] = useState(() => new Map()); // /api/series-health by commodity_id
 
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -295,6 +305,11 @@ export default function IndexLibraryArea() {
       ]);
       setData(valRes.data); setCommodities(comRes.data); setSources(srcRes.data);
       setCostModels(cmRes.data || []);
+      try {
+        // Shared series health (Jira 208): staleness + the reason a row is empty.
+        const h = await api.get('/api/series-health');
+        setHealthById(new Map((h.data.series || []).map(s => [s.commodity_id, s])));
+      } catch { setHealthById(new Map()); /* non-critical: the old rule still applies */ }
       try {
         const f = await api.get('/api/indexes/filter-options', { params: { team_id: activeTeamId } });
         setRegionsOpt(f.data.regions || []);
@@ -448,6 +463,7 @@ export default function IndexLibraryArea() {
           hasValues: nums.length > 0,
           staleQuarters: trailingGap(cells),
           isComposite: !!meta.composite_expression,
+          health: healthById.get(r.commodity_id) || null,
         }),
       };
     });
@@ -493,7 +509,7 @@ export default function IndexLibraryArea() {
     });
 
     return [...indexRows, ...fxRows].sort((a, b) => a.mat.localeCompare(b.mat));
-  }, [data, periods, commodityMap, commodities, pairs, fxPlatformAll, fxCustomAll, fxCommodityIdByName]);
+  }, [data, periods, commodityMap, commodities, pairs, fxPlatformAll, fxCustomAll, fxCommodityIdByName, healthById]);
 
   const regionList = useMemo(() => regionsOpt.length ? regionsOpt : [...new Set(rows.map(r => r.reg))].sort(), [regionsOpt, rows]);
 

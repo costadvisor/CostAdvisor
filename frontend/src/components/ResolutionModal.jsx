@@ -164,8 +164,11 @@ function Unpriceable() {
   // returns all three groups so a consumer can rely on the keys; an empty one
   // renders as nothing rather than as a card saying zero.
   const groups = Object.entries(data.blockers || {}).filter(([, g]) => g.code_count > 0);
-  if (!groups.length) {
-    return <div style={{ fontSize: 12, color: 'var(--muted)' }}>Every referenced type code resolves to a series with values.</div>;
+  // Priceable but dated (Jira 208): shown beside the blockers, never summed
+  // with them — costing still produces a number, it is just an old one.
+  const stale = data.stale && data.stale.code_count > 0 ? data.stale : null;
+  if (!groups.length && !stale) {
+    return <div style={{ fontSize: 12, color: 'var(--muted)' }}>Every referenced type code resolves to a series with current values.</div>;
   }
 
   return (
@@ -208,6 +211,31 @@ function Unpriceable() {
           </div>
         );
       })}
+      {stale && (
+        <div className="ca-card" style={{ marginBottom: 12, padding: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--accent3)' }}>Priced on old data</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace" }}>
+              {stale.code_count} code{stale.code_count === 1 ? '' : 's'} · {pct(stale.weight_share_of_library_pct)} of library weight
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+            Not a blocker: costing carries the last value forward. The series needs a refresh.
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
+            {(stale.codes || []).map((c, i) => (
+              <span key={i} className="ca-badge"
+                title={[c.label, c.health_reason].filter(Boolean).join(' · ') || undefined}
+                style={{
+                  background: 'var(--surface2)', color: 'var(--text-secondary)',
+                  fontFamily: "'JetBrains Mono', monospace", fontWeight: 500,
+                }}>
+                {c.code}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </>
   );
 }

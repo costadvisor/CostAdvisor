@@ -37,6 +37,14 @@ class SeriesHistory(BaseModel):
     last_year: int | None = None
 
 
+class SeriesHealthBrief(BaseModel):
+    state: str                       # current | stale | forecast_only | empty | composite
+    reason: str
+    store: str | None = None         # monthly | quarterly | both
+    last_actual: str | None = None   # "YYYY-MM"
+    months_old: int | None = None
+
+
 # ── Q1: the chain for one type code ──────────────────────────────────────────
 
 class TypeCodeChainOut(BaseModel):
@@ -55,6 +63,9 @@ class TypeCodeChainOut(BaseModel):
     history: SeriesHistory
     priceable: bool
     blocker: str | None = None
+    # The shared series-health read (Jira 208): both value stores, the age,
+    # and why. Absent when the code resolves to no series.
+    health: SeriesHealthBrief | None = None
 
 
 # ── Q2 + Q4: the dependents of one series ────────────────────────────────────
@@ -123,6 +134,9 @@ class UnpriceableOut(BaseModel):
     # Keyed by reason — never one combined count, because the three need three
     # different actions: buy a feed, decide what a code means, run a scrape.
     blockers: dict[str, BlockerGroup]
+    # Priceable, but only on an old observation (Jira 208). Kept apart from
+    # the blockers: costing still produces a number, it is just dated.
+    stale: BlockerGroup | None = None
 
 
 # ── Q3: why can't this combo be costed ───────────────────────────────────────

@@ -35,6 +35,7 @@ from app.models.formula_template import (
 )
 from app.models.index_data import CommodityIndex
 from app.models.index_layer import IndexCard, IndexMonthlyValue, TypeCode
+from app.services.series_health import STALE, series_health, series_health_bulk
 
 # Why a line cannot be costed. Kept distinct rather than collapsed into one
 # "unpriceable" flag, because the remedies differ completely: `no_series`
@@ -55,11 +56,15 @@ def resolve_type_code(db: Session, code: str) -> dict | None:
         return None
 
     series = None
+    health = None
     cards: list[dict] = []
     history = {"actual_points": 0, "forecast_points": 0, "first": None, "last": None}
 
     if tc.resolves_to_id is not None:
         series = db.query(CommodityIndex).filter(CommodityIndex.id == tc.resolves_to_id).first()
+        # Jira 208: whether the series can be priced is the shared health read
+        # (both value stores), not the monthly count below alone.
+        health = series_health(db, tc.resolves_to_id)
 
     if series is not None:
         cards = [
@@ -123,17 +128,31 @@ def resolve_type_code(db: Session, code: str) -> dict | None:
         # Several cards can display one series, so the chain fans out here.
         "cards": cards,
         "history": history,
-        "priceable": tc.resolution == "resolved" and history["actual_points"] > 0,
-        "blocker": _code_blocker(tc, history),
+        "priceable": tc.resolution == "resolved" and bool(health and health.usable),
+        "blocker": _code_blocker(tc, bool(health and health.usable)),
+        "health": None if health is None else {
+            "state": health.state,
+            "reason": health.reason,
+            "store": health.store,
+            "last_actual": health.last_actual,
+            "months_old": health.months_old,
+        },
     }
 
 
-def _code_blocker(tc: TypeCode, history: dict) -> str | None:
+def _usable_series(db: Session) -> dict[int, object]:
+    """Series health keyed by id, for the series that have something to price
+    from. Both value stores count: reading monthly actuals alone called every
+    quarterly-only series 'no history' though costing prices it (Jira 208)."""
+    return {h.commodity_id: h for h in series_health_bulk(db) if h.usable}
+
+
+def _code_blocker(tc: TypeCode, has_history: bool) -> str | None:
     if tc.resolution == BLOCKER_AMBIGUOUS:
         return BLOCKER_AMBIGUOUS
     if tc.resolution == BLOCKER_NO_SERIES:
         return BLOCKER_NO_SERIES
-    if not history.get("actual_points"):
+    if not has_history:
         # Resolves to a real series that simply has no numbers yet — a
         # different problem from either of the above, and a different fix.
         return BLOCKER_NO_HISTORY
@@ -280,46 +299,47 @@ def unpriceable_type_codes(db: Session) -> dict:
     count.
     """
     codes = db.query(TypeCode).order_by(TypeCode.source_total_weight.desc().nullslast()).all()
-    with_history = {
-        cid
-        for (cid,) in db.query(IndexMonthlyValue.commodity_id)
-        .filter(IndexMonthlyValue.kind == "actual")
-        .distinct()
-    }
+    usable = _usable_series(db)
 
     grouped: dict[str, list[dict]] = {
         BLOCKER_NO_SERIES: [], BLOCKER_AMBIGUOUS: [], BLOCKER_NO_HISTORY: [],
     }
+    # Priceable, but on an old observation (Jira 208). Not a blocker — costing
+    # carries the value forward — so it sits beside the blockers, never in them.
+    stale: list[dict] = []
     for tc in codes:
-        history = {"actual_points": 1 if tc.resolves_to_id in with_history else 0}
-        blocker = _code_blocker(tc, history)
-        if blocker is None:
-            continue
-        grouped[blocker].append({
+        health = usable.get(tc.resolves_to_id)
+        entry = {
             "code": tc.code,
             "label": tc.label,
             "resolution": tc.resolution,
             "swap_priority": tc.swap_priority,
             "ideal_index": tc.ideal_index,
             "source_total_weight": float(tc.source_total_weight or 0),
-        })
+        }
+        blocker = _code_blocker(tc, health is not None)
+        if blocker is not None:
+            grouped[blocker].append(entry)
+        elif health.state == STALE:
+            stale.append({**entry, "health_reason": health.reason})
 
     library_weight = float(db.query(func.sum(TypeCode.source_total_weight)).scalar() or 0)
+
+    def group(entries: list[dict]) -> dict:
+        weight = sum(e["source_total_weight"] for e in entries)
+        return {
+            "code_count": len(entries),
+            "source_total_weight": weight,
+            "weight_share_of_library_pct": (
+                round(weight / library_weight * 100, 2) if library_weight else None
+            ),
+            "codes": entries,
+        }
+
     return {
         "library_total_weight": library_weight,
-        "blockers": {
-            reason: {
-                "code_count": len(entries),
-                "source_total_weight": sum(e["source_total_weight"] for e in entries),
-                "weight_share_of_library_pct": (
-                    round(
-                        sum(e["source_total_weight"] for e in entries) / library_weight * 100, 2
-                    ) if library_weight else None
-                ),
-                "codes": entries,
-            }
-            for reason, entries in grouped.items()
-        },
+        "blockers": {reason: group(entries) for reason, entries in grouped.items()},
+        "stale": group(stale),
     }
 
 
@@ -439,12 +459,7 @@ def diagnose_combo(db: Session, template_id: uuid.UUID, region: str,
         diagnosis.reason = "combo has no cost lines"
         return diagnosis
 
-    with_history = {
-        cid
-        for (cid,) in db.query(IndexMonthlyValue.commodity_id)
-        .filter(IndexMonthlyValue.kind == "actual")
-        .distinct()
-    }
+    with_history = set(_usable_series(db))
     codes = {
         tc.id: tc
         for tc in db.query(TypeCode).filter(
@@ -463,8 +478,7 @@ def diagnose_combo(db: Session, template_id: uuid.UUID, region: str,
         tc = codes.get(line.type_code_id)
         if tc is None:
             continue
-        history = {"actual_points": 1 if tc.resolves_to_id in with_history else 0}
-        blocker = _code_blocker(tc, history)
+        blocker = _code_blocker(tc, tc.resolves_to_id in with_history)
         if blocker is None:
             continue
 

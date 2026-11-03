@@ -386,3 +386,53 @@ def test_platform_totals_do_not_include_any_team_fork(db, tenant_a, client_as):
         assert entry["code"] == code.code
     finally:
         _cleanup(db, [fork.id], [code.id], [series.id])
+
+
+# ── Jira 208: "has history" is the shared series-health read ─────────────────
+#
+# Reading monthly actuals alone called a quarterly-only series "no history"
+# though costing prices it, and said nothing about how old a priced value is.
+
+def test_a_quarterly_only_series_is_priceable_not_no_history(db):
+    from app.models.index_data import IndexValue
+    from app.services.resolution import resolve_type_code, unpriceable_type_codes
+
+    series = _series(db, f"q-only-{uuid.uuid4().hex[:8]}", with_history=False)
+    db.add(IndexValue(commodity_id=series.id, region="Europe", year=2026, quarter=3,
+                      value=50, source="seed"))
+    db.commit()
+    code = _code(db, f"TC-{uuid.uuid4().hex[:8]}", series)
+    try:
+        chain = resolve_type_code(db, code.code)
+        assert chain["priceable"] is True and chain["blocker"] is None
+        assert chain["health"]["store"] == "quarterly"
+        no_history = unpriceable_type_codes(db)["blockers"][BLOCKER_NO_HISTORY]["codes"]
+        assert code.code not in {c["code"] for c in no_history}
+    finally:
+        db.rollback()
+        db.execute(text("DELETE FROM index_values WHERE commodity_id = :i"), {"i": series.id})
+        db.commit()
+        _cleanup(db, code_ids=[code.id], series_ids=[series.id])
+
+
+def test_a_code_on_stale_data_is_listed_apart_from_the_blockers(db, tenant_a, client_as):
+    from app.services.resolution import unpriceable_type_codes
+
+    series = _series(db, f"stale-{uuid.uuid4().hex[:8]}", with_history=False)
+    db.add(IndexMonthlyValue(commodity_id=series.id, year=2024, month=1, value=100, kind="actual"))
+    db.commit()
+    code = _code(db, f"TC-{uuid.uuid4().hex[:8]}", series)
+    try:
+        report = unpriceable_type_codes(db)
+        stale = {c["code"]: c for c in report["stale"]["codes"]}
+        assert code.code in stale
+        assert "2024-01" in stale[code.code]["health_reason"]
+        # Priceable on an old value is not a blocker.
+        for group in report["blockers"].values():
+            assert code.code not in {c["code"] for c in group["codes"]}
+
+        r = client_as(tenant_a).get("/api/resolution/unpriceable")
+        assert r.status_code == 200
+        assert code.code in {c["code"] for c in r.json()["stale"]["codes"]}
+    finally:
+        _cleanup(db, code_ids=[code.id], series_ids=[series.id])

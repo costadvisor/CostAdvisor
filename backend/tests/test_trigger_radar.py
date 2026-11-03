@@ -1050,3 +1050,85 @@ def test_contract_terms_never_reach_a_costing_only_role(
         db.query(Contract).filter(Contract.id == contract.id).delete(
             synchronize_session=False)
         db.commit()
+
+
+# ── Jira 208: monthly-only series and the shared health read ────────────────
+#
+# The drop's series are monthly-only. Reading quarterly values alone meant no
+# move on a catalogue series could ever open a window, and a line on a series
+# with no values at all still counted as coverage.
+
+def _monthly(db, series, points):
+    from app.models.index_layer import IndexMonthlyValue
+    for (y, m, v) in points:
+        db.add(IndexMonthlyValue(commodity_id=series.id, year=y, month=m, value=v, kind="actual"))
+    db.commit()
+
+
+def _drop_monthly(db, *series):
+    db.rollback()
+    bypass_rls_var.set(True)
+    for s in series:
+        db.execute(text("DELETE FROM index_monthly_values WHERE commodity_id = :i"), {"i": s.id})
+    db.commit()
+
+
+def test_a_move_on_a_monthly_only_series_is_seen(db):
+    from app.services.thresholds import Threshold
+    from app.services.trigger_radar import series_move
+
+    s = _series(db, "monthly-only")
+    try:
+        _monthly(db, s, [(2026, 1, 100), (2026, 2, 100), (2026, 3, 100),
+                         (2026, 4, 130), (2026, 5, 130), (2026, 6, 130)])
+        move = series_move(db, s.id, Threshold(value=10.0, unit="pct", source="fallback"))
+        assert move is not None
+        assert (move.year, move.quarter) == (2026, 2)
+        assert move.move_pct == pytest.approx(30.0)
+    finally:
+        _drop_monthly(db, s)
+        _cleanup(db, series_ids=[s.id])
+
+
+def test_quarterly_values_still_win_when_a_series_has_them(db):
+    from app.services.thresholds import Threshold
+    from app.services.trigger_radar import series_move
+
+    s = _series(db, "both-stores", levels=[(PREV_Y, PREV_Q, 100), (CUR_Y, CUR_Q, 105)])
+    try:
+        # The monthly store says +100%; the quarterly store (5%) is what is read.
+        _monthly(db, s, [(2026, 1, 100), (2026, 4, 200)])
+        assert series_move(db, s.id, Threshold(value=10.0, unit="pct", source="fallback")) is None
+    finally:
+        _drop_monthly(db, s)
+        _cleanup(db, series_ids=[s.id])
+
+
+def test_a_line_on_a_series_with_no_values_is_not_coverage(db, tenant_a):
+    dry = _series(db, "resolved-but-dry")
+    code = _code(db, dry)                    # resolves fine, nothing loaded
+    cm = _cost_model(db, tenant_a, series_weights=[(dry, 1.0)])
+    try:
+        cov = model_coverage(db, db.query(CostModel).filter(CostModel.id == cm.id).one())
+        assert cov.coverage == COVERAGE_UNKNOWN
+        assert cov.lines[0].reason == "series has no actual values"
+        assert code.code in cov.unresolved_codes
+    finally:
+        _cleanup(db, cost_model_ids=[cm.id], code_ids=[code.id], series_ids=[dry.id])
+
+
+def test_an_untyped_line_with_nothing_to_price_counts_as_fixed(db, tenant_a):
+    """Costing treats a line with no type and no series as fixed; the radar
+    used to call it an unbound index line, so every such recipe read partial."""
+    good = _series(db, "good", levels=[(CUR_Y, CUR_Q, 100)])
+    cm = _cost_model(db, tenant_a, series_weights=[(good, 0.8)])
+    fv = db.query(FormulaVersion).filter(FormulaVersion.cost_model_id == cm.id).one()
+    db.add(FormulaComponent(formula_version_id=fv.id, label="Fixed",
+                            commodity_id=None, weight=0.2, component_type=None))
+    db.commit()
+    try:
+        cov = model_coverage(db, db.query(CostModel).filter(CostModel.id == cm.id).one())
+        assert cov.coverage == COVERAGE_COVERED
+        assert {l.reason for l in cov.lines if l.label == "Fixed"} == {"fixed line"}
+    finally:
+        _cleanup(db, cost_model_ids=[cm.id], series_ids=[good.id])
