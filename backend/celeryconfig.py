@@ -25,6 +25,7 @@ imports = (
     "app.tasks.alerts",
     "app.tasks.radar",
     "app.tasks.seasonality",
+    "app.tasks.refresh_check",
 )
 
 # Beat schedule
@@ -67,5 +68,11 @@ beat_schedule = {
     "scrape-fx-live-daily": {
         "task": "app.tasks.scrape_indexes.scrape_fx_live",
         "schedule": crontab(hour=8, minute=0),  # Daily 08:00 UTC
+    },
+    # Jira 209 — report refresh failures and late data. After every refresh
+    # job of the day, so a Monday check sees that morning's scrapes.
+    "check-refresh-health-daily": {
+        "task": "app.tasks.refresh_check.check_refresh_health",
+        "schedule": crontab(hour=8, minute=15),  # Daily 08:15 UTC
     },
 }

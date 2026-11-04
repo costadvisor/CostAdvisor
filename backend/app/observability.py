@@ -25,6 +25,8 @@ def init_sentry() -> None:
     """Initialize Sentry if configured. Safe to call when SDK not installed."""
     if not _SDK_AVAILABLE or not _settings.sentry_dsn:
         return
+    if sentry_sdk.get_client().is_active():
+        return  # already set up (the API imports app.tasks too)
     sentry_sdk.init(
         dsn=_settings.sentry_dsn,
         environment=_settings.environment,
@@ -44,3 +46,11 @@ def clear_user_context() -> None:
     if not _SDK_AVAILABLE or not _settings.sentry_dsn:
         return
     sentry_sdk.set_user(None)
+
+
+def capture_message(message: str, level: str = "info") -> None:
+    """Send a message (not an exception) to Sentry, e.g. the daily refresh
+    alerts (Jira 209). No-op if Sentry isn't active."""
+    if not _SDK_AVAILABLE or not _settings.sentry_dsn:
+        return
+    sentry_sdk.capture_message(message, level=level)

@@ -25,7 +25,7 @@ from app.routers import (
     contracts, radar, editorial, dimensions, index_dossier, seasonality,
     intelligence, support, index_validation,
     intel_catalogue, intel_reference, strategy, taxonomy, series_health,
-    recipe_line_audit,
+    recipe_line_audit, refresh_monitor,
 )
 # Imported for its side effect: registers the before_flush listener that
 # auto-registers region codes so the region FK never rejects a user write.
@@ -135,6 +135,8 @@ app.include_router(resolution.router, prefix="/api/resolution", tags=["resolutio
 app.include_router(series_health.router, prefix="/api/series-health", tags=["series-health"])
 # Does every recipe line point at a real index with data (Jira 208).
 app.include_router(recipe_line_audit.router, prefix="/api/recipe-audit", tags=["recipe-audit"])
+# How each index is refreshed, and what happened last time (Jira 209).
+app.include_router(refresh_monitor.router, prefix="/api/refresh", tags=["refresh"])
 # Data-quality findings over those same layers (Scrum 34). Same platform
 # grain and the same reasoning for living on its own surface.
 app.include_router(index_validation.router, prefix="/api/validation",

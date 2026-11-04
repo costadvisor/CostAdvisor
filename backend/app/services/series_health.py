@@ -42,10 +42,26 @@ COMPOSITE = "composite"
 
 STATES = (CURRENT, STALE, FORECAST_ONLY, EMPTY, COMPOSITE)
 
-# PROPOSED, pending Alexis (Jira 208 open question). Every drop series ends at
-# its last actual month, and a refresh cadence is not yet agreed (Jira 209), so
-# this is a reporting threshold only: nothing is blocked on it.
+# PROPOSED, pending Alexis (Jira 208 open question). The default threshold, for
+# a series that states no usable frequency. A reporting threshold only: nothing
+# is blocked on it.
 STALE_AFTER_MONTHS = 6
+
+# PROPOSED (Jira 209 S4). "Late" depends on how often a series publishes: the
+# expected gap between observations plus a grace for publication lag. Keyed by
+# that gap in months (see `frequency_interval_months`).
+#   monthly (and daily/weekly, stored monthly)   late after 2 months
+#   quarterly                                    late after 6 months (2 quarters)
+#   semi-annual                                  late after 9 months
+#   annual                                       late after 15 months
+STALE_AFTER_BY_INTERVAL = {1: 2, 3: 6, 6: 9, 12: 15}
+_INTERVAL_NAME = {1: "monthly", 3: "quarterly", 6: "semi-annual", 12: "annual"}
+
+# PROPOSED (Jira 209 S4). A content-drop series can be no newer than the last
+# drop, which is re-extracted by hand (expected every 3 months) and carries its
+# own publication lag, so it is late after this many months whatever its
+# frequency — unless its frequency allows longer (an annual series).
+CONTENT_DROP_STALE_AFTER_MONTHS = 6
 
 STORE_MONTHLY = "monthly"
 STORE_QUARTERLY = "quarterly"
@@ -65,11 +81,45 @@ class SeriesHealth:
     monthly_actual_points: int = 0
     forecast_points: int = 0
     quarterly_points: int = 0
+    stale_after_months: int = STALE_AFTER_MONTHS
+    stale_rule: str = "default"           # what set stale_after_months
 
     @property
     def usable(self) -> bool:
         """Has an actual observation to price from, however old."""
         return self.state in (CURRENT, STALE, COMPOSITE)
+
+
+def frequency_interval_months(frequency: str | None) -> int | None:
+    """Months between observations for a stated frequency, or None when it
+    states none usable. The content drop writes frequencies as free text
+    ("Monthly (arithmetic mean of daily fixes)", "Daily/Weekly news",
+    "Annual, stepped monthly"), so the leading word decides. Daily and weekly
+    series are stored monthly, so they read as monthly."""
+    f = (frequency or "").strip().lower()
+    if f.startswith(("daily", "weekly", "monthly")):
+        return 1
+    if f.startswith("quarterly"):
+        return 3
+    if f.startswith(("semi-annual", "semiannual", "half-yearly")):
+        return 6
+    if f.startswith(("annual", "yearly")):
+        return 12
+    return None
+
+
+def stale_after(series: CommodityIndex) -> tuple[int, str]:
+    """(months, rule): how old the newest actual value may be before the
+    series is late, and a short label for why."""
+    interval = frequency_interval_months(series.frequency)
+    by_frequency = STALE_AFTER_BY_INTERVAL.get(interval) if interval else None
+    if series.commodity_key:
+        if by_frequency and by_frequency > CONTENT_DROP_STALE_AFTER_MONTHS:
+            return by_frequency, f"content drop, {_INTERVAL_NAME[interval]}"
+        return CONTENT_DROP_STALE_AFTER_MONTHS, "content drop"
+    if by_frequency:
+        return by_frequency, _INTERVAL_NAME[interval]
+    return STALE_AFTER_MONTHS, "default"
 
 
 def _month_index(year: int, month: int) -> int:
@@ -106,6 +156,7 @@ def _classify(series: CommodityIndex, monthly: tuple | None, quarterly: tuple | 
         forecast_points=m_forecast,
         quarterly_points=q_points,
     )
+    health.stale_after_months, health.stale_rule = stale_after(series)
 
     if m_actual and q_points:
         health.store = STORE_BOTH
@@ -139,11 +190,11 @@ def _classify(series: CommodityIndex, monthly: tuple | None, quarterly: tuple | 
     age = max(0, _month_index(as_of.year, as_of.month) - latest)
     health.last_actual = _ym(latest)
     health.months_old = age
-    if age > STALE_AFTER_MONTHS:
+    if age > health.stale_after_months:
         health.state = STALE
         health.reason = (
             f"last actual value {health.last_actual} is {age} months old "
-            f"(stale after {STALE_AFTER_MONTHS})"
+            f"(stale after {health.stale_after_months}: {health.stale_rule})"
         )
     else:
         health.state = CURRENT

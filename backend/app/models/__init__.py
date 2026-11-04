@@ -62,8 +62,14 @@ from app.models.strategy import (
     StrategyRecord, TeamObjective,
 )
 from app.models.content_load import ContentLoad
+from app.models.index_refresh import (
+    IndexRefreshAttempt, IndexRefreshRun, IndexRefreshState,
+)
 
 __all__ = [
+    "IndexRefreshAttempt",
+    "IndexRefreshRun",
+    "IndexRefreshState",
     "IndexValidationFinding",
     "IndexValidationRun",
     "User",

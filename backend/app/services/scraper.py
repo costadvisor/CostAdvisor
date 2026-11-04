@@ -43,6 +43,12 @@ class BaseScraper(ABC):
             return 0
 
         data = await self.fetch()
+        return self.write(db, commodity, data)
+
+    def write(self, db: Session, commodity: CommodityIndex, data: list[ScrapedDataPoint]) -> int:
+        """Upsert fetched points into index_values and commit. Split from
+        `run` so the scheduled refresh can check points before writing them
+        (Jira 209); `run` behaves exactly as before."""
         count = 0
         for point in data:
             existing = db.query(IndexValue).filter(

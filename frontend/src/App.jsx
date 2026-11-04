@@ -29,6 +29,7 @@ import Dimensions from './pages/Dimensions';
 import Validation from './pages/Validation';
 import PriceListImport from './pages/PriceListImport';
 import IndexSourcing from './pages/IndexSourcing';
+import RefreshStatus from './pages/RefreshStatus';
 import AiCostModeler from './pages/AiCostModeler';
 import Team from './pages/Team';
 import Privacy from './pages/Privacy';
@@ -101,6 +102,8 @@ export default function App() {
             <Route path="/validation" element={<Validation />} />
             <Route path="/price-lists" element={<PriceListImport />} />
             <Route path="/index-sourcing" element={<IndexSourcing />} />
+            {/* Jira 209: super-admin page; the page itself checks the role. */}
+            <Route path="/refresh-status" element={<RefreshStatus />} />
             <Route path="/ai-cost-modeler" element={<AiCostModeler />} />
             <Route path="/fx-rates" element={<Navigate to="/index-library" replace />} />
             <Route path="/index-library" element={<IndexLibraryArea />} />

@@ -129,7 +129,10 @@ export default function Navbar() {
       ],
     },
     { kind: 'link', path: '/team', label: 'Team', badge: pendingInviteCount || 0 },
-    ...(user?.is_super_admin ? [{ kind: 'link', path: '/admin', label: 'Admin' }] : []),
+    ...(user?.is_super_admin ? [
+      { kind: 'link', path: '/admin', label: 'Admin' },
+      { kind: 'link', path: '/refresh-status', label: 'Refresh' },
+    ] : []),
   ];
 
   const groupActive = (g) =>

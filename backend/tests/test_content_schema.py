@@ -133,7 +133,12 @@ def test_one_alembic_head_on_the_content_revisions():
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(Config(str(VERSIONS.parents[1] / "alembic.ini")))
-    assert script.get_heads() == ["cd1a2b3c4d5e"]
+    # One head, with the content revisions on its chain. Later migrations
+    # (e.g. Jira 209's refresh log) stack on top, so the head itself moves.
+    heads = script.get_heads()
+    assert len(heads) == 1
+    chain = {r.revision for r in script.iterate_revisions(heads[0], "base")}
+    assert {"cd1a2b3c4d5e", "tax2a1b2c3d4e"} <= chain
     assert script.get_revision("cd1a2b3c4d5e").down_revision == "tax2a1b2c3d4e"
     assert script.get_revision("tax2a1b2c3d4e").down_revision == "ai1a2b3c4d5e"
 
