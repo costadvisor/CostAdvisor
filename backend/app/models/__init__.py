@@ -66,6 +66,7 @@ from app.models.index_refresh import (
     IndexRefreshAttempt, IndexRefreshRun, IndexRefreshState,
 )
 from app.models.live_conversion import ReportLiveConversion
+from app.models.search_profile import SearchProfile
 
 __all__ = [
     "ReportLiveConversion",
@@ -177,4 +178,5 @@ __all__ = [
     "CustomLever",
     "StrategyAction",
     "ContentLoad",
+    "SearchProfile",
 ]

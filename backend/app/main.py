@@ -25,7 +25,7 @@ from app.routers import (
     contracts, radar, editorial, dimensions, index_dossier, seasonality,
     intelligence, support, index_validation,
     intel_catalogue, intel_reference, strategy, taxonomy, series_health,
-    recipe_line_audit, refresh_monitor, live_values, staleness,
+    recipe_line_audit, refresh_monitor, live_values, staleness, news,
 )
 # Imported for its side effect: registers the before_flush listener that
 # auto-registers region codes so the region FK never rejects a user write.
@@ -127,6 +127,8 @@ app.include_router(intel_catalogue.router, prefix="/api/intel", tags=["intel"])
 app.include_router(intel_reference.router, prefix="/api/intel", tags=["intel"])
 app.include_router(taxonomy.router, prefix="/api/taxonomy", tags=["taxonomy"])
 app.include_router(strategy.router, prefix="/api/strategy", tags=["strategy"])
+# Wave 4 monthly news (SCRUM-213+): search profiles, later the sweep + editor queue.
+app.include_router(news.router, prefix="/api/news", tags=["news"])
 app.include_router(indexes.router, prefix="/api/indexes", tags=["indexes"])
 # Platform-grain index resolution reads (Scrum 74) — deliberately its own
 # surface rather than a mode of /api/indexes, which is team-scoped.

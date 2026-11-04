@@ -91,6 +91,27 @@ class Settings(BaseSettings):
     # Used in production with a pre-warmed Redis cache so no live LLM is needed.
     llm_enabled: bool = True
 
+    # Anthropic (Claude API) — Wave 4 monthly news (SCRUM-213/214/215).
+    # Separate from Ollama on purpose: news search + sorting run on Claude via
+    # the organisation's key, and do not depend on the Hetzner box (which
+    # staging cannot reach). Empty key = the news features report "not
+    # configured" instead of failing mid-request.
+    anthropic_api_key: str = ""
+    anthropic_api_url: str = "https://api.anthropic.com"
+    anthropic_timeout: int = 180
+    # Model for search + profile drafting (needs judgement and web search).
+    anthropic_model: str = "claude-sonnet-5-5"
+    # A profile test run is capped so an editor's click can't run up a bill.
+    news_test_run_max_searches: int = 5
+    # Seconds a test run may take in total: under the ~100s proxy cutoff in front
+    # of the API (Cloudflare), so the editor always gets an answer, not an error.
+    news_test_run_time_budget: int = 75
+    # Who can see the news features (SCRUM-213+) while they are being built.
+    # Comma-separated emails; "*" = everyone with the Content Editor role;
+    # empty = nobody, so the feature is off unless an environment switches it on.
+    # Lets the code ride on dev/staging, visible only to the people testing it.
+    news_preview_emails: str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
