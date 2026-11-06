@@ -713,8 +713,9 @@ export default function CostModelBuilder() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
                   <div>
                     <label className="ca-label">Total Price ({sym}/unit)</label>
-                    <input className="ca-input" type="number" value={basePrice} min={0} step={0.01}
-                      onChange={e => setBasePrice(+e.target.value)} />
+                    {/* NumberInput: a type=number field showed "052" after clearing and typing 52. */}
+                    <NumberInput value={basePrice} allowNegative={false}
+                      onChange={v => setBasePrice(v ?? 0)} />
                   </div>
                   <div>
                     <label className="ca-label">Base Year</label>
@@ -1157,9 +1158,8 @@ export default function CostModelBuilder() {
                     </div>
                     <div>
                       <label className="ca-label">{marginType === 'pct' ? 'Margin %' : `Fixed Amount (${sym})`}</label>
-                      <input className="ca-input" type="number" value={marginValue} min={0}
-                        step={marginType === 'pct' ? 1 : 0.01}
-                        onChange={e => setMarginValue(+e.target.value)} />
+                      <NumberInput value={marginValue} allowNegative={false}
+                        onChange={v => setMarginValue(v ?? 0)} />
                     </div>
                     <div>
                       <label className="ca-label" style={{ fontSize: 9 }}>Weight</label>
