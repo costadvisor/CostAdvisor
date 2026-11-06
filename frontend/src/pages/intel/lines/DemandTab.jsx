@@ -4,10 +4,12 @@ import { Panel, StatusBadge, EmptyState } from '../../../components/intel';
 import { industryHref, productHref, count, listedOf } from './lineUtil';
 
 /* Line detail › Demand: where the line's products are bought — the ratified
- * demand tree's industries → categories that place them. */
+ * demand tree's industries → categories that place them. A category opens on
+ * its industry page (`?open=<code>`); products show by name, PID on hover. */
 export default function DemandTab({ line }) {
   const demand = line.demand || {};
   const industries = demand.industries || [];
+  const names = new Map((line.products || []).map((p) => [p.pid, p.name]));
 
   if (!industries.length) {
     return (
@@ -51,14 +53,21 @@ export default function DemandTab({ line }) {
                     )}
                     <td>
                       <span className="ixl-code">{c.code}</span>{' '}
-                      <span className="ix-cell-main">{c.name}</span>
+                      {ind.slug ? (
+                        <Link to={`${industryHref(ind.slug)}?open=${encodeURIComponent(c.code)}`}
+                          title={`Open ${c.code} on the ${ind.industry} page`}>
+                          {c.name}
+                        </Link>
+                      ) : <span className="ix-cell-main">{c.name}</span>}
                     </td>
                     <td className="ix-muted">{c.fn}</td>
                     <td><StatusBadge status={c.status} /></td>
                     <td>
                       <div className="ixl-pid-chips">
                         {(c.pids || []).map((pid) => (
-                          <Link key={pid} to={productHref(pid)} className="ix-tag plain">{pid}</Link>
+                          <Link key={pid} to={productHref(pid)} className="ix-tag plain" title={pid}>
+                            {names.get(pid) || pid}
+                          </Link>
                         ))}
                       </div>
                     </td>
