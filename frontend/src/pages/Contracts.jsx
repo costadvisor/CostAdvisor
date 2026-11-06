@@ -103,6 +103,8 @@ function ContractForm({ initial, suppliers, costModels, onCancel, onSaved }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const deadline = previewDeadline(form.term_end, form.notice_days);
+  // ISO dates compare as strings. The server refuses this too.
+  const termInverted = !!(form.term_start && form.term_end && form.term_end < form.term_start);
 
   const addClause = () => set('clauses', [...form.clauses, {
     clause_type: 'notice', label: '', body: '',
@@ -119,6 +121,7 @@ function ContractForm({ initial, suppliers, costModels, onCancel, onSaved }) {
 
   const save = async (e) => {
     e.preventDefault();
+    if (termInverted) return;
     setBusy(true);
     // notice_deadline is deliberately absent from this body — the server derives it.
     const body = {
@@ -184,9 +187,17 @@ function ContractForm({ initial, suppliers, costModels, onCancel, onSaved }) {
             onChange={e => set('term_start', e.target.value)} />
         </div>
         <div>
-          <label className="ca-label">Term end</label>
-          <input className="ca-input" type="date" value={form.term_end}
+          <label className="ca-label" htmlFor="contract-term-end">Term end</label>
+          <input id="contract-term-end" className="ca-input" type="date" value={form.term_end}
+            min={form.term_start || undefined} aria-invalid={termInverted}
+            aria-describedby={termInverted ? 'contract-term-error' : undefined}
+            style={termInverted ? { borderColor: 'var(--accent2)' } : undefined}
             onChange={e => set('term_end', e.target.value)} />
+          {termInverted && (
+            <div id="contract-term-error" style={{ fontSize: 11, color: 'var(--accent2)', marginTop: 4 }}>
+              Term end is before term start.
+            </div>
+          )}
         </div>
         <div>
           <label className="ca-label">Notice period (days)</label>
@@ -309,7 +320,7 @@ function ContractForm({ initial, suppliers, costModels, onCancel, onSaved }) {
 
       <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
         <button type="button" className="ca-btn ca-btn-ghost ca-btn-sm" onClick={onCancel}>Cancel</button>
-        <button type="submit" className="ca-btn ca-btn-primary ca-btn-sm" disabled={busy}>
+        <button type="submit" className="ca-btn ca-btn-primary ca-btn-sm" disabled={busy || termInverted}>
           {busy ? 'Saving…' : initial.id ? 'Save changes' : 'Create contract'}
         </button>
       </div>

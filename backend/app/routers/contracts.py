@@ -97,6 +97,13 @@ def _validate(db: Session, team_id: uuid.UUID, data, *, clauses, cost_model_ids)
             raise HTTPException(404, f"Cost model {cm_id} not found in this team")
 
 
+def _check_term(term_start, term_end):
+    # An end before the start saved as a contract whose notice window had
+    # closed a year ago ("399d ago" on the radar).
+    if term_start and term_end and term_end < term_start:
+        raise HTTPException(422, "Term end is before term start.")
+
+
 @router.get("/can-access")
 def can_access(team_id: uuid.UUID, db: Session = Depends(get_db),
                current_user: User = Depends(get_current_user)):
@@ -147,6 +154,7 @@ def create_contract(team_id: uuid.UUID, data: ContractIn, db: Session = Depends(
                     current_user: User = Depends(get_current_user)):
     require_permission(db, current_user, team_id, "contracts.edit")
     _validate(db, team_id, data, clauses=data.clauses, cost_model_ids=data.cost_model_ids)
+    _check_term(data.term_start, data.term_end)
 
     c = Contract(
         team_id=team_id, supplier_id=data.supplier_id, reference=data.reference,
@@ -190,6 +198,8 @@ def update_contract(contract_id: uuid.UUID, data: ContractUpdate,
 
     fields = data.model_dump(exclude_unset=True,
                              exclude={"cost_model_ids", "clauses"})
+    # A partial update: check the dates the contract will have after it.
+    _check_term(fields.get("term_start", c.term_start), fields.get("term_end", c.term_end))
     for k, v in fields.items():
         setattr(c, k, v)
     # Any change to term_end or notice_days moves the deadline; recompute
