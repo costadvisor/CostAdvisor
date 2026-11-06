@@ -201,8 +201,11 @@ export default function NegotiationPrepArea() {
               <select className="ca-select" value={driver} aria-label="Cost line"
                       onChange={e => setDriver(e.target.value)} style={{ flex: '2 1 180px' }}>
                 <option value="">Which cost line? (optional)</option>
+                {/* The cost line's own label is the value: two lines priced off one
+                    index shared the index name, and the select (and the claim)
+                    landed on the first of them, with its recipe weight. */}
                 {prep.drivers.map(d => (
-                  <option key={d.label} value={d.index_name || d.label}>
+                  <option key={d.label} value={d.label}>
                     {d.label}{d.index_name ? ` · ${d.index_name}` : ''} ({d.change_pct > 0 ? '+' : ''}{d.change_pct.toFixed(1)}%)
                   </option>
                 ))}
@@ -254,7 +257,7 @@ export default function NegotiationPrepArea() {
                   >
                     <option value="">Attach a cost line…</option>
                     {prep.drivers.map(d => (
-                      <option key={d.label} value={d.index_name || d.label}>
+                      <option key={d.label} value={d.label}>
                         {d.label}{d.index_name ? ` · ${d.index_name}` : ''}
                       </option>
                     ))}
