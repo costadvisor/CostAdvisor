@@ -159,7 +159,7 @@ export default function Dashboard() {
           <button className={`ca-btn ${view === 'buy' ? 'ca-btn-primary' : 'ca-btn-ghost'}`} onClick={() => setView('buy')}>Buy Windows</button>
           <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => portfolio && exportCsv(
             'portfolio.csv',
-            ['Supplier', 'Product Family', 'Product Reference', 'Region', 'Currency', 'Should-Cost', 'Actual', 'Gap %', 'Exposure', 'Index Flag', 'Drift Flag'],
+            ['Supplier', 'Product', 'Product Reference', 'Region', 'Currency', 'Should-Cost', 'Actual', 'Gap %', 'Exposure', 'Index Flag', 'Drift Flag'],
             sortedModels.map(m => [m.supplier_name, m.product_name, m.product_reference, m.region, m.currency, m.current_should_cost, m.latest_actual_price, m.gap_pct, Math.abs(m.cumulative_impact || m.gap || 0), m.flag_index_moved, m.flag_price_drift])
           )}>Export CSV</button>
           <button className="ca-btn ca-btn-primary" onClick={() => navigate('/cost-models/new')}>+ New Model</button>
@@ -196,7 +196,7 @@ export default function Dashboard() {
                   <thead>
                     <tr>
                       <th>Supplier</th>
-                      <SortHeader label="Product Family" field="product" />
+                      <SortHeader label="Product" field="product" />
                       <th>Product Reference</th>
                       <th className="center">Producing Region</th>
                       <SortHeader label="Should-Cost" field="should_cost" />
