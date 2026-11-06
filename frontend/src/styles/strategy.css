@@ -143,8 +143,6 @@
   background: linear-gradient(to bottom, rgba(255,255,255,0), #fff 85%);
 }
 .st-clamp-foot { padding: 9px 16px 11px; border-top: 1px solid var(--border); text-align: center; }
-.st-caveat p { margin: 0; }
-.st-caveat-lines { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 8px; }
 
 /* Report HTML sits inside .report-wrap (report.css keeps its own light
    palette, as a delivered document). Give it the panel's padding and a

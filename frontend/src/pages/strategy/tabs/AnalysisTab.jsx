@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import {
-  Panel, KraljicBadge, EmptyState, ErrorState, LoadingPanel, useApi, fmt,
+  Panel, KraljicBadge, EmptyState, ErrorState, LoadingPanel, useApi,
 } from '../../../components/intel';
 import { KraljicMatrix } from '../../../components/charts';
 import AnalysisDemand from '../AnalysisDemand';
+import ReportCaveat from '../../../components/intel/report/ReportCaveat';
 import { wrapTables } from '../../../components/intel/report/reportUtil';
 import '../../../styles/report.css';
 
@@ -256,27 +256,12 @@ function AnalysisPanel({ name, panel, kraljic }) {
   );
 }
 
-function Caveat({ caveat, reportName, asOf }) {
+/* The caveat banner the line page shows, from this payload: its lines name
+   the line id `product_line_id`. */
+function Caveat({ caveat }) {
   if (!caveat) return null;
-  const lines = (caveat.lines || []).filter((l) => l.visible !== false);
-  return (
-    <div className="ix-callout warn st-caveat" role="note">
-      <div className="ix-callout-label">
-        Market report · {reportName || caveat.old_line_name} · written {fmt.month(caveat.as_of || asOf)}
-      </div>
-      <p>{caveat.text}</p>
-      {lines.length > 0 && (
-        <div className="st-caveat-lines">
-          <span className="ix-muted ix-small">Current product lines:</span>
-          {lines.map((l) => (
-            <Link key={l.line_key} className="ix-tag plain" to={`/intelligence/lines/${encodeURIComponent(l.line_key)}`}>
-              {l.name}
-            </Link>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  const lines = (caveat.lines || []).map((l) => ({ ...l, id: l.product_line_id ?? l.id ?? null }));
+  return <ReportCaveat caveat={{ ...caveat, lines }} className="st-caveat" />;
 }
 
 function Contents({ order }) {
@@ -395,7 +380,7 @@ export default function AnalysisTab({ slug, teamId, category }) {
 
   return (
     <div className="st-analysis">
-      <Caveat caveat={data.caveat} reportName={data.report_name} asOf={data.as_of} />
+      <Caveat caveat={data.caveat} />
       <div className="ix-two-col">
         <div className="ix-col">
           {order.map((k) => (

@@ -874,7 +874,9 @@ def report_caveat(db: Session, report: MarketReport) -> dict:
         from app.services.intel_reference import caveat_for, get_snapshot
         caveat = caveat_for(get_snapshot(db), report.slug)
         if not _mentions(caveat.get("lines"), hidden):
-            return caveat
+            # caveat_for calls the line id `id`; this payload `product_line_id`.
+            return {**caveat, "lines": [{**ln, "product_line_id": ln.get("id")}
+                                        for ln in caveat.get("lines") or []]}
         logger.warning("intel_reference.caveat_for names an unpublished line for %s; "
                        "local caveat used", report.slug)
     except Exception:  # noqa: BLE001 — the tab must still render its caveat
