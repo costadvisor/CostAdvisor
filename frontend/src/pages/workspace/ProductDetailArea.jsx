@@ -136,9 +136,27 @@ export default function ProductDetailArea() {
       named_place: fv.named_place || null,
       landed_cost_adjustments: fv.landed_cost_adjustments || null,
       notes: fv.notes || null,
+      // The catalogue link and each line's provenance go back as they came, as
+      // the builder sends them: leaving them out unlinked a tracking model (its
+      // live should-cost moved) and dropped nested cost-model lines.
+      source_coverage_id: fv.source_coverage_id || null,
+      link_mode: fv.source_coverage_id ? (fv.link_mode || 'pinned') : null,
       ...(fv.formula_type === 'advanced'
         ? { expression: fv.expression, variables: fv.variables }
-        : { components: (fv.components || []).map(c => ({ label: c.label, commodity_name: c.commodity_name || null, weight: c.weight })) }),
+        : {
+            components: (fv.components || []).map(c => ({
+              label: c.label,
+              commodity_name: c.commodity_name || null,
+              commodity_id: c.commodity_id ?? null,
+              weight: c.weight,
+              component_type: c.component_type ?? null,
+              depth: c.depth ?? null,
+              via_template_id: c.via_template_id ?? null,
+              line_region: c.line_region ?? null,
+              is_proxy: c.is_proxy ?? null,
+              child_cost_model_id: c.child_cost_model_id ?? null,
+            })),
+          }),
     };
     setSaving(true);
     try {
