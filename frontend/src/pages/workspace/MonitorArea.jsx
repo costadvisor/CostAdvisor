@@ -393,7 +393,9 @@ export default function MonitorArea() {
                                     <button className="ca-btn ca-btn-primary ca-btn-sm" onClick={() => navigate('/cost-models/new', { state: { productId: r.productId } })}>Complete formula</button>
                                   ) : (
                                     <>
-                                      <button className={`ca-btn ca-btn-sm ${r.status === 'alert' || r.status === 'watch' ? 'ca-btn-primary' : 'ca-btn-ghost'}`} onClick={() => navigate(`/cost-models/${r.costModelId}/brief`)}>Brief</button>
+                                      {/* The Negotiate brief, which links on to prep: the
+                                          legacy /cost-models/:id/brief left the journey. */}
+                                      <button className={`ca-btn ca-btn-sm ${r.status === 'alert' || r.status === 'watch' ? 'ca-btn-primary' : 'ca-btn-ghost'}`} onClick={() => navigate(`/negotiate/${r.costModelId}`)}>Brief</button>
                                       <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => navigate(`/cost-models/${r.costModelId}/evolution`)}>Evolution</button>
                                       <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => navigate(`/cost-models/${r.costModelId}`)}>View</button>
                                     </>
