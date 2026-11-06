@@ -35,11 +35,13 @@ const slug = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(
 
 function Ladder({ ladder }) {
   const { currency: cur, unit, floor, should_cost: target, current_price: ask } = ladder;
-  const lo = Math.min(...[floor, target, ask].filter(v => v != null));
-  const hi = Math.max(...[floor, target, ask].filter(v => v != null));
-  const span = hi - lo || 1;
+  // Bars from zero, so their lengths compare like the prices do. Scaled
+  // between the lowest and highest figure, the floor always drew at 2% and
+  // the ask at 100%, whatever the gap.
+  const hi = Math.max(...[floor, target, ask].filter(v => v != null)) || 1;
   const rows = [
-    ['Their price', ask, 'var(--accent2)'],
+    // Red only when they ask more than the target.
+    ['Their price', ask, ask != null && ask > target ? 'var(--accent2)' : 'var(--text-secondary)'],
     ['Your target — should-cost', target, 'var(--accent)'],
     ['Floor — indexed cost before margin', floor, 'var(--accent4)'],
   ];
@@ -53,7 +55,7 @@ function Ladder({ ladder }) {
           </div>
           <div style={{ background: 'var(--surface2)', height: 6, borderRadius: 3 }}>
             <div style={{
-              width: value == null ? 0 : `${Math.max(2, ((value - lo) / span) * 100)}%`,
+              width: value == null ? 0 : `${Math.max(2, (value / hi) * 100)}%`,
               background: color, height: '100%', borderRadius: 3,
             }} />
           </div>
