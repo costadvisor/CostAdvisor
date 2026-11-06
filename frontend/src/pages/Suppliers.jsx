@@ -318,8 +318,10 @@ function trustGrainLabel(s) {
 }
 
 function TrustGradeBadge({ summary }) {
-  if (!summary) {
-    return <span style={{ fontSize: 11, color: 'var(--muted)' }}>Not computed</span>;
+  // No stored score rows means the scores were never computed, not that the
+  // data is short: every supplier read "Insufficient data" on a fresh team.
+  if (!summary || !summary.scores?.length) {
+    return <span style={{ fontSize: 11, color: 'var(--muted)' }} title="Run 'Compute trust scores' above">Not computed</span>;
   }
   if (summary.insufficient_data || summary.overall_grade == null) {
     return <span style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>Insufficient data</span>;
