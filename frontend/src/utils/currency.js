@@ -65,4 +65,8 @@ export const fmtNumber = (v, { decimals } = {}) => {
 // record. A brief's "Total financial impact" (POST /api/costing/brief) sums each
 // quarter's own gap × that quarter's volume over the brief's period instead, so
 // the two figures differ for the same cost model.
-export const EXPOSURE_NOTE = "Exposure = today's gap per unit (latest actual price − today's should-cost) × all volume on record for the cost model; the per-unit gap when no volume is on record. A negotiation brief's total financial impact is a different figure: each quarter's own gap × that quarter's volume, summed over the brief's period.";
+export const EXPOSURE_NOTE = "Exposure = today's gap per unit (latest actual price − today's should-cost) × all volume on record for the cost model; the per-unit gap when no volume is on record. Only overpaying counts: a product bought under should-cost has no exposure. A negotiation brief's total financial impact is a different figure: each quarter's own gap × that quarter's volume, summed over the brief's period.";
+
+// One summary row's exposure, as the server totals it: money overpaid, never
+// a saving (Math.abs counted underpaying rows as money at stake).
+export const rowExposure = (s) => (s ? Math.max(0, s.cumulative_impact ?? s.gap ?? 0) : 0);

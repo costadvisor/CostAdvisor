@@ -116,6 +116,22 @@ export function MultiLineChart({
   );
 }
 
+/* ── Gap status — one vocabulary for Monitor and Negotiate ──────────── */
+/* From GET /api/portfolio/summary's flags. Both lists used to name the same
+ * state differently ("Alert" here, "Above should-cost" there). */
+export const GAP_STATUS = {
+  alert: { label: 'Above should-cost', color: 'var(--accent2)', bg: 'var(--danger-bg)', rank: 0 },
+  watch: { label: 'Index moved', color: 'var(--accent3)', bg: 'var(--warn-bg)', rank: 1 },
+  below: { label: 'Below should-cost', color: 'var(--accent)', bg: 'var(--success-bg)', rank: 2 },
+  ok: { label: 'On track', color: 'var(--accent)', bg: 'var(--success-bg)', rank: 3 },
+  draft: { label: 'Formula draft', color: 'var(--muted)', bg: 'var(--neutral-bg)', rank: 4 },
+};
+// No summary row = no completed formula yet.
+export const gapStatus = (s) => (!s ? 'draft'
+  : s.flag_price_drift ? 'alert'
+    : s.flag_below_should_cost ? 'below'
+      : s.flag_index_moved ? 'watch' : 'ok');
+
 /* ── DriftBar — small horizontal magnitude bar ──────────────────────── */
 export function DriftBar({ value = 0, max = 100, color = 'var(--accent2)', width = 90 }) {
   const pct = Math.max(0, Math.min(100, (Math.abs(value) / (max || 1)) * 100));

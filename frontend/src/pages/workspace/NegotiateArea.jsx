@@ -2,9 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
-import { DriftBar } from './wsCharts';
+import { DriftBar, GAP_STATUS as STATUS, gapStatus } from './wsCharts';
 import DemoDataNote from '../../components/DemoDataNote';
-import { dominantCurrency, fmtMoney, fmtSignedMoney, EXPOSURE_NOTE } from '../../utils/currency';
+import { dominantCurrency, fmtMoney, fmtSignedMoney, EXPOSURE_NOTE, rowExposure } from '../../utils/currency';
 
 /* ──────────────────────────────────────────────────────────────────────
  * Negotiate — landing lets a buyer pick which product to prep a call for,
@@ -19,13 +19,6 @@ import { dominantCurrency, fmtMoney, fmtSignedMoney, EXPOSURE_NOTE } from '../..
  * "new negotiation smarts" depth is explicitly Wave 3 — removed in favour
  * of the real flow.
  * ──────────────────────────────────────────────────────────────────── */
-
-const STATUS = {
-  alert: { label: 'Above should-cost', color: 'var(--accent2)', bg: 'var(--danger-bg)', rank: 0 },
-  watch: { label: 'Index moved', color: 'var(--accent3)', bg: 'var(--warn-bg)', rank: 1 },
-  ok: { label: 'On track', color: 'var(--accent)', bg: 'var(--success-bg)', rank: 2 },
-  draft: { label: 'Formula draft', color: 'var(--muted)', bg: 'var(--neutral-bg)', rank: 3 },
-};
 
 export default function NegotiateArea() {
   const { activeTeamId } = useAuth();
@@ -79,10 +72,8 @@ export default function NegotiateArea() {
   const rows = useMemo(() => {
     const cmRows = costModels.map(cm => {
       const s = summaryByModel[cm.id];
-      const status = !s ? 'draft'
-        : s.flag_price_drift ? 'alert'
-          : s.flag_index_moved ? 'watch' : 'ok';
-      const exposure = s ? Math.abs(s.cumulative_impact ?? s.gap ?? 0) : 0;
+      const status = gapStatus(s);
+      const exposure = rowExposure(s);
       return {
         kind: 'cm', costModelId: cm.id, productId: cm.product_id,
         name: cm.product_name || 'Unnamed product',
@@ -112,6 +103,7 @@ export default function NegotiateArea() {
 
   const maxAbsGap = Math.max(25, ...rows.map(r => Math.abs(r.gapPct || 0)));
   const negotiable = rows.filter(r => r.kind === 'cm');
+  const liveCount = negotiable.filter(r => r.status !== 'draft').length;
   // The server's total converts each model's exposure into the reporting
   // currency (the same figure Monitor shows); the row sum is the fallback.
   const totalExposure = summary?.kpis?.total_exposure ?? rows.reduce((s, r) => s + (r.exposure || 0), 0);
@@ -137,9 +129,11 @@ export default function NegotiateArea() {
       ) : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, margin: '14px 0' }}>
+            {/* Counted as Monitor and Forecast count: products, then cost models. */}
             <div className="ca-metric">
-              <div className="ca-metric-lbl">Ready to negotiate</div>
-              <div className="ca-metric-val">{negotiable.length} / {rows.length}</div>
+              <div className="ca-metric-lbl">Products in portfolio</div>
+              <div className="ca-metric-val">{products.length}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{liveCount} of {negotiable.length} cost models ready to negotiate</div>
             </div>
             <div className="ca-metric" title={EXPOSURE_NOTE}>
               <div className="ca-metric-lbl">Total exposure</div>

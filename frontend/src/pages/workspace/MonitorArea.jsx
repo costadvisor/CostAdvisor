@@ -3,10 +3,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import exportCsv from '../../utils/exportCsv';
-import { DriftBar } from './wsCharts';
+import { DriftBar, GAP_STATUS as STATUS, gapStatus } from './wsCharts';
 import RadarView from '../../components/RadarView';
 import DemoDataNote from '../../components/DemoDataNote';
-import { fmtMoney, fmtSignedMoney, EXPOSURE_NOTE } from '../../utils/currency';
+import { fmtMoney, fmtSignedMoney, EXPOSURE_NOTE, rowExposure } from '../../utils/currency';
 
 /* Monitor — the standing question of the job: across everything I buy, where am
  * I overpaying right now, before I walk into a negotiation. Rebuilt to the new IA
@@ -20,21 +20,11 @@ import { fmtMoney, fmtSignedMoney, EXPOSURE_NOTE } from '../../utils/currency';
  * priority matrix / alerts that turn "here's a gap" into "fix this one first"
  * are deliberately Wave 3, not built here. */
 
-// Status is derived on the frontend from the endpoint's existing flags + whether
-// a product has a completed formula — no new backend logic.
-const STATUS = {
-  alert: { label: 'Alert', color: 'var(--accent2)', bg: 'var(--danger-bg)', rank: 0 },
-  watch: { label: 'Watch', color: 'var(--accent3)', bg: 'var(--warn-bg)', rank: 1 },
-  ok: { label: 'On track', color: 'var(--accent)', bg: 'var(--success-bg)', rank: 2 },
-  draft: { label: 'Formula draft', color: 'var(--muted)', bg: 'var(--neutral-bg)', rank: 3 },
-};
-
+// Status comes from the summary's flags (GAP_STATUS in wsCharts, shared with
+// Negotiate) + whether a product has a completed formula.
 const STATUS_FILTERS = [
   { key: 'all', label: 'All products' },
-  { key: 'alert', label: 'Alerts only' },
-  { key: 'watch', label: 'Watch' },
-  { key: 'ok', label: 'On track' },
-  { key: 'draft', label: 'Formula draft' },
+  ...['alert', 'watch', 'below', 'ok', 'draft'].map(key => ({ key, label: STATUS[key].label })),
 ];
 
 function Badge({ color, bg, children, title }) {
@@ -118,10 +108,8 @@ export default function MonitorArea() {
       const s = summaryByModel[cm.id];
       const fam = productById[cm.product_id]?.family || null;
       // A cost model with no completed formula still reads as a draft.
-      const status = !s ? 'draft'
-        : s.flag_price_drift ? 'alert'
-          : s.flag_index_moved ? 'watch' : 'ok';
-      const exposure = s ? Math.abs(s.cumulative_impact ?? s.gap ?? 0) : 0;
+      const status = gapStatus(s);
+      const exposure = rowExposure(s);
       return {
         kind: 'cm', key: cm.id, costModelId: cm.id, productId: cm.product_id,
         ref: cm.product_reference || null,
@@ -200,12 +188,12 @@ export default function MonitorArea() {
   const stats = [
     { lbl: 'Products in portfolio', val: totalProducts, sub: `${completeCount} active cost model${completeCount === 1 ? '' : 's'} · ${draftCount} formula incomplete` },
     { lbl: 'Should-costs live', val: `${liveProducts} / ${totalProducts}`, color: 'var(--accent)', sub: draftCount ? `${draftCount} awaiting formula completion` : 'all products modelled' },
-    { lbl: 'Estimated drift', val: fmtMoney(kpis?.total_exposure || 0, reportCur, { decimals: 0 }), color: (kpis?.total_exposure || 0) > 0 ? 'var(--accent2)' : undefined, sub: `sum of exposures: today's gap × all volume on record, in ${reportCur}`, title: EXPOSURE_NOTE },
+    { lbl: 'Total exposure', val: fmtMoney(kpis?.total_exposure || 0, reportCur, { decimals: 0 }), color: (kpis?.total_exposure || 0) > 0 ? 'var(--accent2)' : undefined, sub: `sum of exposures: today's gap × all volume on record, in ${reportCur}`, title: EXPOSURE_NOTE },
     { lbl: 'Awaiting invoice', val: awaitingInvoice, sub: awaitingInvoice ? 'price not yet received this period' : 'all invoices in' },
   ];
 
   const filterBtn = (active) => (active ? 'ca-btn ca-btn-primary ca-btn-sm' : 'ca-btn ca-btn-ghost ca-btn-sm');
-  const groupBadges = (counts) => ['alert', 'watch', 'ok', 'draft']
+  const groupBadges = (counts) => ['alert', 'watch', 'below', 'ok', 'draft']
     .filter(k => counts[k])
     .map(k => <Badge key={k} color={STATUS[k].color} bg={STATUS[k].bg}>{counts[k]} {STATUS[k].label.toLowerCase()}</Badge>);
 

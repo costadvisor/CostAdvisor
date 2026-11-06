@@ -4,7 +4,7 @@ import { useAuth } from '../../AuthContext';
 import { useToast } from '../../components/Toast';
 import { qLabel } from '../../utils/quarters';
 import exportCsv from '../../utils/exportCsv';
-import { fmtMoney, fmtNumber, EXPOSURE_NOTE } from '../../utils/currency';
+import { dominantCurrency, fmtMoney, fmtNumber, EXPOSURE_NOTE } from '../../utils/currency';
 import DemoDataNote from '../../components/DemoDataNote';
 import { MultiLineChart } from './wsCharts';
 
@@ -68,6 +68,9 @@ export default function ForecastArea() {
   const { activeTeamId, user } = useAuth();
   const { addToast } = useToast();
   const [models, setModels] = useState([]);
+  const [kpis, setKpis] = useState(null);
+  const [reportCur, setReportCur] = useState('USD');
+  const [productCount, setProductCount] = useState(0);
   const [indices, setIndices] = useState([]);
   const [projections, setProjections] = useState({}); // commodity_name -> run | null
   const [selected, setSelected] = useState(null);
@@ -79,13 +82,20 @@ export default function ForecastArea() {
     if (!activeTeamId) return;
     setLoading(true); setError(null);
     Promise.all([
-      api.get('/api/portfolio/summary', { params: { team_id: activeTeamId } }),
       api.get('/api/cost-models/', { params: { team_id: activeTeamId } }),
       // Commodity ids (the projection endpoint is keyed on them) and units.
       api.get('/api/indexes'),
     ])
-      .then(async ([sum, cmRes, all]) => {
+      .then(async ([cmRes, all]) => {
+        // The summary in the team's dominant currency, as Monitor and Negotiate
+        // ask for it, so the exposure KPI is the same FX-converted server total.
+        const reporting = dominantCurrency(cmRes.data) || 'USD';
+        const sum = await api.get('/api/portfolio/summary',
+          { params: { team_id: activeTeamId, reporting_currency: reporting } });
         setModels(sum.data.models || []);
+        setKpis(sum.data.kpis || null);
+        setReportCur(reporting);
+        setProductCount(new Set((cmRes.data || []).map(cm => cm.product_id)).size);
         // The indices under this team's own recipes (each cost model's current
         // formula version, formula_versions[0]), the ones driving most products
         // first. The landing page's headline list had none of them.
@@ -206,19 +216,17 @@ export default function ForecastArea() {
   const flagged = models.filter(m => m.flag_price_drift || m.flag_index_moved).length;
   const gaps = models.map(m => m.gap_pct).filter(v => v != null);
   const avgGap = gaps.length ? gaps.reduce((a, b) => a + Math.abs(b), 0) / gaps.length : null;
-  const totalExposure = models.reduce((a, m) => a + Math.abs(m.cumulative_impact || 0), 0);
-  // The sum is not FX-converted, so it only carries a symbol when every model
-  // is priced in one currency.
-  const currencies = [...new Set(models.map(m => m.currency).filter(Boolean))];
-  const exposureLabel = !totalExposure ? '—'
-    : currencies.length === 1 ? fmtMoney(totalExposure, currencies[0], { decimals: 0 })
-      : fmtMoney(totalExposure, null, { decimals: 0 });
+  // The server's total (FX-converted, overpaying only), the figure Monitor and
+  // Negotiate show; a client-side sum mixed currencies and counted savings.
+  const totalExposure = kpis?.total_exposure ?? 0;
+  const exposureLabel = fmtMoney(totalExposure, reportCur, { decimals: 0 });
   const stats = [
-    { lbl: 'Products tracked', val: String(models.length), color: 'var(--text)' },
+    { lbl: 'Products in portfolio', val: String(productCount), color: 'var(--text)',
+      sub: `${models.length} active cost model${models.length === 1 ? '' : 's'}` },
     { lbl: 'Flagged (drift / index)', val: String(flagged), color: flagged ? 'var(--accent3)' : 'var(--text)' },
     { lbl: 'Avg |gap|', val: avgGap != null ? `${avgGap.toFixed(1)}%` : '—', color: 'var(--accent)' },
-    { lbl: currencies.length > 1 ? 'Total exposure (mixed currencies)' : 'Total exposure', val: exposureLabel, color: 'var(--accent2)',
-      sub: "Sum over cost models of today's gap × all volume on record", title: EXPOSURE_NOTE },
+    { lbl: 'Total exposure', val: exposureLabel, color: totalExposure > 0 ? 'var(--accent2)' : 'var(--text)',
+      sub: `Sum of today's gap × all volume on record, in ${reportCur}`, title: EXPOSURE_NOTE },
   ];
 
   const doExport = () => exportCsv(
