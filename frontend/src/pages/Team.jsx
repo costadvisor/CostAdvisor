@@ -8,10 +8,12 @@ import ProviderCredentialsSection from '../components/ProviderCredentialsSection
 
 export default function Team() {
   const { pendingInviteCount } = useAuth();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const VALID_TABS = ['teams', 'requests', 'activity', 'settings'];
-  const initialTab = VALID_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'teams';
-  const [tab, setTab] = useState(initialTab);
+  // The tab lives in the URL, so Back returns to the previous tab and a reload
+  // or a shared link keeps it. The default tab keeps the URL bare.
+  const tab = VALID_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'teams';
+  const setTab = (t) => setSearchParams(t === 'teams' ? {} : { tab: t });
 
   const TAB_LABELS = {
     teams: 'Teams',

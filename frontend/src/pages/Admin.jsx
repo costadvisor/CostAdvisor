@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef, Fragment, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { useConfirm, useAlert } from '../components/ConfirmDialog';
 import Tooltip from '../components/Tooltip';
 import { invalidateRegions } from '../components/RegionSelect';
 import SupportAdminTab from '../components/SupportAdminTab';
+
+const ADMIN_TABS = ['users', 'teams', 'audit', 'requests', 'regions', 'support', 'settings'];
 
 export default function Admin() {
   const { user, refreshUser } = useAuth();
@@ -19,7 +22,11 @@ export default function Admin() {
   const [demoRequests, setDemoRequests] = useState([]);
   const [regions, setRegions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState('users');
+  // The tab lives in the URL (as on the Team page), so Back returns to the
+  // previous tab and Admin > Requests can be linked to.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = ADMIN_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'users';
+  const setTab = (t) => setSearchParams(t === 'users' ? {} : { tab: t });
   const [impersonating, setImpersonating] = useState(false);
   const [search, setSearch] = useState('');
   const [showDeleted, setShowDeleted] = useState(false);
