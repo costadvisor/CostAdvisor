@@ -190,8 +190,8 @@ export default function NegotiateArea() {
                         <td>
                           <div style={{ fontWeight: 600, color: r.kind === 'draft' ? 'var(--text-secondary)' : 'var(--text)' }}>{r.name}</div>
                           <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                                  {r.supplier || 'No supplier'}{r.destination ? ` → ${r.destination}` : r.region ? ` · ${r.region}` : ''}{r.incoterm ? ` · ${r.incoterm}` : ''}
-                                </div>
+                            {r.supplier || 'No supplier'}{r.destination ? ` → ${r.destination}` : r.region ? ` · ${r.region}` : ''}{r.incoterm ? ` · ${r.incoterm}` : ''}
+                          </div>
                         </td>
                         <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.shouldCost != null ? 'var(--accent)' : 'var(--muted)' }}>
                           {r.shouldCost != null ? fmtMoney(r.shouldCost, r.currency) : '—'}

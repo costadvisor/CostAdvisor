@@ -231,9 +231,9 @@ export default function ForecastArea() {
 
   const doExport = () => exportCsv(
     'forecast-portfolio.csv',
-    ['Reference', 'Product', 'Supplier', 'Region', 'Should-cost', 'Actual price', 'Gap %'],
+    ['Reference', 'Product', 'Supplier', 'Region', 'Destination', 'Should-cost', 'Actual price', 'Gap %'],
     models.map(m => [
-      m.product_reference || '', m.product_name, m.supplier_name || '', m.region,
+      m.product_reference || '', m.product_name, m.supplier_name || '', m.region, m.destination_country || '',
       m.current_should_cost, m.latest_actual_price ?? '', m.gap_pct ?? '',
     ]),
   );
@@ -425,7 +425,7 @@ export default function ForecastArea() {
               <caption className="ca-sr-only">Current should-cost against the latest actual price, per product.</caption>
               <thead>
                 <tr>
-                  <th scope="col">Ref</th><th scope="col">Product</th><th scope="col">Supplier</th><th scope="col">Region</th>
+                  <th scope="col">Ref</th><th scope="col">Product</th><th scope="col">Supplier</th><th scope="col">Destination</th>
                   <th scope="col" className="right">Should-cost</th><th scope="col" className="right">Actual</th><th scope="col" className="right">Gap %</th>
                 </tr>
               </thead>
@@ -435,7 +435,9 @@ export default function ForecastArea() {
                     <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{m.product_reference}</td>
                     <td style={{ fontWeight: 600 }}>{m.product_name}</td>
                     <td>{m.supplier_name || '—'}</td>
-                    <td>{m.region}</td>
+                    {/* Two cost models for one product and supplier differ by destination;
+                        the region alone ("Europe") read the same on both rows. */}
+                    <td>{m.destination_country || m.region}</td>
                     <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{m.current_should_cost != null ? fmtMoney(m.current_should_cost, m.currency) : '—'}</td>
                     <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{m.latest_actual_price != null ? fmtMoney(m.latest_actual_price, m.currency) : '—'}</td>
                     <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace", color: m.gap_pct == null ? 'var(--muted)' : m.gap_pct > 0 ? 'var(--accent2)' : 'var(--accent)' }}>{m.gap_pct != null ? `${m.gap_pct > 0 ? '+' : ''}${m.gap_pct.toFixed(1)}%` : '—'}</td>
