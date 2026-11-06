@@ -45,7 +45,10 @@ export default function CostModelBuilder() {
   const [productId, setProductId] = useState('');
   const [productName, setProductName] = useState('');
   const [formula, setFormula] = useState('');
-  const [activeContent, setActiveContent] = useState(0.65);
+  // The builder has no active-content field: keep the product's own value, or
+  // none (the engine reads that as 100%). A 0.65 default used to be written
+  // onto every product saved from here, which moved its "per active" price.
+  const [activeContent, setActiveContent] = useState(null);
   const [unit, setUnit] = useState('kg');
 
   // Cost model fields
@@ -138,7 +141,7 @@ export default function CostModelBuilder() {
     setProductName(p.name);
     setFormula(p.formula || '');
     setUnit(p.unit || 'kg');
-    setActiveContent(p.active_content ?? 0.65);
+    setActiveContent(p.active_content ?? null);
     // A catalog-linked product auto-loads its recipe at this model's region
     // (Scrum 58: "creating a product auto-loads the template by formula × region").
     if (p.formula_template_id && formulaTemplates.length && !autoLoadedTemplateRef.current) {
@@ -179,7 +182,7 @@ export default function CostModelBuilder() {
         setProductName(data.product_name || '');
         setFormula(data.product_reference || '');
         setUnit(data.product_unit || 'kg');
-        setActiveContent(data.product_active_content ?? 0.65);
+        setActiveContent(data.product_active_content ?? null);
         setSupplierId(data.supplier_id || '');
         setDestinationCountry(data.destination_country || '');
         setDestinationRegion(data.destination_region || '');
