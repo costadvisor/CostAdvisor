@@ -1,9 +1,51 @@
-import { useCallback } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import {
+  useCallback, useEffect, useLayoutEffect, useRef,
+} from 'react';
+import {
+  Link, useNavigationType, useSearchParams,
+} from 'react-router-dom';
 import { EmptyState, ErrorState, LoadingPanel, useApi } from '../../../components/intel';
 import ReportView from '../../../components/intel/report/ReportView';
 import ReportCaveat from '../../../components/intel/report/ReportCaveat';
 import { playbookHref } from './lineUtil';
+
+/* Coming back to the Report tab (from another tab, or Back) lands where the
+ * reader was: the tab unmounts when it is left, so the window offset would be
+ * lost. Kept per line and report for the session; opening the line afresh
+ * starts at the top. Saved from the last scroll event, and only after a real
+ * one, so StrictMode's rehearsal unmount saves nothing. */
+function useReadingPlace(storeKey, ready) {
+  const navType = useNavigationType();
+  const lastY = useRef(0);
+  const restored = useRef(false);
+
+  useEffect(() => {
+    if (navType !== 'PUSH') return;
+    try { sessionStorage.removeItem(storeKey); } catch { /* storage off */ }
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useLayoutEffect(() => {
+    let scrolled = false;
+    const onScroll = () => { scrolled = true; lastY.current = window.scrollY; };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (!scrolled) return;
+      try { sessionStorage.setItem(storeKey, String(Math.round(lastY.current))); } catch { /* storage off */ }
+    };
+  }, [storeKey]);
+
+  useEffect(() => {
+    if (!ready || restored.current) return;
+    restored.current = true;
+    if (navType === 'PUSH') return;
+    let y = 0;
+    try { y = Number(sessionStorage.getItem(storeKey)) || 0; } catch { y = 0; }
+    if (y > 0) requestAnimationFrame(() => window.scrollTo(0, y));
+  }, [ready, navType, storeKey]);
+}
 
 /* Line detail › Report: the delivered market report(s) serving this line.
  * Several reports can serve one line (the line ↔ report link is
@@ -18,6 +60,7 @@ export default function ReportTab({ line }) {
   const { data: report, error, loading, reload } = useApi(
     current ? `/api/intel/reports/${encodeURIComponent(current.slug)}` : null,
   );
+  useReadingPlace(`ixl-report-y:${line.id}:${current?.slug || ''}`, !!report && !loading);
 
   const pick = useCallback((slug) => {
     setParams((prev) => {
