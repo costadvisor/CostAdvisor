@@ -52,9 +52,15 @@ export default function ProductDetailArea() {
   const [spPeriod, setSpPeriod] = useState('');          // "year-quarter"
   const [saving, setSaving] = useState(false);
 
-  const loadSc = () => {
+  // "Today" is the model's latest quarter with data, the quarter Portfolio,
+  // Monitor and the brief price at. The calendar quarter only carries the last
+  // month forward, so this page read €292 "as of Q4 2026" beside their €291.
+  const asOf = (m) => (m?.as_of_year ? { y: m.as_of_year, q: m.as_of_quarter } : { y: CUR_Y, q: CUR_Q });
+
+  const loadSc = (m) => {
+    const { y, q } = asOf(m);
     setSc({ status: 'loading' });
-    api.post('/api/costing/should-cost', { cost_model_id: costModelId, target_year: CUR_Y, target_quarter: CUR_Q })
+    api.post('/api/costing/should-cost', { cost_model_id: costModelId, target_year: y, target_quarter: q })
       .then(({ data }) => setSc({ status: 'ok', ...data }))
       .catch(err => setSc({ status: 'err', msg: formatApiError(err) }));
   };
@@ -63,7 +69,7 @@ export default function ProductDetailArea() {
     setLoading(true);
     setError(null);
     api.get(`/api/cost-models/${costModelId}`)
-      .then(({ data }) => setCm(data))
+      .then(({ data }) => { setCm(data); loadSc(data); })
       .catch(err => setError(formatApiError(err)))
       .finally(() => setLoading(false));
   };
@@ -83,14 +89,14 @@ export default function ProductDetailArea() {
       .catch(() => setLockHold(null));
   };
 
-  useEffect(() => { loadCm(); loadSc(); loadBuy(); loadLockHold(); /* eslint-disable-next-line */ }, [costModelId]);
+  useEffect(() => { loadCm(); loadBuy(); loadLockHold(); /* eslint-disable-next-line */ }, [costModelId]);
 
   // Scrum 17 — should-cost breakdown, fetched lazily on first expand.
   const toggleBreakdown = () => {
     const next = !showBreakdown;
     setShowBreakdown(next);
     if (next && !breakdown && !breakdownErr) {
-      api.post('/api/costing/should-cost/breakdown', { cost_model_id: costModelId, target_year: CUR_Y, target_quarter: CUR_Q })
+      api.post('/api/costing/should-cost/breakdown', { cost_model_id: costModelId, target_year: asOf(cm).y, target_quarter: asOf(cm).q })
         .then(({ data }) => setBreakdown(data))
         .catch(err => setBreakdownErr(formatApiError(err)));
     }
@@ -162,8 +168,8 @@ export default function ProductDetailArea() {
     try {
       await api.post(`/api/cost-models/${costModelId}/renegotiate`, payload);
       setEditing(false);
+      setBreakdown(null);
       loadCm();
-      loadSc();
     } catch (err) {
       showAlert({ title: 'Could not save', message: formatApiError(err) });
     } finally {
@@ -241,7 +247,7 @@ export default function ProductDetailArea() {
       {/* Live should-cost + starting point */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, margin: '16px 0' }}>
         <div className="ca-result">
-          <div className="ca-result-label">Live should-cost · as of Q{CUR_Q} {CUR_Y}</div>
+          <div className="ca-result-label">Live should-cost · as of Q{asOf(cm).q} {asOf(cm).y}</div>
           {sc.status === 'loading' ? (
             <div className="ca-result-big" style={{ color: 'var(--muted)' }}>…</div>
           ) : sc.status === 'err' ? (
@@ -325,7 +331,7 @@ export default function ProductDetailArea() {
           card wrapped every component name over four or five lines. */}
       {showBreakdown && sc.status === 'ok' && (
         <div style={{ marginBottom: 16 }}>
-          <ShouldCostBreakdownTable breakdown={breakdown} error={breakdownErr} sym={sym} asOf={`Q${CUR_Q} ${CUR_Y}`} />
+          <ShouldCostBreakdownTable breakdown={breakdown} error={breakdownErr} sym={sym} asOf={`Q${asOf(cm).q} ${asOf(cm).y}`} />
         </div>
       )}
 

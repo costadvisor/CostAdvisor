@@ -141,6 +141,12 @@ export default function Evolution() {
   const gapComponents = data_gaps?.length
     ? [...new Set(data_gaps.map(g => g.component_label))]
     : [];
+  // ...and the quarters they fall in, in chart order: a range picked before the
+  // index history starts is not a library problem to "configure".
+  const gapPeriods = periodLabels.filter(l => data_gaps?.some(g => g.period === l));
+  const gapPeriodText = gapPeriods.length > 2
+    ? `${gapPeriods[0]} to ${gapPeriods[gapPeriods.length - 1]} (${gapPeriods.length} quarters)`
+    : gapPeriods.join(', ');
   const sym = curSym(currency);
 
   // Quarter picker options bounded by available index data
@@ -182,8 +188,9 @@ export default function Evolution() {
       )}
       {gapComponents.length > 0 && (
         <div style={{ background: 'var(--warn-bg)', border: '1px solid var(--accent3)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--accent3)' }}>
-          Missing index data for: <strong>{gapComponents.join(', ')}</strong>. Those components use their base-period value as a fallback.{' '}
-          <button className="ca-btn-link" onClick={() => navigate('/index-library')}>Configure in Index Library →</button>
+          No index data{gapPeriodText ? ` in ${gapPeriodText}` : ''} for: <strong>{gapComponents.join(', ')}</strong>. Those quarters use the base-period value as a fallback
+          {gapPeriods.length > 0 && gapPeriods.length < periods.length ? ' — pick a later start to leave them out.' : '.'}{' '}
+          <button className="ca-btn-link" onClick={() => navigate('/index-library')}>Index Library →</button>
         </div>
       )}
       <p className="ca-subtitle">
@@ -259,6 +266,11 @@ export default function Evolution() {
             </div>
           )}
         </div>
+        {periods.length < 2 && (
+          <div style={{ fontSize: 12, color: 'var(--muted)', padding: '24px 0', textAlign: 'center' }}>
+            {periods.length === 1 ? `Only ${periods[0].period} is in range` : 'No quarter is in range'} — the chart needs two quarters. Widen the range above.
+          </div>
+        )}
         <div className="ca-scroll-x">
           <EvoChart
             periods={periodLabels}

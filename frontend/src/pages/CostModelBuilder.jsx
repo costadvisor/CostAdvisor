@@ -61,6 +61,7 @@ export default function CostModelBuilder() {
   const [destinationRegion, setDestinationRegion] = useState('');
   const [region, setRegion] = useState('Europe');
   const [currency, setCurrency] = useState('EUR');
+  const [asOf, setAsOf] = useState(null);   // the model's latest quarter with data
   const [incoterm, setIncoterm] = useState('');
 
   // Formula version fields
@@ -191,6 +192,7 @@ export default function CostModelBuilder() {
         setDestinationRegion(data.destination_region || '');
         setRegion(data.region);
         setCurrency(data.currency);
+        setAsOf(data.as_of_year ? { year: data.as_of_year, quarter: data.as_of_quarter } : null);
         setIncoterm(data.incoterm || '');
 
         const currentFv = data.formula_versions?.[0];
@@ -249,14 +251,15 @@ export default function CostModelBuilder() {
 
   // The live should-cost of a saved model, as Portfolio and the product page
   // show it. This page's big figure is the base price, never an estimate.
+  // Priced at the model's latest quarter with data (as_of), as every list is.
   const [liveSc, setLiveSc] = useState(null);
   useEffect(() => {
-    if (!costModelId || editing) return;
-    const cq = currentQuarter();
+    if (!costModelId || editing || !loaded) return;
+    const cq = asOf || currentQuarter();
     api.post('/api/costing/should-cost', { cost_model_id: costModelId, target_year: cq.year, target_quarter: cq.quarter })
       .then(({ data }) => setLiveSc({ ...data, label: qLabel(cq.year, cq.quarter) }))
       .catch(() => setLiveSc(null));
-  }, [costModelId, editing]);
+  }, [costModelId, editing, loaded, asOf]);
 
   const donutSegs = useMemo(() => {
     const segs = components

@@ -198,7 +198,11 @@ def get_cost_model(
     if not cm:
         raise HTTPException(status_code=404, detail="Cost model not found")
     require_permission(db, current_user, cm.team_id, "cost_models.view")
-    return _build_cost_model_out(cm)
+    out = _build_cost_model_out(cm)
+    if cm.current_formula is not None:
+        from app.services.costing_engine import latest_data_quarter
+        out.as_of_year, out.as_of_quarter = latest_data_quarter(db, cm)
+    return out
 
 
 @router.put("/{cost_model_id}", response_model=CostModelOut)

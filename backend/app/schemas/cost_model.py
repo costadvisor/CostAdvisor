@@ -232,5 +232,11 @@ class CostModelOut(BaseModel):
     product_unit: str | None = None
     product_active_content: float | None = None
     supplier_name: str | None = None
+    # The quarter "should-cost today" is priced at on every list, alert and
+    # brief (costing_engine.latest_data_quarter). Set on the single-model read
+    # only, so the product page prices at the same quarter instead of the
+    # calendar quarter (the last month carried forward).
+    as_of_year: int | None = None
+    as_of_quarter: int | None = None
 
     model_config = {"from_attributes": True}
