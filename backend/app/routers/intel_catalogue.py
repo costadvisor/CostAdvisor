@@ -66,7 +66,8 @@ def card_filters(
     industry: list[str] | None = Query(None, description="Industry name (demand tree), exact"),
     fn: list[str] | None = Query(None, description="Function (demand tree), exact"),
     supplier: list[str] | None = Query(None, description="Canonical producer name, exact; counting makers only"),
-    q: str | None = Query(None, description="Substring of pid, name, full name, line, sub-family, family or CAS"),
+    q: str | None = Query(None, description="Words (all, any order) of pid, name, full name, line, "
+                                            "sub-family, family, CAS or counted maker"),
     has_report: bool | None = Query(None, description="true = the card's product line has a market report"),
     region: list[str] | None = Query(None, description="Drop region code (EU, NA, CN, IN, APAC, MEA, LA, GL)"),
     trend: str | None = Query(None, description="up | flat | down (vs Jan 2023, ±2 points)"),

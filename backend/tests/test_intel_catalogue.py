@@ -340,6 +340,40 @@ def test_facet_counts_follow_the_other_filters_but_not_their_own(api):
     assert outside in {s["name"] for s in picked["suppliers"]}
 
 
+def test_search_takes_words_in_any_order_both_spellings_and_makers(api, db):
+    """Audit A-08: a search is words, each of which must appear somewhere on
+    the card, in any order; UK and US spellings meet; a counted maker's name
+    finds the cards it makes."""
+    ferric = next(i for i in _all(api, q=FERRIC)["items"] if i["pid"] == FERRIC)
+    words = ferric["name"].split()
+    assert FERRIC in _pids(api, q=" ".join(reversed(words)))
+    assert FERRIC in _pids(api, q=f"{words[0]} {words[-1]}")
+    items = _all(api)["items"]
+    for pattern, (a, b) in ((r"\w*sul(ph|f)\w*", ("sulph", "sulf")), (r"\w*alumin(i?)um\w*", ("aluminium", "aluminum"))):
+        card = next(i for i in items if re.search(pattern, i["name"], re.I))
+        word = re.search(pattern, card["name"], re.I).group(0).lower()
+        other = word.replace(a, b) if a in word else word.replace(b, a)
+        assert other != word and card["pid"] in _pids(api, q=other), (card["name"], other)
+    maker = db.execute(text(
+        "SELECT pr.name FROM producer_formulas pf JOIN producers pr ON pr.id = pf.producer_id "
+        "WHERE pf.subject_code = :c AND pf.counts_toward_floor AND NOT pr.is_bucket "
+        "ORDER BY pf.row_order LIMIT 1"), {"c": FERRIC}).scalar()
+    assert FERRIC in _pids(api, q=maker)
+
+
+@pytest.mark.parametrize("q, terms", [
+    ("Chloride  Ferric 40%", ["chloride", "ferric", "40"]),
+    ("Aluminum SULPHATE", ["aluminium", "sulfate"]),
+    ("(carbon fibre)", ["carbon", "fiber"]),
+    ("BCI-FECL3-LIQ", ["bci-fecl3-liq"]),
+    ("%%", ["%%"]),
+    ("   ", []),
+    (None, []),
+])
+def test_search_terms(q, terms):
+    assert ic.search_terms(q) == terms
+
+
 def test_bad_filter_values_are_422(api):
     assert api.get("/api/intel/products", params={"trend": "sideways"}).status_code == 422
     assert api.get("/api/intel/products", params={"limit": 0}).status_code == 422

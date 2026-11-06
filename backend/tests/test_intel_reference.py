@@ -242,6 +242,14 @@ def test_line_filters(api, db):
     q = api.get("/api/intel/lines", params={"q": probe}).json()
     assert expect.template_line(probe) in {it["line_key"] for it in q["items"]}
 
+    # Audit A-08: words in any order, UK and US spellings alike.
+    line = next(it for it in items if len(it["name"].split()) > 2)
+    flipped = api.get("/api/intel/lines", params={"q": " ".join(reversed(line["name"].split()))}).json()
+    assert line["id"] in {it["id"] for it in flipped["items"]}
+    sulph = next(it for it in items if "sulf" in it["name"].lower())
+    spelt = api.get("/api/intel/lines", params={"q": sulph["name"].lower().replace("sulf", "sulph")}).json()
+    assert sulph["id"] in {it["id"] for it in spelt["items"]}
+
 
 def test_line_detail_by_id_key_and_former_key(api, db, drop):
     ids = _line_ids(db)

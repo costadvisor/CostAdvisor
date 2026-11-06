@@ -274,6 +274,7 @@ class Catalogue:
     industries: list[str]
     data_version: dict | None
     _facets: dict = field(default_factory=dict)
+    _search: dict = field(default_factory=dict)   # pid → folded search text, filled lazily
 
 
 _lock = threading.Lock()
@@ -736,6 +737,47 @@ def facets(cat: Catalogue, statuses: frozenset[str] | None = None, **filters) ->
     return out
 
 
+# ── Search ───────────────────────────────────────────────────────────────────
+
+# The catalogue mixes UK and US spellings; both sides of a search fold to one.
+SEARCH_SPELLINGS = (("sulph", "sulf"), ("aluminum", "aluminium"), ("fibre", "fiber"))
+_EDGE_PUNCT = "()[]{},;:!?\"'“”‘’%"
+
+
+def search_fold(text: str) -> str:
+    """Text as a search compares it: case-folded, one spelling per word."""
+    out = text.casefold()
+    for variant, kept in SEARCH_SPELLINGS:
+        out = out.replace(variant, kept)
+    return out
+
+
+def search_terms(q: str | None) -> list[str]:
+    """The words of a search, folded. Each must appear, in any order
+    ("chloride ferric 40" finds "Ferric chloride … 40%")."""
+    folded = search_fold(q or "").strip()
+    words = [w.strip(_EDGE_PUNCT) for w in folded.split()]
+    return [w for w in words if w] or ([folded] if folded else [])
+
+
+def search_matches(terms: list[str], hay: str) -> bool:
+    return all(t in hay for t in terms)
+
+
+def _search_text(cat: Catalogue, code: str) -> str:
+    """A card's words: code, names, line, sub-family, family, CAS and its
+    counted makers, so a supplier's name finds the cards it makes."""
+    hay = cat._search.get(code)
+    if hay is None:
+        p = cat.products[code]
+        line = p.line or {}
+        hay = search_fold(" ".join(x for x in (
+            p.code, p.name, p.full_name, line.get("name"), line.get("subfamily_name"), p.family,
+            p.cas, *sorted(cat.suppliers_of.get(code, ()))) if x))
+        cat._search[code] = hay
+    return hay
+
+
 # ── Queries over the snapshot ────────────────────────────────────────────────
 
 def normalize_region(region: str | None) -> str | None:
@@ -789,16 +831,8 @@ def _card_tests(cat: Catalogue, *, statuses: frozenset[str] | None = None,
         tests["region"] = lambda i: not regs.isdisjoint(i["regions"])
     if trend:
         tests["trend"] = lambda i: i["trend_dir"] == trend
-    needle = q.strip().casefold() if q and q.strip() else None
-    if needle:
-        def _search(i: dict) -> bool:
-            p = cat.products[i["pid"]]
-            line = p.line or {}
-            hay = " ".join(x for x in (p.code, p.name, p.full_name, line.get("name"),
-                                       line.get("subfamily_name"), p.family, p.cas)
-                           if x).casefold()
-            return needle in hay
-        tests["q"] = _search
+    if terms := search_terms(q):
+        tests["q"] = lambda i: search_matches(terms, _search_text(cat, i["pid"]))
     return tests
 
 

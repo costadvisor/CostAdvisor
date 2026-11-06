@@ -77,6 +77,7 @@ from app.services.catalog_visibility import (
     status_badge,
 )
 from app.services.content_drop.reader import DROP_REGION_BY_APP, REGION_MAP
+from app.services.intel_catalogue import search_fold, search_matches, search_terms
 from app.services.live_values import LiveText
 from app.services.staleness import reader_note
 
@@ -816,8 +817,8 @@ def _precompute_lines(snap: Snapshot) -> None:
                 fns[fn].add(card)
         sup_counter, buckets = _suppliers_of_cards(snap, cards)
         reports = _line_reports(snap, ln.id)
-        search = " ".join([ln.name, ln.family, ln.subfamily or "", ln.platform or ""]
-                          + list(cards) + [snap.templates[c].name for c in cards]).lower()
+        search = search_fold(" ".join([ln.name, ln.family, ln.subfamily or "", ln.platform or ""]
+                                      + list(cards) + [snap.templates[c].name for c in cards]))
         item = {
             "id": ln.id,
             "line_key": ln.line_key,
@@ -877,7 +878,7 @@ def list_lines(db: Session, *, family_id: int | None = None, subfamily_id: int |
     statuses = parse_status(status)
     snap = get_snapshot(db)
     ind_name = _resolve_industry_name(snap, industry) if industry else None
-    needle = q.strip().lower() if q and q.strip() else None
+    terms = search_terms(q)
 
     out = []
     for it in snap.line_items:
@@ -891,7 +892,7 @@ def list_lines(db: Session, *, family_id: int | None = None, subfamily_id: int |
             continue
         if has_report is not None and it["has_report"] != has_report:
             continue
-        if needle and needle not in it["_search"]:
+        if terms and not search_matches(terms, it["_search"]):
             continue
         out.append(_with_status(snap, it, statuses))
 
@@ -1419,7 +1420,7 @@ def _precompute_suppliers(snap: Snapshot) -> None:
             "_regions": Counter(r for lk in counting for r in set(lk.regions)),
             "_cards": set(cards),
             "_lines": lines,
-            "_search": " ".join([p["name"]] + snap.aliases.get(pid_, [])).lower(),
+            "_search": search_fold(" ".join([p["name"]] + snap.aliases.get(pid_, []))),
         })
     rows.sort(key=lambda r: (-r["product_count"], r["name"].lower()))
     generic.sort(key=lambda r: (-r["product_count"], r["name"].lower()))
@@ -1445,7 +1446,7 @@ def list_suppliers(db: Session, *, q: str | None = None,
     Several families or industries match a producer in any of them (OR);
     the different filters all apply."""
     snap = get_snapshot(db)
-    needle = q.strip().lower() if q and q.strip() else None
+    terms = search_terms(q)
     fams = set(_picked(family_id))
     inds_asked = _picked(industry)
     inds = {n for n in (_resolve_industry_name(snap, v) for v in inds_asked) if n}
@@ -1453,7 +1454,7 @@ def list_suppliers(db: Session, *, q: str | None = None,
     for r in snap.supplier_rows:
         if r["product_count"] < max(min_products, 1):
             continue
-        if needle and needle not in r["_search"]:
+        if terms and not search_matches(terms, r["_search"]):
             continue
         if fams and not any(f["id"] in fams for f in r["families"]):
             continue

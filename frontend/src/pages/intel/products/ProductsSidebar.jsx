@@ -107,7 +107,7 @@ export default function ProductsSidebar({
       search={searchText}
       onSearch={onSearch}
       searchPlaceholder="Search products…"
-      searchLabel="Search products by name, PID, line, family or CAS"
+      searchLabel="Search products by name, PID, line, family, CAS or maker"
       activeCount={activeCount}
       onClear={onClear}
       ariaLabel="Product filters"
