@@ -374,6 +374,8 @@ export default function NegotiateDetailArea() {
           <div style={{ color: 'var(--muted)', fontSize: 12, padding: 16 }}>No component drivers for this model.</div>
         ) : (
           <>
+            {/* Scrolls inside its card on a phone instead of spilling out of it. */}
+            <div style={{ overflowX: 'auto' }}>
             <table className="ca-table">
               <thead>
                 <tr>
@@ -421,6 +423,7 @@ export default function NegotiateDetailArea() {
                 })}
               </tbody>
             </table>
+            </div>
             {!hasActual && (
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
                 Each row shows what the component contributes to the should-cost. Once a supplier

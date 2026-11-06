@@ -250,7 +250,7 @@ export default function MonitorArea() {
                 <button key={f.key} className={filterBtn(statusFilter === f.key)} onClick={() => setStatusFilter(f.key)}>{f.label}</button>
               ))}
             </div>
-            {familyLabels.length > 0 && <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 2px' }} />}
+            {familyLabels.length > 0 && <div className="ca-filter-divider" />}
             {familyLabels.length > 0 && (
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 <button className={filterBtn(familyFilter === 'all')} onClick={() => setFamilyFilter('all')}>All families</button>
@@ -262,7 +262,8 @@ export default function MonitorArea() {
           </div>
 
           {/* Stats */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 14 }}>
+          {/* auto-fit, as on Negotiate: four fixed columns overflowed a phone. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 14 }}>
             {stats.map(s => (
               <div key={s.lbl} className="ca-metric" title={s.title}>
                 <div className="ca-metric-lbl">{s.lbl}</div>

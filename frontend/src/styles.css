@@ -433,6 +433,10 @@ body, #root {
 /* A full-page table grows with the page: the 440px cap above is for drawers and
    cards, and on a page it hid most rows behind a second scrollbar. */
 .ca-scroll-x--full { max-height: none; overflow-y: visible; }
+/* Vertical rule between two filter groups; on a phone the groups wrap onto
+   their own rows and the rule would stand alone. */
+.ca-filter-divider { width: 1px; height: 24px; background: var(--border); margin: 0 2px; }
+@media (max-width: 640px) { .ca-filter-divider { display: none; } }
 
 /* Range input */
 input[type=range] { padding: 0; cursor: pointer; accent-color: var(--accent); }
