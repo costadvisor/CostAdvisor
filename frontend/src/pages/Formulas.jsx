@@ -43,6 +43,8 @@ const GRADE_BADGE = {
 };
 
 const GRADE_ORDER = ['high', 'medium', 'low', 'blocked', 'unrated'];
+// A filter chip beside the grades: formulas with a combo queued for expert review.
+const REVIEW_FILTER = 'review';
 
 // The supply taxonomy as the catalogue rows carry it: family › sub-family ›
 // product line. A card on no published line says so, never shows a key.
@@ -374,11 +376,15 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
 
   // family id → { key, name, lines: [{ key, label, sub, rows[] }] }, by name.
   // Grouped by ids, not codes: the catalogue's families carry no code.
+  // Search starts at two characters: one letter matched nearly every formula
+  // and opened every family at once.
+  const q = query.trim().length >= 2 ? query.trim().toLowerCase() : '';
   const families = useMemo(() => {
-    const q = query.trim().toLowerCase();
     const map = new Map();
     for (const t of catalogRows) {
-      if (gradeFilter !== 'all' && (t.trust_summary?.worst_grade || 'unrated') !== gradeFilter) continue;
+      if (gradeFilter === REVIEW_FILTER) {
+        if (!(t.trust_summary?.needs_review_count > 0)) continue;
+      } else if (gradeFilter !== 'all' && (t.trust_summary?.worst_grade || 'unrated') !== gradeFilter) continue;
       if (q) {
         const hay = `${t.name} ${t.code} ${t.family?.name || ''} ${t.subfamily?.name || ''} ${t.product_line?.name || ''}`.toLowerCase();
         if (!hay.includes(q)) continue;
@@ -416,15 +422,25 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
       fam.lineCount = fam.lines.filter(ln => !ln.unpublished).length;
     }
     return list;
-  }, [catalogRows, query, gradeFilter]);
+  }, [catalogRows, q, gradeFilter]);
 
-  const filtering = query.trim() !== '' || gradeFilter !== 'all';
+  const filtering = q !== '' || gradeFilter !== 'all';
   const shown = families.reduce((n, f) => n + f.count, 0);
   const reviewTotal = catalogRows.reduce((n, t) => n + (t.trust_summary?.needs_review_count || 0), 0);
-  const isOpen = (fam) => filtering || expanded.has(fam.key);
+  // Formulas per grade, so a chip says what it holds and an empty grade is not offered.
+  const gradeCounts = useMemo(() => catalogRows.reduce((acc, t) => {
+    const g = t.trust_summary?.worst_grade || 'unrated';
+    acc[g] = (acc[g] || 0) + 1;
+    if (t.trust_summary?.needs_review_count > 0) acc[REVIEW_FILTER] = (acc[REVIEW_FILTER] || 0) + 1;
+    return acc;
+  }, {}), [catalogRows]);
+  // A filter opens every matching family; each can still be closed while it is on.
+  const [shut, setShut] = useState(() => new Set());
+  useEffect(() => { setShut(new Set()); }, [q, gradeFilter]);
+  const isOpen = (fam) => (filtering ? !shut.has(fam.key) : expanded.has(fam.key));
   const allOpen = families.length > 0 && families.every(isOpen);
 
-  const toggle = (code) => setExpanded(prev => {
+  const toggle = (code) => (filtering ? setShut : setExpanded)(prev => {
     const next = new Set(prev);
     if (next.has(code)) next.delete(code); else next.add(code);
     return next;
@@ -524,7 +540,9 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
             onChange={e => setQuery(e.target.value)}
             aria-label="Search default formulas"
           />
-          {['all', ...GRADE_ORDER].map(c => (
+          {['all', ...GRADE_ORDER, REVIEW_FILTER]
+            .filter(c => c === 'all' || c === gradeFilter || gradeCounts[c])
+            .map(c => (
             <button
               key={c}
               onClick={() => setGradeFilter(c)}
@@ -537,18 +555,21 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
                 fontWeight: gradeFilter === c ? 600 : 400,
               }}
             >
-              {c === 'all' ? 'ALL' : (GRADE_BADGE[c]?.label || c).split(' · ')[0]}
+              {c === 'all' ? 'ALL'
+                : c === REVIEW_FILTER ? 'NEEDS REVIEW'
+                  : (GRADE_BADGE[c]?.label || c).split(' · ')[0]}
+              {c !== 'all' && ` ${gradeCounts[c] || 0}`}
             </button>
           ))}
-          {!filtering && (
-            <button
-              className="ca-btn ca-btn-ghost ca-btn-sm"
-              style={{ fontSize: 10, marginLeft: 'auto' }}
-              onClick={() => setExpanded(allOpen ? new Set() : new Set(families.map(f => f.key)))}
-            >
-              {allOpen ? 'Collapse all' : 'Expand all'}
-            </button>
-          )}
+          <button
+            className="ca-btn ca-btn-ghost ca-btn-sm"
+            style={{ fontSize: 10, marginLeft: 'auto' }}
+            onClick={() => (filtering
+              ? setShut(allOpen ? new Set(families.map(f => f.key)) : new Set())
+              : setExpanded(allOpen ? new Set() : new Set(families.map(f => f.key))))}
+          >
+            {allOpen ? 'Collapse all' : 'Expand all'}
+          </button>
         </div>
       )}
 
@@ -564,26 +585,25 @@ function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = fal
           padding: '20px 16px', border: '1px dashed var(--border)',
           borderRadius: 8, fontSize: 12, color: 'var(--muted)', textAlign: 'center',
         }}>
-          No formulas match {query.trim() ? <>“{query.trim()}”</> : 'this filter'}.
+          No formulas match {q ? <>“{query.trim()}”</> : 'this filter'}.
         </div>
       ) : (
         <div className="ca-card" style={{ padding: 0, overflow: 'hidden' }}>
           {families.map((fam, fi) => (
             <div key={fam.key} style={{ borderTop: fi > 0 ? '1px solid var(--border)' : 'none' }}>
               <button
-                onClick={() => !filtering && toggle(fam.key)}
+                onClick={() => toggle(fam.key)}
                 aria-expanded={isOpen(fam)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10, width: '100%',
                   padding: '11px 16px', background: 'transparent', border: 'none',
-                  cursor: filtering ? 'default' : 'pointer', textAlign: 'left', color: 'var(--text)',
+                  cursor: 'pointer', textAlign: 'left', color: 'var(--text)',
                 }}
               >
                 <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"
                   style={{
                     transform: isOpen(fam) ? 'rotate(90deg)' : 'none',
                     transition: 'transform 0.15s ease-out', flexShrink: 0,
-                    opacity: filtering ? 0.3 : 1,
                   }}>
                   <path d="M3 1l4 4-4 4" fill="none" stroke="var(--text-secondary)" strokeWidth="1.5" />
                 </svg>
