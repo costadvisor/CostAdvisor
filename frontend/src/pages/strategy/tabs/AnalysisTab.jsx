@@ -1,4 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
+} from 'react';
 import {
   Panel, KraljicBadge, EmptyState, ErrorState, LoadingPanel, useApi,
 } from '../../../components/intel';
@@ -213,7 +215,7 @@ function KraljicBody({ panel, kraljic }) {
   );
 }
 
-function AnalysisPanel({ name, panel, kraljic }) {
+function AnalysisPanel({ name, panel, kraljic, open, onToggle }) {
   const meta = PANELS[name] || { title: panel.heading || name };
   const caption = captionOf(panel.heading);
   let body;
@@ -244,7 +246,7 @@ function AnalysisPanel({ name, panel, kraljic }) {
   return (
     <div id={anchorId(name)} className="st-anchor">
       <Panel title={meta.title} caption={caption} flush={flush} className="st-sheet"
-        collapsible={!!meta.collapsed} defaultOpen={!meta.collapsed}>
+        collapsible={!!meta.collapsed} open={meta.collapsed ? open : undefined} onToggle={onToggle}>
         {panel.stale_note && (
           // LIVE-5: this panel's text may be out of date; one calm line, the reasons are for staff.
           <div className="ix-callout warn" role="note" style={{ margin: '12px 16px' }}>{panel.stale_note}</div>
@@ -264,7 +266,9 @@ function Caveat({ caveat }) {
   return <ReportCaveat caveat={{ ...caveat, lines }} className="st-caveat" />;
 }
 
-function Contents({ order }) {
+/* A jump to a collapsed panel opens it: landing on its bare title strip
+   reads as an empty section. */
+function Contents({ order, onOpen }) {
   if (order.length < 3) return null;
   return (
     <Panel title="In this analysis">
@@ -275,6 +279,7 @@ function Contents({ order }) {
               const el = document.getElementById(anchorId(k));
               if (!el) return;
               e.preventDefault();
+              onOpen(k);
               el.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }}>
             {PANELS[k]?.title || k}
@@ -334,6 +339,15 @@ export default function AnalysisTab({ slug, teamId, category }) {
     { team_id: teamId },
   );
 
+  // Collapsible panels' open state lives here, so the contents can open one.
+  const [opened, setOpened] = useState(() => new Set());
+  const setOpen = useCallback((key, next) => setOpened((o) => {
+    if (o.has(key) === next) return o;
+    const n = new Set(o);
+    if (next) n.add(key); else n.delete(key);
+    return n;
+  }), []);
+
   const order = useMemo(() => {
     if (!data?.panels) return [];
     const listed = (data.panel_order && data.panel_order.length ? data.panel_order : DEFAULT_ORDER);
@@ -354,7 +368,7 @@ export default function AnalysisTab({ slug, teamId, category }) {
   const kraljic = data.kraljic || category?.kraljic || null;
   const rail = (
     <StickyRail>
-      {data.available && <Contents order={order} />}
+      {data.available && <Contents order={order} onOpen={(k) => setOpen(k, true)} />}
       <AnalysisDemand key={teamId} category={category} teamId={teamId} />
     </StickyRail>
   );
@@ -384,7 +398,8 @@ export default function AnalysisTab({ slug, teamId, category }) {
       <div className="ix-two-col">
         <div className="ix-col">
           {order.map((k) => (
-            <AnalysisPanel key={k} name={k} panel={data.panels[k]} kraljic={kraljic} />
+            <AnalysisPanel key={k} name={k} panel={data.panels[k]} kraljic={kraljic}
+              open={opened.has(k)} onToggle={(next) => setOpen(k, next)} />
           ))}
         </div>
         {rail}
