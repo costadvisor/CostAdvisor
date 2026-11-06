@@ -38,7 +38,10 @@ export default function NegotiateDetailArea() {
     setError(null);
     api.post('/api/costing/brief', { cost_model_id: costModelId })
       .then(({ data }) => setData(data))
-      .catch(err => setError(formatApiError(err)))
+      // A bad or unknown id is "not found", not the validator's raw text.
+      .catch(err => setError([404, 422].includes(err?.response?.status)
+        ? 'This product was not found. It may have been deleted, or the link is wrong.'
+        : `Error: ${formatApiError(err)}`))
       .finally(() => setLoading(false));
   }, [costModelId]);
 
@@ -46,7 +49,7 @@ export default function NegotiateDetailArea() {
   if (error) return (
     <div className="ca-page ca-fade-in">
       <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => navigate('/negotiate')}>← Negotiate</button>
-      <div className="ca-card" style={{ color: 'var(--accent2)', marginTop: 12 }}>Error: {error}</div>
+      <div className="ca-card" style={{ color: 'var(--accent2)', marginTop: 12 }}>{error}</div>
     </div>
   );
   if (!data) return null;

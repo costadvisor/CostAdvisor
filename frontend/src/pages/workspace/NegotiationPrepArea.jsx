@@ -86,7 +86,9 @@ export default function NegotiationPrepArea() {
     setErr(null);
     api.get(`/api/negotiation-prep/${costModelId}/prep`)
       .then(({ data }) => setPrep(data))
-      .catch(e => setErr(formatApiError(e) || 'Could not load the prep.'));
+      .catch(e => setErr([404, 422].includes(e?.response?.status)
+        ? 'This product was not found. It may have been deleted, or the link is wrong.'
+        : formatApiError(e) || 'Could not load the prep.'));
   }, [costModelId]);
 
   useEffect(() => { load(); }, [load]);
@@ -139,7 +141,13 @@ export default function NegotiationPrepArea() {
     setTimeout(() => { document.title = prev; }, 500);
   };
 
-  if (err) return <div className="ca-page ca-fade-in"><div className="ca-card" style={{ color: 'var(--accent2)' }}>{err}</div></div>;
+  // A way back, not a dead end.
+  if (err) return (
+    <div className="ca-page ca-fade-in">
+      <Link to="/negotiate" className="ca-btn ca-btn-ghost ca-btn-sm">← Negotiate</Link>
+      <div className="ca-card" style={{ color: 'var(--accent2)', marginTop: 12 }}>{err}</div>
+    </div>
+  );
   if (!prep) return <div className="ca-page ca-fade-in"><div style={{ padding: 20, color: 'var(--muted)' }}>Loading…</div></div>;
 
   return (
