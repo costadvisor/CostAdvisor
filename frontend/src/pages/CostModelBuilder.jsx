@@ -19,6 +19,10 @@ import { curSym } from '../utils/currency';
 // (backend/app/services/drop/catalog_loader.py REGION_MAP).
 const CATALOG_TO_APP_REGION = { EU: 'Europe', NA: 'NA', CN: 'China', IN: 'India', APAC: 'APAC', MEA: 'MEA', LA: 'Latam', GL: 'GLOBAL' };
 
+// A stored weight (4 decimals) as parts in percent, at full precision. Rounding
+// to a whole percent rewrote every line by up to half a point on the next save.
+const weightToParts = (w) => Math.round((Number(w) || 0) * 10000) / 100;
+
 export default function CostModelBuilder() {
   const { costModelId } = useParams();
   const navigate = useNavigate();
@@ -198,7 +202,7 @@ export default function CostModelBuilder() {
             label: c.label,
             commodity_name: c.commodity_name || '',
             commodity_id: c.commodity_id,
-            parts: Math.round(c.weight * 100),
+            parts: weightToParts(c.weight),
             component_type: c.component_type,
             depth: c.depth,
             via_template_id: c.via_template_id,
@@ -1324,12 +1328,14 @@ export default function CostModelBuilder() {
                 label: c.label,
                 commodity_name: c.commodity_name || '',
                 commodity_id: c.commodity_id,
-                parts: Math.round(c.weight * 100),
+                parts: weightToParts(c.weight),
                 component_type: c.component_type,
                 depth: c.depth,
                 via_template_id: c.via_template_id,
                 line_region: c.line_region,
                 is_proxy: c.is_proxy,
+                child_cost_model_id: c.child_cost_model_id || null,
+                child_cost_model_name: c.child_cost_model_name || null,
               })));
               const vtype = v.formula_type || 'simple';
               setFormulaMode(vtype);
