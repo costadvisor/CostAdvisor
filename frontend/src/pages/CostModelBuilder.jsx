@@ -12,7 +12,8 @@ import { stripReservedFns } from '../utils/formulaFns';
 import NumberInput from '../components/NumberInput';
 import { normalizeVarMap } from '../components/VariableMapEditor';
 import IndexCombo from '../components/IndexCombo';
-import { curSym } from '../utils/currency';
+import { curSym, fmtPerUnit } from '../utils/currency';
+import { qLabel, currentQuarter } from '../utils/quarters';
 
 // Catalog recipes list their regions as drop codes (`catalog_meta.regions`);
 // the builder's region select uses the app codes they were loaded under
@@ -244,7 +245,16 @@ export default function CostModelBuilder() {
   const compWeight = (c) => totalParts > 0 ? (c.parts / totalParts) * (componentPool / basePrice) : 0;
   const compCost = (c) => totalParts > 0 ? (c.parts / totalParts) * componentPool : 0;
 
-  const shouldCost = basePrice;
+  // The live should-cost of a saved model, as Portfolio and the product page
+  // show it. This page's big figure is the base price, never an estimate.
+  const [liveSc, setLiveSc] = useState(null);
+  useEffect(() => {
+    if (!costModelId || editing) return;
+    const cq = currentQuarter();
+    api.post('/api/costing/should-cost', { cost_model_id: costModelId, target_year: cq.year, target_quarter: cq.quarter })
+      .then(({ data }) => setLiveSc({ ...data, label: qLabel(cq.year, cq.quarter) }))
+      .catch(() => setLiveSc(null));
+  }, [costModelId, editing]);
 
   const donutSegs = useMemo(() => {
     const segs = components
@@ -1203,7 +1213,7 @@ export default function CostModelBuilder() {
                 fontFamily: "'Syne', sans-serif", fontSize: 16, fontWeight: 700,
                 color: isValid ? 'var(--accent)' : 'var(--accent2)'
               }}>
-                {sym}{shouldCost.toFixed(3)}
+                {sym}{basePrice.toFixed(3)}
               </span>
             </div>
           </div>
@@ -1252,11 +1262,16 @@ export default function CostModelBuilder() {
 
           {/* Should-Cost result */}
           <div className="ca-result" style={{ marginBottom: 16 }}>
-            <div className="ca-result-label">Estimated Should-Cost</div>
-            <div className="ca-result-big">{sym}{shouldCost.toFixed(3)}</div>
+            <div className="ca-result-label">{costModelId ? `Base price · ${qLabel(baseYear, baseQuarter)}` : 'Starting price'}</div>
+            <div className="ca-result-big">{sym}{basePrice.toFixed(3)}</div>
             <div style={{ marginTop: 4, fontSize: 11, color: 'var(--muted)' }}>
               per {unit} · {region}
             </div>
+            {liveSc?.should_cost != null && (
+              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                Live should-cost {liveSc.label}: <strong>{fmtPerUnit(liveSc.should_cost, currency, unit)}</strong>
+              </div>
+            )}
             {formulaMode === 'simple' ? (
               <>
                 <hr className="ca-sep" />
