@@ -275,9 +275,6 @@ export default function ProductDetailArea() {
               <button className="ca-btn-link" style={{ fontSize: 11, marginTop: 10 }} onClick={toggleBreakdown}>
                 {showBreakdown ? '▾ Hide breakdown' : '▸ Show breakdown'}
               </button>
-              {showBreakdown && (
-                <ShouldCostBreakdownTable breakdown={breakdown} error={breakdownErr} sym={sym} />
-              )}
             </>
           )}
         </div>
@@ -323,6 +320,14 @@ export default function ProductDetailArea() {
           )}
         </div>
       </div>
+
+      {/* Breakdown at full width: seven columns squeezed into the half-width
+          card wrapped every component name over four or five lines. */}
+      {showBreakdown && sc.status === 'ok' && (
+        <div style={{ marginBottom: 16 }}>
+          <ShouldCostBreakdownTable breakdown={breakdown} error={breakdownErr} sym={sym} asOf={`Q${CUR_Q} ${CUR_Y}`} />
+        </div>
+      )}
 
       {/* Formula */}
       <div className="ca-card">
@@ -401,17 +406,22 @@ const SOURCE_LABEL = {
   composite: 'composite', fixed: 'fixed', team_override: 'override',
   scraped_region: 'scraped', scraped_global: 'scraped (global)',
   scraped_any_region: 'scraped (other region)', scraped_temporal_carry_forward: 'scraped (carried)',
+  monthly_carry_forward: 'carried forward',
 };
 
 // Scrum 17 — itemized should-cost: index name, weight, base/current value, ratio,
 // contribution, and source, with a footer that sums to exactly the should-cost shown
 // above (mirrors FormulaDetailModal's resolved-recipe table pattern).
-function ShouldCostBreakdownTable({ breakdown, error, sym }) {
+function ShouldCostBreakdownTable({ breakdown, error, sym, asOf }) {
   if (error) return <div className="ca-card" style={{ marginTop: 10, color: 'var(--accent2)', fontSize: 12 }}>Error: {error}</div>;
   if (!breakdown) return <div style={{ marginTop: 10, color: 'var(--muted)', fontSize: 12 }}>Loading…</div>;
 
   const mono = { fontFamily: "'JetBrains Mono', monospace" };
   const fmt = (v) => (v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 3 }));
+  // The "live" figure is often the latest index month carried to this quarter;
+  // say so rather than let "as of Q4 2026" imply fresh data.
+  const indexed = breakdown.components.filter(c => c.has_data && c.source);
+  const allCarried = indexed.length > 0 && indexed.every(c => /carry_forward/.test(c.source));
 
   return (
     <div style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
@@ -497,6 +507,11 @@ function ShouldCostBreakdownTable({ breakdown, error, sym }) {
           </tbody>
         </table>
       </div>
+      {allCarried && (
+        <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
+          No index has published {asOf} values yet: every line carries its latest month forward.
+        </div>
+      )}
       {breakdown.data_gaps.length > 0 && (
         <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--accent3)', borderTop: '1px solid var(--border)' }}>
           {breakdown.data_gaps.length} component{breakdown.data_gaps.length > 1 ? 's' : ''} missing index data and rode flat: {breakdown.data_gaps.map(g => g.component_label).join(', ')}.
