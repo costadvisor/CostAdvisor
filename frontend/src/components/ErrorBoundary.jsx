@@ -12,6 +12,14 @@ export default class ErrorBoundary extends Component {
     return { error };
   }
 
+  // The route-level boundary in App passes the pathname: navigating away
+  // (Back, a nav link) clears the error instead of leaving it up for good.
+  componentDidUpdate(prevProps) {
+    if (this.state.error && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
+  }
+
   componentDidCatch(error, info) {
     // If Sentry is wired on the window, report the crash.
     if (typeof window !== 'undefined' && window.Sentry?.captureException) {
@@ -31,7 +39,7 @@ export default class ErrorBoundary extends Component {
           email us and include roughly what you were doing when it broke.
         </p>
         <p style={{ fontSize: 13, marginTop: 16 }}>
-          <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
+          <a href={`mailto:${SUPPORT_EMAIL}`} style={{ color: 'var(--accent)' }}>{SUPPORT_EMAIL}</a>
         </p>
         <button
           className="ca-btn ca-btn-primary"
