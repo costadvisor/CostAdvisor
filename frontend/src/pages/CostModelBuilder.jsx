@@ -50,7 +50,9 @@ export default function CostModelBuilder() {
   // none (the engine reads that as 100%). A 0.65 default used to be written
   // onto every product saved from here, which moved its "per active" price.
   const [activeContent, setActiveContent] = useState(null);
-  const [unit, setUnit] = useState('kg');
+  // New models default to the default region's money and the tonne, as the AI
+  // cost modeler does: USD per kg for a Europe model had to be fixed every time.
+  const [unit, setUnit] = useState('t');
 
   // Cost model fields
   const [supplierId, setSupplierId] = useState('');
@@ -58,7 +60,7 @@ export default function CostModelBuilder() {
   const [destinationCountry, setDestinationCountry] = useState('');
   const [destinationRegion, setDestinationRegion] = useState('');
   const [region, setRegion] = useState('Europe');
-  const [currency, setCurrency] = useState('USD');
+  const [currency, setCurrency] = useState('EUR');
   const [incoterm, setIncoterm] = useState('');
 
   // Formula version fields
@@ -634,7 +636,8 @@ export default function CostModelBuilder() {
                 <div>
                   <label className="ca-label">Currency</label>
                   <select className="ca-select" value={currency} onChange={e => setCurrency(e.target.value)}>
-                    {['USD','EUR'].map(c => <option key={c}>{c}</option>)}
+                    {/* Currencies the FX layer converts; a loaded model keeps its own. */}
+                    {[...new Set(['EUR', 'USD', 'GBP', 'CNY', 'INR', currency])].map(c => <option key={c}>{c}</option>)}
                   </select>
                 </div>
                 <div>
@@ -687,8 +690,10 @@ export default function CostModelBuilder() {
                       onClick={() => { setFormulaMode(mode); setShowLandedCost(mode === 'simple'); }}
                       style={{
                         padding: '4px 14px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
-                        background: formulaMode === mode ? 'var(--accent)' : 'transparent',
-                        color: formulaMode === mode ? '#fff' : 'var(--muted)',
+                        // The theme's on-accent text, as .ca-btn-primary uses: white on
+                        // the mint accent was hard to read.
+                        background: formulaMode === mode ? 'var(--accent-fill, var(--accent))' : 'transparent',
+                        color: formulaMode === mode ? 'var(--on-accent)' : 'var(--muted)',
                         textTransform: 'capitalize',
                       }}
                     >{mode}</button>
@@ -784,8 +789,8 @@ export default function CostModelBuilder() {
                                 onClick={() => setLinkMode(mode)}
                                 style={{
                                   padding: '4px 10px', fontSize: 10, fontWeight: 600, border: 'none', cursor: 'pointer',
-                                  background: (linkMode || 'pinned') === mode ? 'var(--accent)' : 'transparent',
-                                  color: (linkMode || 'pinned') === mode ? '#fff' : 'var(--muted)',
+                                  background: (linkMode || 'pinned') === mode ? 'var(--accent-fill, var(--accent))' : 'transparent',
+                                  color: (linkMode || 'pinned') === mode ? 'var(--on-accent)' : 'var(--muted)',
                                   textTransform: 'capitalize',
                                 }}
                               >{mode}</button>
@@ -862,7 +867,7 @@ export default function CostModelBuilder() {
                     </div>
                     {components.map((c, i) => (
                       <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 60px 80px 90px 30px', gap: 8, marginBottom: 6, alignItems: 'center' }}>
-                        <input className="ca-input" value={c.label} placeholder="Component label"
+                        <input className="ca-input" value={c.label} placeholder="Component label" title={c.label || undefined}
                           onChange={e => updateComp(i, 'label', e.target.value)} style={{ padding: '7px 8px' }} />
                         <select className="ca-select"
                           value={c.child_cost_model_id ? `model:${c.child_cost_model_id}` : (c.commodity_name || '')}
@@ -1465,8 +1470,8 @@ function SaveTemplateModal({ expression, variables, activeTeamId, canEditPlatfor
                   <button key={s} onClick={() => setScope(s)} style={{
                     padding: '5px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
                     border: `1px solid ${scope === s ? 'var(--accent)' : 'var(--border)'}`,
-                    background: scope === s ? 'var(--accent)' : 'transparent',
-                    color: scope === s ? '#fff' : 'var(--text)',
+                    background: scope === s ? 'var(--accent-fill, var(--accent))' : 'transparent',
+                    color: scope === s ? 'var(--on-accent)' : 'var(--text)',
                     fontWeight: scope === s ? 600 : 400,
                   }}>
                     {s === 'platform' ? 'Default (all teams)' : 'Team only'}
