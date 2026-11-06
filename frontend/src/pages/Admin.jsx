@@ -88,11 +88,27 @@ export default function Admin() {
     if (tab === 'audit') fetchAuditLogs();
     else if (tab === 'requests') fetchRequests();
     else if (tab === 'regions') fetchRegions();
-    else if (tab !== 'settings') fetchData();
+    // Settings too: it needs the user list, and a link straight to
+    // ?tab=settings would otherwise never clear the loading state.
+    else fetchData();
   }, [tab, showDeleted]);
 
   useEffect(() => {
     setImpersonating(document.cookie.split(';').some(c => c.trim().startsWith('ca_impersonating=')));
+  }, []);
+
+  // The tab row counts users, teams, pending requests and regions, but each
+  // list otherwise loads only with its own tab, so counts read (0) or were
+  // missing until then. Load the ones the opening tab will not, quietly.
+  useEffect(() => {
+    const quiet = (url, set) => api.get(url).then(r => set(r.data)).catch(() => {});
+    if (['audit', 'requests', 'regions'].includes(tab)) {
+      quiet('/api/admin/users', setUsers);
+      quiet('/api/admin/teams', setTeams);
+      quiet('/api/admin/access-requests', setAccessRequests);
+    }
+    quiet('/api/admin/demo-requests', setDemoRequests);
+    quiet('/api/regions', setRegions);
   }, []);
 
   const setPlatformRole = async (userId, roleName, grant) => {
@@ -1815,6 +1831,14 @@ function AdminSettingsTab({ users = [] }) {
     if (section === 'roles') fetchRoles();
     if (section === 'demo_hosts') fetchDemoHosts();
   }, [section]);
+
+  // The section buttons show counts, so load these small lists up front;
+  // without this they read 'Plans (0)' until the section was opened.
+  useEffect(() => {
+    api.get('/api/settings/plans').then(r => setPlans(r.data)).catch(console.error);
+    api.get('/api/settings/roles').then(r => setRoles(r.data)).catch(console.error);
+    api.get('/api/admin/demo-hosts').then(r => setDemoHosts(r.data)).catch(console.error);
+  }, []);
 
   const fetchPlans = () => {
     setLoadingPlans(true);
