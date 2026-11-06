@@ -179,7 +179,9 @@ def prep(
               new_value={"claims": len(claims), "gap": brief.gap})
     out = PrepOut(
         cost_model_id=cm.id, product_name=brief.product_name, supplier_name=brief.supplier_name,
-        period_label=brief.period_label, ladder=ladder, drivers=drivers,
+        period_label=brief.period_label, as_of_label=brief.as_of_label,
+        as_of_year=brief.as_of_year, as_of_quarter=brief.as_of_quarter,
+        ladder=ladder, drivers=drivers,
         claims=[CheckedClaimOut(**vars(c) | {"claim_id": uuid.UUID(c.claim_id)}) for c in checked],
         script=script,
         data_gaps=[f"{g.component_label} ({g.period}): {g.reason}" for g in brief.data_gaps],

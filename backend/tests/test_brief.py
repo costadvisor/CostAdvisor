@@ -319,3 +319,33 @@ def test_summary_drift_is_sign_aware_and_savings_are_no_exposure(client_as, tena
     assert row["gap"] == pytest.approx(-21.0)
     assert row["flag_price_drift"] is False and row["flag_below_should_cost"] is True
     assert kpis["total_exposure"] == pytest.approx(0.0)
+
+
+def test_brief_names_its_as_of_and_base_quarters(client_as, tenant_a, brief_model):
+    """Audit D-02 / D-19: a single figure is 'as of' the window's last quarter,
+    and the drivers' change is measured from the formula's base quarter — the
+    brief names both, and the narrative says "since" that quarter rather than
+    calling the movement a share of the gap "over the period"."""
+    b = client_as(tenant_a).post("/api/costing/brief", json={"cost_model_id": str(brief_model.id)}).json()
+    assert b["as_of_label"] == f"Q{CUR_Q}-{str(CUR_Y)[-2:]}"
+    assert (b["as_of_year"], b["as_of_quarter"]) == (CUR_Y, CUR_Q)
+    assert b["base_period_label"] == f"Q{BASE_Q}-{str(BASE_Y)[-2:]}"
+    # Contributions sum to the should-cost's move since the base (111 - 100),
+    # which is not the supplier gap (39): the label is what changed.
+    assert sum(d["contribution_to_gap"] for d in b["drivers"]) == pytest.approx(11.0)
+
+
+def test_rule_based_narrative_uses_since_and_app_money():
+    from app.services.narrative import fmt_money, generate_narrative
+
+    assert fmt_money(-9.0152, "EUR", "t") == "-€9.02/t"
+    assert fmt_money(3517.41, "EUR") == "€3,517"
+    text = generate_narrative(
+        "PAC", "Kemira",
+        [{"component_label": "Energy", "index_name": "EU power", "index_change_pct": -8.6,
+          "contribution_to_gap": -9.0152, "direction": "down"}],
+        gap=47.77, gap_pct=16.4, total_impact=None, currency="EUR",
+        period_label="Q3-24 to Q2-26", num_periods=8, base_period_label="Q1-23", unit="t",
+    )
+    assert "fell 8.6% since Q1-23, taking €9.02/t off the should-cost" in text
+    assert "over the period" not in text and ".015" not in text

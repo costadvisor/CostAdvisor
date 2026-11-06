@@ -954,6 +954,7 @@ def calculate_brief(
     drivers.sort(key=lambda d: abs(d.component_cost), reverse=True)
 
     period_label = f"{periods[0][3]} to {periods[-1][3]}" if periods else ""
+    base_label = _period_label(ref_year, ref_quarter)
 
     narrative = generate_narrative(
         product_name=cost_model.product.name,
@@ -965,6 +966,8 @@ def calculate_brief(
         currency=out_ccy,
         period_label=period_label,
         num_periods=len(periods),
+        base_period_label=base_label,
+        unit=out_unit,
     )
 
     return BriefResult(
@@ -981,6 +984,10 @@ def calculate_brief(
         total_impact=round(total_impact, 2) if total_impact is not None else None,
         volumes_missing=volumes_missing,
         period_label=period_label,
+        as_of_label=last_label,
+        as_of_year=last_y,
+        as_of_quarter=last_q,
+        base_period_label=base_label,
         evolution=evo_periods,
         narrative=narrative,
         drivers=drivers,

@@ -117,7 +117,8 @@ class _Brief:
     product_name = "Acrylic Emulsion AE-40"
     currency = "EUR"
     unit = "t"
-    period_label = "Q3-26"
+    period_label = "Q4-24 to Q3-26"
+    as_of_label = "Q3-26"
     current_should_cost = 1842.0
     current_floor = 1676.22
     current_actual_price = 2040.0
@@ -129,10 +130,25 @@ def test_the_script_quotes_only_engine_numbers():
     checked = [check_claim(_Claim("Acrylate up 30%", "BA-EU", 30.0), DRIVERS, 1842.0)]
     lines = build_script(_Brief(), checked)
     body = " ".join(lines)
-    assert "1,842.00 EUR/t" in body          # the target
-    assert "1,676.22 EUR/t" in body          # the floor, a genuinely different number
-    assert "198.00 EUR/t above" in body      # their ask, stated as a distance
+    assert "€1,842/t" in body                # the target, in the app's money format
+    assert "€1,676/t" in body                # the floor, a genuinely different number
+    assert "€198/t above" in body            # their ask, stated as a distance
     assert any("Acrylate up 30%" in ln for ln in lines)
+    # One number at one point in time (audit D-19): as of the last quarter.
+    assert "As of Q3-26 the defensible number" in body and "Q4-24 to" not in body
+
+
+def test_below_should_cost_the_script_never_offers_more():
+    """Audit D verifier note: priced under should-cost, "we are ready to settle
+    at" the should-cost would offer the supplier a rise. The script holds the
+    current price instead."""
+    class _Below(_Brief):
+        current_actual_price = 1807.15
+        gap = -34.85
+    body = " ".join(build_script(_Below(), []))
+    assert "settle at" not in body
+    assert "€1,807/t is already below our should-cost" in body
+    assert "€34.85/t below that" in body
 
 
 def test_an_excluded_claim_stays_out_of_the_script():

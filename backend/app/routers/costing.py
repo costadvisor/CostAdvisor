@@ -138,6 +138,8 @@ async def brief(
         currency=result.currency,
         period_label=result.period_label,
         num_periods=len(result.evolution),
+        base_period_label=result.base_period_label,
+        unit=result.unit,
     )
 
     # Audit: assembling a negotiation brief surfaces sensitive cost intelligence
