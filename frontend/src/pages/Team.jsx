@@ -829,25 +829,44 @@ function RequestsTab() {
 
 // ─── Activity helpers ─────────────────────────────────────────────────────────
 
+// 'brief_generated' -> 'Brief generated': a readable fallback for any code the
+// lists below do not name yet.
+const humanize = (code) => {
+  const s = String(code || '').replace(/_/g, ' ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};
+const fmtNum = (v) => Number(v).toLocaleString(undefined, { maximumFractionDigits: 2, useGrouping: false });
+const fmtPct = (v) => `${v > 0 ? '+' : ''}${Number(v).toFixed(1)}%`;
+const fmtVal = (v) => (v == null ? '—' : typeof v === 'number' ? fmtNum(v)
+  : typeof v === 'object' ? JSON.stringify(v) : String(v));
+
+// One "field: value" or "field: before → after" part. Changes come as
+// {from, to} or, from the cost-model router, {old, new}; unchanged ones are dropped.
+function fmtField(k, v) {
+  const name = k.replace(/_/g, ' ');
+  const pair = v && typeof v === 'object'
+    ? ('from' in v && 'to' in v ? [v.from, v.to] : 'old' in v && 'new' in v ? [v.old, v.new] : null)
+    : null;
+  if (!pair) return `${name}: ${fmtVal(v)}`;
+  return pair[0] === pair[1] ? null : `${name}: ${fmtVal(pair[0])} → ${fmtVal(pair[1])}`;
+}
+
 function formatActivityDetail(log) {
   const nv = log.new_value || {};
   const pv = log.previous_value || {};
   const { _impersonated_by, by, ...data } = nv;
   const label = (k) => k.replace(/_/g, ' ');
+  const entity = label(log.entity_type || 'item');
 
   switch (log.event_type) {
     case 'create':
-      return nv.name ? `Created: ${nv.name}` : `Created ${log.entity_type}`;
+      return nv.name ? `Created: ${nv.name}` : `Created ${entity}`;
     case 'update': {
-      const parts = Object.entries(data).map(([k, v]) => {
-        if (v && typeof v === 'object' && 'from' in v && 'to' in v)
-          return `${label(k)}: ${v.from} → ${v.to}`;
-        return `${label(k)}: ${v}`;
-      });
+      const parts = Object.entries(data).map(([k, v]) => fmtField(k, v)).filter(Boolean);
       return parts.length ? parts.join(' · ') : 'Updated';
     }
     case 'delete':
-      return pv.name ? `Deleted: ${pv.name}` : nv.name ? `Deleted: ${nv.name}` : `Deleted ${log.entity_type}`;
+      return pv.name ? `Deleted: ${pv.name}` : nv.name ? `Deleted: ${nv.name}` : `Deleted ${entity}`;
     case 'clone':
       return nv.cloned_from ? `Cloned from "${nv.cloned_from}"` : 'Cloned';
     case 'invite':
@@ -869,15 +888,48 @@ function formatActivityDetail(log) {
       return nv.index || nv.commodity ? `Index override: ${nv.index || nv.commodity}` : 'Index value overridden';
     case 'scrape':
       return `Index source scraped${nv.url ? `: ${nv.url}` : ''}`;
+    // The payloads carry no currency, so gaps are plain numbers in the cost
+    // model's own currency.
+    case 'brief_generated':
+      return nv.gap == null
+        ? 'No actual price to compare yet'
+        : `Gap to should-cost: ${fmtNum(nv.gap)}${nv.gap_pct != null ? ` (${fmtPct(nv.gap_pct)})` : ''}`;
+    case 'negotiation_prep_generated': {
+      const claims = `${nv.claims ?? 0} supplier claim${nv.claims === 1 ? '' : 's'}`;
+      return nv.gap == null ? claims : `Gap to should-cost: ${fmtNum(nv.gap)} · ${claims}`;
+    }
+    case 'negotiation_position_generated':
+      return [nv.year && `Q${nv.quarter} ${nv.year}`, nv.region,
+        nv.supplier_price != null && `supplier price ${fmtNum(nv.supplier_price)}`].filter(Boolean).join(' · ') || '—';
+    case 'supplier_claim':
+      return `"${nv.said || ''}"${nv.driver_label ? ` (${nv.driver_label})` : ''}`;
+    case 'quote_extracted':
+      return `${nv.filename || 'Quote'}: ${nv.line_count ?? 0} line${nv.line_count === 1 ? '' : 's'} read`;
+    case 'ai_cost_draft':
+      return `Draft for ${nv.product_name || 'a product'}${nv.lines != null ? ` (${nv.lines} lines)` : ''}`;
+    case 'ai_cost_draft_promoted':
+      return 'AI draft turned into a cost model';
+    case 'support_thread_created':
+      return `"${nv.subject || ''}"${nv.scope === 'team' ? ' (team thread)' : ''}`;
+    case 'support_message_posted':
+      return nv.is_staff ? 'Support replied' : 'Message posted';
+    case 'support_thread_status_changed':
+      return `Status: ${nv.status}`;
+    case 'fork':
+      return nv.name ? `Forked as "${nv.name}"` : 'Forked';
+    case 'dismiss':
+      return nv.driver ? `Dismissed: ${nv.driver}` : 'Dismissed';
+    case 'compute':
+      return `Trust score from ${nv.row_count ?? 0} prices`;
+    case 'compute_all':
+      return `${nv.supplier_count ?? 0} suppliers scored`;
+    case 'update_role_permissions':
+      return `${nv.name || 'Role'}: ${nv.permission_count ?? 0} permissions`;
     default: {
       const parts = Object.entries(data)
         .filter(([k]) => !k.startsWith('_'))
-        .map(([k, v]) => {
-          if (v && typeof v === 'object' && 'from' in v && 'to' in v)
-            return `${label(k)}: ${v.from} → ${v.to}`;
-          if (typeof v === 'object') return `${label(k)}: ${JSON.stringify(v)}`;
-          return `${label(k)}: ${v}`;
-        });
+        .map(([k, v]) => fmtField(k, v))
+        .filter(Boolean);
       return parts.length ? parts.join(' · ') : '—';
     }
   }
@@ -914,6 +966,26 @@ const EVENT_TYPES = [
   { value: 'scrape', label: 'Scrape' },
   { value: 'invite_accepted', label: 'Invite Accepted' },
   { value: 'invite_revoked', label: 'Invite Revoked' },
+  // Newer events (team-visible ones the backend logs; admin_* never reach
+  // this log). Anything not listed still shows, under humanize().
+  { value: 'brief_generated', label: 'Brief Generated' },
+  { value: 'negotiation_prep_generated', label: 'Negotiation Prep' },
+  { value: 'negotiation_position_generated', label: 'Negotiation Position' },
+  { value: 'supplier_claim', label: 'Supplier Claim' },
+  { value: 'quote_extracted', label: 'Quote Extracted' },
+  { value: 'quote_line_confirmed', label: 'Quote Line Confirmed' },
+  { value: 'quote_line_rejected', label: 'Quote Line Rejected' },
+  { value: 'ai_cost_draft', label: 'AI Cost Draft' },
+  { value: 'ai_cost_draft_promoted', label: 'AI Draft Promoted' },
+  { value: 'load_example_data', label: 'Example Data Loaded' },
+  { value: 'fork', label: 'Fork' },
+  { value: 'dismiss', label: 'Dismiss' },
+  { value: 'compute', label: 'Trust Score' },
+  { value: 'compute_all', label: 'Trust Scores (All)' },
+  { value: 'update_role_permissions', label: 'Role Permissions' },
+  { value: 'support_thread_created', label: 'Support Request' },
+  { value: 'support_message_posted', label: 'Support Message' },
+  { value: 'support_thread_status_changed', label: 'Support Status' },
 ];
 
 const ENTITY_TYPES = [
@@ -1070,12 +1142,12 @@ function ActivityTab() {
                           display: 'inline-block', padding: '1px 8px', borderRadius: 4,
                           fontSize: 10, fontWeight: 600, background: bs.bg, color: bs.color,
                         }}>
-                          {EVENT_TYPES.find(e => e.value === log.event_type)?.label || log.event_type}
+                          {EVENT_TYPES.find(e => e.value === log.event_type)?.label || humanize(log.event_type)}
                         </span>
                       </td>
                       <td style={{ fontSize: 11 }}>
                         <span style={{ color: 'var(--text)' }}>
-                          {ENTITY_TYPES.find(e => e.value === log.entity_type)?.label || log.entity_type}
+                          {ENTITY_TYPES.find(e => e.value === log.entity_type)?.label || humanize(log.entity_type)}
                         </span>
                         <span style={{ color: 'var(--muted)', marginLeft: 6, fontSize: 9 }}>{log.entity_id?.slice(0, 8)}</span>
                       </td>
