@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import {
   DetailHeader, Panel, EmptyState, ErrorState, LoadingPage, StatusBadge, useApi, fmt,
 } from '../../components/intel';
@@ -27,6 +27,7 @@ function parseOpen(raw) {
 
 export default function IndustryDetailPage() {
   const { industrySlug } = useParams();
+  const location = useLocation();
   const { data, error, status, loading, reload } = useApi(
     industrySlug ? `/api/intel/industries/${encodeURIComponent(industrySlug)}` : null,
   );
@@ -109,7 +110,9 @@ export default function IndustryDetailPage() {
   return (
     <div className="ca-fade-in">
       <DetailHeader
-        backTo="/intelligence/categories"
+        // From the Categories list, "Back" is history, so the list keeps its
+        // sort and filters; opened directly, it goes to the list.
+        backTo={location.state?.fromList ? undefined : '/intelligence/categories'}
         crumbs={[
           { label: 'Intelligence', to: '/intelligence' },
           { label: 'Categories', to: '/intelligence/categories' },
