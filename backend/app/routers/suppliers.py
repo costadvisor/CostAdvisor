@@ -19,6 +19,7 @@ from app.schemas.supplier import (
     SupplierTrustSummaryOut, SupplierTrustScoresResponse,
 )
 from app.services.audit import log_event
+from app.services.data_resolver import index_lookup_cache
 from app.services.permissions import require_permission
 from app.services.supplier_trust import (
     compute_supplier_trust_scores, team_producer_map, _grade_for,
@@ -104,7 +105,14 @@ def benchmark_suppliers(
     and volume-weighted exposure. Ranked by mean gap% desc so the biggest
     margin-padder (largest negotiation opportunity) is first."""
     require_team_role(db, current_user, team_id, ["owner", "admin"])
+    # One memo for the whole read, as the portfolio endpoints do: each priced
+    # quarter is its own should-cost call, and without a shared memo every call
+    # re-read the same index values and recipe lines (~15 s on the demo team).
+    with index_lookup_cache():
+        return _benchmark(db, team_id)
 
+
+def _benchmark(db: Session, team_id: uuid.UUID) -> dict:
     suppliers = db.query(Supplier).filter(Supplier.team_id == team_id).order_by(Supplier.name).all()
     results = []
     for s in suppliers:

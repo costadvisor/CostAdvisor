@@ -40,3 +40,41 @@ def test_benchmark_non_member_forbidden(client_as, tenant_a, tenant_b):
     c = client_as(tenant_b)
     r = c.get("/api/suppliers/benchmark", params={"team_id": str(tenant_a["team_id"])})
     assert r.status_code == 403
+
+
+def test_benchmark_prices_every_quarter_inside_one_index_memo(client_as, tenant_a, db, monkeypatch):
+    """Audit C-31: each priced quarter is its own should-cost call. Run outside a
+    shared memo, every call re-read the same index values (~15 s on the demo
+    team); inside one, the repeats are answered from it (~3 s)."""
+    import uuid
+
+    from app.models.cost_model import CostModel
+    from app.models.price_data import ActualPrice
+    from app.models.product import Product
+    from app.models.supplier import Supplier
+    from app.services.data_resolver import index_lookup_cache_active
+
+    s = Supplier(team_id=tenant_a["team_id"], name="Memo Co")
+    p = Product(id=uuid.uuid4(), team_id=tenant_a["team_id"], created_by=tenant_a["user_id"], name="Memo P", unit="t")
+    db.add_all([s, p])
+    db.flush()
+    cm = CostModel(id=uuid.uuid4(), team_id=tenant_a["team_id"], product_id=p.id, created_by=tenant_a["user_id"],
+                   supplier_id=s.id, region="Europe", currency="EUR")
+    db.add(cm)
+    db.flush()
+    db.add_all([ActualPrice(cost_model_id=cm.id, uploaded_by=tenant_a["user_id"], year=2026, quarter=q, price=110.0)
+                for q in (1, 2)])
+    db.commit()
+
+    seen = []
+
+    def _stub(db_, model, year, quarter):
+        seen.append(index_lookup_cache_active())
+        return 100.0
+
+    monkeypatch.setattr("app.routers.suppliers._should_cost_for_period", _stub)
+    r = client_as(tenant_a).get("/api/suppliers/benchmark", params={"team_id": str(tenant_a["team_id"])})
+    assert r.status_code == 200, r.text
+    row = next(x for x in r.json()["suppliers"] if x["supplier_id"] == s.id)
+    assert row["avg_gap_pct"] == 10.0
+    assert seen == [True, True]
