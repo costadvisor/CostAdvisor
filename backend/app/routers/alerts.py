@@ -8,6 +8,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database import get_db
 from app.models.user import User
 from app.models.team import Team
@@ -223,6 +224,17 @@ def set_team_threshold(team_id: uuid.UUID, data: TeamThresholdUpdate,
         default_threshold_pct=float(team.default_threshold_pct),
         default_threshold_unit=team.default_threshold_unit,
     )
+
+
+@router.get("/mail-status")
+def get_mail_status(team_id: uuid.UUID, db: Session = Depends(get_db),
+                    current_user: User = Depends(get_current_user)):
+    """Whether alert e-mail can be delivered at all: the same SMTP check the
+    sender makes (services/email._send), so the page can warn before a
+    subscriber picks Email and every alert fails silently."""
+    require_permission(db, current_user, team_id, "costing.view")
+    settings = get_settings()
+    return {"configured": bool(settings.smtp_host and settings.smtp_user)}
 
 
 @router.get("/slack-webhook", response_model=SlackWebhookOut)

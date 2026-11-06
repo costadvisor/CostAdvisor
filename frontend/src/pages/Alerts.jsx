@@ -48,6 +48,8 @@ export default function Alerts() {
   const [costModels, setCostModels] = useState([]);
   const [commodities, setCommodities] = useState([]);
   const [slack, setSlack] = useState({ configured: false, slack_webhook_url: null });
+  // null = unknown (the check failed): no warning rather than a wrong one.
+  const [mailConfigured, setMailConfigured] = useState(null);
   const [slackUrl, setSlackUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -82,8 +84,10 @@ export default function Alerts() {
       api.get('/api/alerts/threshold', { params: p }),
       api.get('/api/suppliers', { params: p }).catch(() => ({ data: [] })),
       api.get('/api/contracts', { params: p }).catch(() => ({ data: [] })),
+      api.get('/api/alerts/mail-status', { params: p }).catch(() => ({ data: { configured: null } })),
     ])
-      .then(([s, h, cm, idx, sw, th, sup, con]) => {
+      .then(([s, h, cm, idx, sw, th, sup, con, mail]) => {
+        setMailConfigured(mail.data?.configured ?? null);
         setSubs(s.data); setHistory(h.data); setCostModels(cm.data);
         setCommodities(idx.data); setSlack(sw.data); setSlackUrl(sw.data.slack_webhook_url || '');
         setTeamThreshold(th.data); setThresholdDraft(String(th.data.default_threshold_pct));
@@ -184,7 +188,7 @@ export default function Alerts() {
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.55 }}>
             Applies to every subscription that has not set its own. Changing it moves the
-            boundary for all of them at once. Owner/admin only — saving 403s otherwise.
+            boundary for all of them at once. Only owners and admins can change this.
             {/* The unit travels with the value: a currency threshold only means
                 something where both sides are money, and a platform index level
                 is base 100, where nothing is. */}
@@ -247,6 +251,11 @@ export default function Alerts() {
         </div>
         {channel === 'slack' && !slack.configured && (
           <div style={{ fontSize: 11, color: 'var(--accent2)', marginTop: 6 }}>No Slack webhook configured yet — set one below (owner/admin).</div>
+        )}
+        {channel === 'email' && mailConfigured === false && (
+          <div style={{ fontSize: 11, color: 'var(--accent2)', marginTop: 6 }}>
+            E-mail delivery is not set up on this server yet, so e-mail alerts are recorded in the history below but not sent. Use Slack to be notified now.
+          </div>
         )}
       </div>
 

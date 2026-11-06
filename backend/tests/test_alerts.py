@@ -69,3 +69,22 @@ def test_history_shape(client_as, tenant_a):
     c = client_as(tenant_a)
     r = c.get("/api/alerts/history", params={"team_id": str(tenant_a["team_id"])})
     assert r.status_code == 200 and isinstance(r.json(), list)
+
+
+def test_mail_status_follows_the_smtp_settings(client_as, tenant_a, monkeypatch):
+    """Audit D-29: the page warns before Email is picked on a server that
+    cannot send it; the flag is the sender's own SMTP check."""
+    from app.config import get_settings
+
+    c = client_as(tenant_a)
+    params = {"team_id": str(tenant_a["team_id"])}
+    monkeypatch.setattr(get_settings(), "smtp_host", "")
+    assert c.get("/api/alerts/mail-status", params=params).json() == {"configured": False}
+    monkeypatch.setattr(get_settings(), "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(get_settings(), "smtp_user", "alerts@example.com")
+    assert c.get("/api/alerts/mail-status", params=params).json() == {"configured": True}
+
+
+def test_mail_status_requires_membership(client_as, tenant_a, tenant_b):
+    r = client_as(tenant_b).get("/api/alerts/mail-status", params={"team_id": str(tenant_a["team_id"])})
+    assert r.status_code in (403, 404)
