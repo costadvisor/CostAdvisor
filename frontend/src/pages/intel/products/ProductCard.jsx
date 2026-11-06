@@ -61,7 +61,8 @@ function ProductCard({ item, sparkWidth }) {
       <div className="ix-card-name">{item.name}</div>
       <div className="ixp-status"><SupplyBadge status={item.status} /></div>
       <div className="ix-card-meta ixp-meta">
-        <span>{[item.form, regionsText].filter(Boolean).join(' · ')}</span>
+        {/* The region count is the footer's link text; the dots show which. */}
+        {item.form && <span>{item.form}</span>}
         {item.is_group && (
           <span className="ixp-group" title={`Group card: ${fmt.plural(item.member_count, 'member product')}`}>
             Group · {item.member_count}
