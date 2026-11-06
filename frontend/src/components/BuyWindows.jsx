@@ -6,9 +6,12 @@ import { fmtMoney } from '../utils/currency';
  * Per-product "cheap now / expensive now" signal: current should-cost vs the
  * trailing-4-quarter average. Data from GET /api/portfolio/buy-windows. */
 
+// Named for what it measures (now vs the last four quarters), the words the
+// radar and alerts use. "Hold / wait" belongs to the forward verdict below,
+// where it means the opposite colour.
 export const BUY_SIGNAL = {
-  cheap:        { label: 'Buy now',      color: 'var(--accent)',  bg: 'var(--success-bg)' },
-  expensive:    { label: 'Hold / wait',  color: 'var(--accent2)', bg: 'var(--danger-bg)' },
+  cheap:        { label: 'Cheap now',     color: 'var(--accent)',  bg: 'var(--success-bg)' },
+  expensive:    { label: 'Expensive now', color: 'var(--accent2)', bg: 'var(--danger-bg)' },
   neutral:      { label: 'Neutral',      color: 'var(--muted)',   bg: 'var(--neutral-bg)' },
   insufficient: { label: 'Not enough history', color: 'var(--muted)', bg: 'var(--neutral-bg)' },
 };
@@ -77,7 +80,7 @@ export default function BuyWindows({ data, loading, error }) {
     <div className="ca-card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
         <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-          Current should-cost vs the trailing 4-quarter average. "Buy now" = ≥3% below recent; "Hold / wait" = ≥3% above.
+          Current should-cost vs the trailing 4-quarter average. "Cheap now" = ≥3% below recent; "Expensive now" = ≥3% above.
         </div>
         <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={handleCsv}>Export CSV</button>
       </div>
