@@ -150,6 +150,8 @@
    palette, as a delivered document). Give it the panel's padding and a
    reading size that matches the rest of the page. */
 .st-report.report-wrap { padding: 16px 18px 14px; font-size: 12.5px; line-height: 1.7; border-radius: 0 0 var(--radius) var(--radius); }
+.st-report.report-wrap .ixr-table-scroll { margin: 1rem 0; }
+.st-report.report-wrap .ixr-table-scroll > table { margin: 0; }
 .st-report.report-wrap > :first-child { margin-top: 0; }
 .st-report.report-wrap > :last-child { margin-bottom: 0; }
 .st-report.report-wrap table { font-size: 11.5px; margin: 1rem 0; }

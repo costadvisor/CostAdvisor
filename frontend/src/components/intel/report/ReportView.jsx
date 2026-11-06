@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react';
 import EmptyState from '../EmptyState';
-import { asOfLabel, sectionDomId } from './reportUtil';
+import { asOfLabel, sectionDomId, wrapTables } from './reportUtil';
 import '../../../styles/report.css';
 
 /* A delivered market report, shown as the document it is.
@@ -71,10 +71,12 @@ export default function ReportView({ report, lead, toc = true, only, header = tr
   const slug = report?.slug || 'report';
 
   // Index each section's <h3> blocks for the contents rail (ids are assigned
-  // on the rendered DOM: the stored html carries none).
+  // on the rendered DOM: the stored html carries none). Wide tables get their
+  // scroll box here too.
   useLayoutEffect(() => {
     const root = docRef.current;
     if (!root) return;
+    wrapTables(root);
     const next = {};
     sections.forEach((s) => {
       const el = root.querySelector(`#${sectionDomId(slug, s.section_id)}`);

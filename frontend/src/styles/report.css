@@ -148,6 +148,12 @@
 .report-wrap .report-header h1{color:#fff}
 .report-wrap .footer p{margin-bottom:.5rem}
 .report-wrap .footer p:last-child{margin-bottom:0}
+/* Each table sits in a scroll box (wrapTables in reportUtil.js), so a table
+   wider than the sheet scrolls on its own. The box takes the table's margin:
+   a scroll box keeps its child's margins inside, which would add to the
+   paragraph margin above instead of collapsing with it. */
+.report-wrap .ixr-table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:1.5rem 0}
+.report-wrap .ixr-table-scroll > table{margin:0}
 /* The Kraljic SVG is authored at a fixed 260px; keep it inside narrow columns. */
 .report-wrap svg{max-width:100%;height:auto}
 /* Kraljic quadrant labels. Every delivered chart (171 reports) draws the four

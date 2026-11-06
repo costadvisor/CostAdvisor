@@ -5,6 +5,7 @@ import {
 } from '../../../components/intel';
 import { KraljicMatrix } from '../../../components/charts';
 import AnalysisDemand from '../AnalysisDemand';
+import { wrapTables } from '../../../components/intel/report/reportUtil';
 import '../../../styles/report.css';
 
 /* Strategic Analysis: the playbook's delivered market report, cut into the
@@ -60,7 +61,9 @@ function ReportHtml({ html }) {
   const [tall, setTall] = useState(false);
   const [open, setOpen] = useState(false);
   useLayoutEffect(() => {
-    if (ref.current) setTall(ref.current.scrollHeight > CLAMP_OVER);
+    if (!ref.current) return;
+    wrapTables(ref.current);
+    setTall(ref.current.scrollHeight > CLAMP_OVER);
   }, [html]);
   const clamped = tall && !open;
   const toggle = () => {
