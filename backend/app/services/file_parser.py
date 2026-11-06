@@ -203,10 +203,12 @@ def parse_price_upload(content: bytes, filename: str) -> dict:
             continue
         try:
             price = float(row["price"])
+            if not price > 0:
+                raise ValueError
         except (ValueError, TypeError):
             errors.append({
                 "row": row_num,
-                "message": f"Invalid price '{row['price']}'. Must be a number.",
+                "message": f"Invalid price '{row['price']}'. Must be a number above zero.",
             })
             continue
 
@@ -256,10 +258,12 @@ def parse_volume_upload(content: bytes, filename: str) -> dict:
             continue
         try:
             volume = float(row["volume"])
+            if not volume >= 0:
+                raise ValueError
         except (ValueError, TypeError):
             errors.append({
                 "row": row_num,
-                "message": f"Invalid volume '{row['volume']}'. Must be a number.",
+                "message": f"Invalid volume '{row['volume']}'. Must be a number, zero or more.",
             })
             continue
         entry = {"year": year, "quarter": quarter, "volume": volume}

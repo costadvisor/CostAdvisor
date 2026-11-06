@@ -74,3 +74,22 @@ def test_template_and_upload_use_the_product_unit(client_as, tenant_a, db):
     assert len(r.json()["errors"]) == 1          # the m3 row is skipped, with a reason
     assert (float(_stored(db, cm, 2026, 1).volume), _stored(db, cm, 2026, 1).unit) == (600.0, "t")
     assert (float(_stored(db, cm, 2026, 2).volume), _stored(db, cm, 2026, 2).unit) == (700.0, "t")
+
+
+def test_negative_quantity_and_price_are_refused(client_as, tenant_a, db):
+    """Audit C-06: -12 t and a -5 price were stored and fed gap and impact."""
+    cm = _mk_model(db, tenant_a, unit="t")
+    c = client_as(tenant_a)
+    r = c.put(f"/api/volumes/{cm.id}/2026/4", json={"year": 2026, "quarter": 4, "volume": -12})
+    assert r.status_code == 422
+    r = c.put(f"/api/prices/{cm.id}/2026/4", json={"year": 2026, "quarter": 4, "price": -5})
+    assert r.status_code == 422
+    r = c.put(f"/api/prices/{cm.id}/2026/4", json={"year": 2026, "quarter": 4, "price": 0})
+    assert r.status_code == 422
+    assert c.put(f"/api/volumes/{cm.id}/2026/4", json={"year": 2026, "quarter": 4, "volume": 0}).status_code == 200
+
+    csv = "period,price\nQ1-2026,-5\nQ2-2026,300\n"
+    r = c.post(f"/api/prices/{cm.id}/upload", files={"file": ("prices.csv", csv.encode(), "text/csv")})
+    assert r.status_code == 200, r.text
+    assert r.json()["rows_processed"] == 1
+    assert len(r.json()["errors"]) == 1

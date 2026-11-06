@@ -27,6 +27,7 @@ export default function Pricing() {
   const [addPrice, setAddPrice] = useState('');
   const [addVolume, setAddVolume] = useState('');
   const [saving, setSaving] = useState(false);
+  const [addError, setAddError] = useState(null);
 
   // Editing state
   const [editKey, setEditKey] = useState(null); // "year-quarter"
@@ -104,10 +105,20 @@ export default function Pricing() {
     }
   }, [mergedRows, loadingPrices]);
 
+  // The server's bounds, checked first so the message sits next to the row:
+  // a price above zero, a quantity of zero or more.
+  const entryError = (price, volume) => {
+    if (price !== '' && !(parseFloat(price) > 0)) return 'Price must be above zero.';
+    if (volume !== '' && !(parseFloat(volume) >= 0)) return "Quantity can't be negative.";
+    return null;
+  };
+
   const addPriceRow = () => {
     if (!addPrice && !addVolume) return;
+    const bad = entryError(addPrice, addVolume);
+    if (bad) { setAddError(bad); return; }
     setSaving(true);
-    setRowError(null);
+    setAddError(null);
     const promises = [];
     if (addPrice) {
       promises.push(api.put(`/api/prices/${costModelId}/${addYear}/${addQuarter}`, {
@@ -123,7 +134,7 @@ export default function Pricing() {
     }
     Promise.all(promises)
       .then(() => { setAddPrice(''); setAddVolume(''); fetchData(); })
-      .catch(err => setRowError(formatApiError(err)))
+      .catch(err => setAddError(formatApiError(err)))
       .finally(() => setSaving(false));
   };
 
@@ -134,6 +145,8 @@ export default function Pricing() {
   };
 
   const saveEdit = (row) => {
+    const bad = entryError(editPrice, editVolume);
+    if (bad) { setRowError(bad); return; }
     setRowError(null);
     const promises = [];
     if (editPrice !== '') {
@@ -345,7 +358,7 @@ export default function Pricing() {
                         <td className="right">
                           {isEditing ? (
                             <input
-                              type="number" step="0.01" className="ca-input"
+                              type="number" step="0.01" min="0" className="ca-input"
                               style={{ width: 110, textAlign: 'right', fontSize: 12, padding: '3px 6px' }}
                               aria-label={`Price for ${qLabel(row.year, row.quarter)}`}
                               value={editPrice}
@@ -360,7 +373,7 @@ export default function Pricing() {
                         <td className="right">
                           {isEditing ? (
                             <input
-                              type="number" step="1" className="ca-input"
+                              type="number" step="1" min="0" className="ca-input"
                               style={{ width: 110, textAlign: 'right', fontSize: 12, padding: '3px 6px' }}
                               aria-label={`Quantity for ${qLabel(row.year, row.quarter)}`}
                               value={editVolume}
@@ -413,7 +426,7 @@ export default function Pricing() {
             <div>
               <label className="ca-label" htmlFor="add-price">Price{priceUnit ? ` (${priceUnit})` : ''}</label>
               <input
-                id="add-price" ref={priceInputRef} type="number" step="0.01" className="ca-input"
+                id="add-price" ref={priceInputRef} type="number" step="0.01" min="0" className="ca-input"
                 style={{ width: 140, fontSize: 12 }}
                 value={addPrice}
                 onChange={e => setAddPrice(e.target.value)}
@@ -423,7 +436,7 @@ export default function Pricing() {
             <div>
               <label className="ca-label" htmlFor="add-qty">Quantity{unitLabel ? ` (${unitLabel})` : ''}</label>
               <input
-                id="add-qty" type="number" step="1" className="ca-input"
+                id="add-qty" type="number" step="1" min="0" className="ca-input"
                 style={{ width: 140, fontSize: 12 }}
                 value={addVolume}
                 onChange={e => setAddVolume(e.target.value)}
@@ -434,6 +447,9 @@ export default function Pricing() {
               {saving ? 'Adding…' : 'Add'}
             </button>
           </div>
+          {addError && (
+            <div role="alert" style={{ fontSize: 12, color: 'var(--accent2)', marginTop: 8 }}>{addError}</div>
+          )}
         </div>
 
         {/* Recorded price trend */}

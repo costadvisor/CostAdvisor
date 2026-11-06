@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.constants.incoterms import (
     is_valid as incoterm_is_valid,
@@ -50,7 +50,8 @@ class ActualPriceOut(BaseModel):
 class ActualPriceCreate(BaseModel):
     year: int
     quarter: int
-    price: float
+    # A typo such as -5 fed gap, impact, benchmark and alerts as a real price.
+    price: float = Field(gt=0)
     incoterm: str | None = None
     named_place: str | None = None
     landed_cost_adjustments: dict | None = None
