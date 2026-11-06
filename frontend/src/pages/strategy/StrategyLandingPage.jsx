@@ -19,10 +19,13 @@ const SORTS = [
   { id: 'updated', label: 'Last updated' },
 ];
 
-function kraljicKey(row) {
+/* The quadrants a row is filed under: both halves of a boundary position
+   ("Leverage / Strategic"), as its badge shows them. */
+function kraljicKeys(row) {
   const k = row.kraljic;
-  if (!k) return 'none';
-  return normalizeKraljicBadge(k.badge) || 'none';
+  if (!k) return [];
+  const names = k.boundary && String(k.label || '').includes('/') ? k.label.split('/') : [k.badge];
+  return [...new Set(names.map(normalizeKraljicBadge).filter(Boolean))];
 }
 
 function sortRows(rows, sort) {
@@ -60,7 +63,7 @@ export default function StrategyLandingPage() {
   const options = useMemo(() => ({
     families: uniq(adopted.map((r) => r.family)),
     statuses: uniq(adopted.map((r) => r.status)),
-    kraljic: uniq(adopted.map(kraljicKey)).filter((k) => k !== 'none'),
+    kraljic: uniq(adopted.flatMap(kraljicKeys)),
     owners: uniq(adopted.map((r) => r.owner?.name)),
     hasUnassigned: adopted.some((r) => !r.owner),
   }), [adopted]);
@@ -68,7 +71,7 @@ export default function StrategyLandingPage() {
   const rows = useMemo(() => sortRows(adopted.filter((r) => {
     if (filters.family && r.family !== filters.family) return false;
     if (filters.status && r.status !== filters.status) return false;
-    if (filters.kraljic && kraljicKey(r) !== filters.kraljic) return false;
+    if (filters.kraljic && !kraljicKeys(r).includes(filters.kraljic)) return false;
     if (filters.owner === '__none' && r.owner) return false;
     if (filters.owner && filters.owner !== '__none' && r.owner?.name !== filters.owner) return false;
     return true;
