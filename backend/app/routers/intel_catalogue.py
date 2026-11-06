@@ -15,6 +15,12 @@ here writes.
 card that matches the filters (`total == len(items)`). The page sends no
 limit; `limit` / `offset` exist for scripts and are capped at 5,000.
 
+**Filters.** `family_id`, `industry`, `fn`, `supplier` and `region` take
+several values by repeating the key: a card passes on any of them, and the
+different keys all apply (OR within a key, AND across keys). `/facets` takes
+the same filters, and each option's count leaves its own group's filter out,
+so it reads "what ticking this gives".
+
 **Status filter.** `status` is a comma list of `live`, `supply_exception`,
 `supply_pending`, `not_audited`, or `all`. Absent means every listed card.
 The page sends its default (`live,supply_exception`) to both `/facets` and
@@ -53,31 +59,49 @@ def _statuses(value: str | None):
         raise HTTPException(422, str(exc))
 
 
+def card_filters(
+    family_id: list[int] | None = Query(None, description="chemical_families.id"),
+    subfamily_id: int | None = Query(None, description="subfamilies.id"),
+    line_id: int | None = Query(None, description="product_lines.id"),
+    industry: list[str] | None = Query(None, description="Industry name (demand tree), exact"),
+    fn: list[str] | None = Query(None, description="Function (demand tree), exact"),
+    supplier: list[str] | None = Query(None, description="Canonical producer name, exact; counting makers only"),
+    q: str | None = Query(None, description="Substring of pid, name, full name, line, sub-family, family or CAS"),
+    has_report: bool | None = Query(None, description="true = the card's product line has a market report"),
+    region: list[str] | None = Query(None, description="Drop region code (EU, NA, CN, IN, APAC, MEA, LA, GL)"),
+    trend: str | None = Query(None, description="up | flat | down (vs Jan 2023, ±2 points)"),
+) -> dict:
+    """The card filters /facets and /products share. A list key takes several
+    values by repeating it (`region=EU&region=NA`): a card passes on any of
+    them. Different keys all apply. A comma list is one literal value."""
+    if trend and trend not in TRENDS:
+        raise HTTPException(422, f"Invalid trend. Allowed: {list(TRENDS)}")
+    return {
+        "family_id": family_id, "subfamily_id": subfamily_id, "line_id": line_id,
+        "industry": industry, "fn": fn, "supplier": supplier, "q": q, "has_report": has_report,
+        "region": [normalize_region(r) for r in region] if region else None, "trend": trend,
+    }
+
+
 @router.get("/facets", response_model=FacetsOut)
 def get_facets(
     status: str | None = Query(None, description=STATUS_HELP),
+    filters: dict = Depends(card_filters),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Sidebar facets and header counts. Facet counts cover the cards in
-    `status`; `statuses`, `counts.listed` and `counts.default_view` always
-    cover every listed card."""
-    return facets(get_catalogue(db), _statuses(status))
+    """Sidebar facets and header counts, under the same filters as /products.
+    An option's count is the cards the grid would hold with it ticked (every
+    other group's filter applied, its own left out). `counts.listed` and
+    `counts.default_view` always cover every listed card; `counts.products`
+    the cards in `status`."""
+    return facets(get_catalogue(db), _statuses(status), **filters)
 
 
 @router.get("/products", response_model=ProductListOut)
 def list_products(
     status: str | None = Query(None, description=STATUS_HELP),
-    family_id: int | None = Query(None, description="chemical_families.id"),
-    subfamily_id: int | None = Query(None, description="subfamilies.id"),
-    line_id: int | None = Query(None, description="product_lines.id"),
-    industry: str | None = Query(None, description="Industry name (demand tree), exact"),
-    fn: str | None = Query(None, description="Function (demand tree), exact"),
-    supplier: str | None = Query(None, description="Canonical producer name, exact; counting makers only"),
-    q: str | None = Query(None, description="Substring of pid, name, full name, line, sub-family, family or CAS"),
-    has_report: bool | None = Query(None, description="true = the card's product line has a market report"),
-    region: str | None = Query(None, description="Drop region code (EU, NA, CN, IN, APAC, MEA, LA, GL)"),
-    trend: str | None = Query(None, description="up | flat | down (vs Jan 2023, ±2 points)"),
+    filters: dict = Depends(card_filters),
     limit: int | None = Query(None, ge=1, le=MAX_LIMIT,
                               description="Absent = every matching card (the grid sends none)"),
     offset: int = Query(0, ge=0),
@@ -85,13 +109,7 @@ def list_products(
     current_user: User = Depends(get_current_user),
 ):
     """The listed cards: family name, then status (verified first), then name."""
-    if trend and trend not in TRENDS:
-        raise HTTPException(422, f"Invalid trend. Allowed: {list(TRENDS)}")
-    statuses = _statuses(status)
-    cat = get_catalogue(db)
-    items = filter_items(cat, statuses=statuses, family_id=family_id, subfamily_id=subfamily_id,
-                         line_id=line_id, industry=industry, fn=fn, supplier=supplier, q=q,
-                         has_report=has_report, region=normalize_region(region), trend=trend)
+    items = filter_items(get_catalogue(db), statuses=_statuses(status), **filters)
     page = items[offset:] if limit is None else items[offset:offset + limit]
     return {"total": len(items), "limit": limit, "offset": offset, "items": page}
 

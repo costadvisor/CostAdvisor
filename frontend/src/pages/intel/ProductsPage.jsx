@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigationType } from 'react-router-dom';
 import {
   PageHeader, EmptyState, ErrorState, LoadingCards, Skeleton, useApi, fmt,
-  STATUS_CODES, DEFAULT_STATUSES, STATUS_LABELS, SUBFAMILY_LABEL,
+  STATUS_CODES, DEFAULT_STATUSES, STATUS_LABELS, SUBFAMILY_LABEL, REGION_LABELS, normalizeRegion,
 } from '../../components/intel';
 import ProductsSidebar from './products/ProductsSidebar';
 import ProgressiveGroups from './products/ProgressiveGroups';
@@ -28,12 +28,15 @@ function viewTitle(statuses, statusIsDefault) {
   return `Products: ${statusText(statuses)}`;
 }
 
-// "the search “zzzz” and industry Municipal Water" — for the empty state.
+// "the search “zzzz” and industry Aerospace or Municipal Water" — for the
+// empty state: the values of one group are OR, the groups AND.
 function describeFilters(chips) {
-  return chips.map(({ key, text }) => {
-    if (key === 'q') return `the search ${text}`;
+  const byKey = new Map();
+  chips.forEach(({ key, text }) => byKey.set(key, [...(byKey.get(key) || []), text]));
+  return Array.from(byKey, ([key, texts]) => {
+    if (key === 'q') return `the search ${texts[0]}`;
     if (key === 'has_report') return 'lines with a market report';
-    return `${FILTER_LABELS[key].toLowerCase()} ${text}`;
+    return `${FILTER_LABELS[key].toLowerCase()} ${texts.join(' or ')}`;
   }).join(' and ');
 }
 
@@ -121,9 +124,10 @@ export default function ProductsPage() {
   } = useProductFilters();
   const navType = useNavigationType();
 
-  // The sidebar counts and the grid read the same status filter. The grid
-  // sends no limit: the API returns every matching card (T7).
-  const facetsReq = useApi('/api/intel/facets', { status: params.status }, { keepPrevious: true });
+  // The sidebar counts and the grid read the same filters: each option's
+  // count is what ticking it gives (A-02). The grid sends no limit: the API
+  // returns every matching card (T7).
+  const facetsReq = useApi('/api/intel/facets', params, { keepPrevious: true });
   const listReq = useApi('/api/intel/products', params, { keepPrevious: true });
   const facets = facetsReq.data;
   const counts = facets?.counts || {};
@@ -241,17 +245,22 @@ export default function ProductsPage() {
     if (key === 'trend') return TREND_TEXT[value] || value;
     if (key === 'q') return `“${value}”`;
     if (key === 'has_report') return 'Has a market report';
+    if (key === 'region') return REGION_LABELS[normalizeRegion(value)] || value;
     if (idNames[key]) return idNames[key].get(String(value)) || `#${value}`;
     return value;
   };
+  // One chip per ticked value; its × takes that value off alone.
   const activeChips = [
     ...(statusIsDefault ? [] : [{ key: 'status', text: statusText(statuses) }]),
-    ...Object.entries(filters).filter(([, v]) => v != null).map(([key, v]) => ({ key, text: chipText(key, v) })),
+    ...Object.entries(filters).flatMap(([key, v]) => {
+      if (Array.isArray(v)) return v.map((x) => ({ key, value: x, text: chipText(key, x) }));
+      return v != null ? [{ key, text: chipText(key, v) }] : [];
+    }),
   ];
-  const removeChip = (key) => {
+  const removeChip = (key, value) => {
     if (key === 'status') { setStatuses(DEFAULT_STATUSES); return; }
     if (key === 'q') { committedQ.current = ''; setSearchText(''); }
-    pick(key, null);
+    pick(key, Array.isArray(filters[key]) ? filters[key].filter((x) => x !== value) : null);
   };
 
   let body;
@@ -310,8 +319,9 @@ export default function ProductsPage() {
           actions={trendPills} />
         {activeChips.length > 0 && (
           <div className="ixp-active" aria-label="Active filters">
-            {activeChips.map(({ key, text }) => (
-              <button key={key} type="button" className="ix-chip ixp-chip" onClick={() => removeChip(key)}
+            {activeChips.map(({ key, value, text }) => (
+              <button key={`${key}:${value ?? ''}`} type="button" className="ix-chip ixp-chip"
+                onClick={() => removeChip(key, value)}
                 title={key === 'status' ? 'Back to the verified-supply view' : `Remove ${FILTER_LABELS[key].toLowerCase()} filter`}>
                 <span className="ixp-chip-k">{FILTER_LABELS[key]}</span>
                 <strong>{text}</strong>

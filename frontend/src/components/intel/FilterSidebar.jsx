@@ -60,7 +60,9 @@ export function SidebarDivider() {
  *
  * options:  [{ value, label?, count? }]   (label defaults to value)
  * selected: array of values;  onChange(nextArray)
- * multi:    false → picking one replaces the selection (click again to clear)
+ * multi:    true → checkboxes, any number ticked (the page ORs them);
+ *           false → radios for a group whose options exclude each other:
+ *           picking one replaces the selection, clicking it again clears it
  * limit:    rows shown before "Show all N" (selected rows always stay visible)
  * searchable: a filter box inside the group; defaults on above 15 options
  * hideZero: drop zero-count options (unless selected); "Show all N" then
@@ -75,6 +77,7 @@ export function FilterGroup({
   const [expanded, setExpanded] = useState(false);
   const [q, setQ] = useState('');
   const bodyId = useId();
+  const radioName = useId();
   const sel = useMemo(() => new Set(selected || []), [selected]);
 
   // Everything the group can show; `hideZero` removes options for good, so
@@ -146,7 +149,13 @@ export function FilterGroup({
             return (
               <label key={o.value}
                 className={`ix-fitem${checked ? ' checked' : ''}${o.count === 0 && !checked ? ' zero' : ''}`}>
-                <input type="checkbox" checked={checked} onChange={() => toggle(o.value)} />
+                {multi ? (
+                  <input type="checkbox" checked={checked} onChange={() => toggle(o.value)} />
+                ) : (
+                  // A checked radio fires no change, so the click clears it.
+                  <input type="radio" name={radioName} checked={checked} onChange={() => toggle(o.value)}
+                    onClick={() => { if (checked) toggle(o.value); }} />
+                )}
                 <span className="ix-fitem-label">{o.label ?? o.value}</span>
                 {o.count != null && <span className="ix-count">{o.count}</span>}
               </label>

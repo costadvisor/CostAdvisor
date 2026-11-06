@@ -7,29 +7,36 @@ import {
 // Trend = the card's move since January 2023 (the badge), ±2 points.
 const TREND_LABELS = { up: 'Up >2%', flat: 'Flat ±2%', down: 'Down >2%' };
 
-/* A single-select FilterGroup bound to one URL key. A value that arrived via
- * the URL but is not among the options (a supplier outside the top 60) is
- * appended so its "1 selected" state stays visible and can be unticked. */
-function SingleGroup({ title, name, value, options, onPick, ...rest }) {
+/* A FilterGroup bound to one URL key. List keys take any number of values
+ * (OR within the group); `single` keys hold one, drawn as radios. A value that
+ * arrived via the URL but is not among the options is appended, so its
+ * "selected" state stays visible and can be unticked. Options at 0 under the
+ * other filters are hidden unless ticked (`hideZero`), as on the Lines page. */
+function KeyGroup({ title, name, value, options, onPick, single = false, ...rest }) {
+  const selected = useMemo(() => {
+    if (single) return value ? [value] : [];
+    return value || [];
+  }, [single, value]);
   const opts = useMemo(() => {
-    if (!value || options.some((o) => o.value === value)) return options;
-    return [...options, { value }];
-  }, [options, value]);
+    const known = new Set(options.map((o) => o.value));
+    const extra = selected.filter((v) => !known.has(v)).map((v) => ({ value: v }));
+    return extra.length ? [...options, ...extra] : options;
+  }, [options, selected]);
   return (
     <FilterGroup
       title={title}
       options={opts}
-      selected={value ? [value] : []}
-      multi={false}
-      onChange={(next) => onPick(name, next[0] ?? null)}
+      selected={selected}
+      multi={!single}
+      onChange={(next) => onPick(name, single ? (next[0] ?? null) : next)}
       {...rest}
     />
   );
 }
 
 /* Supply status: four checkboxes, opening on Verified makers + Concentrated
- * supply. The counts are product cards (they always cover every listed card);
- * the badge itself never carries a number. At least one box stays ticked. */
+ * supply. The counts are product cards under the other filters; the badge
+ * itself never carries a number. At least one box stays ticked. */
 function StatusGroup({ facets, statuses, onStatuses }) {
   const byCode = new Map((facets?.statuses || []).map((x) => [x.code, x]));
   const options = STATUS_CODES.map((code) => {
@@ -126,23 +133,23 @@ export default function ProductsSidebar({
 
       {facets && (
         <>
-          <SingleGroup title="Family" name="family_id" value={filters.family_id} options={families}
-            onPick={onPick} limit={40} searchable={false} />
-          <SingleGroup title="Industry" name="industry" value={filters.industry} options={industries}
-            onPick={onPick} limit={8} searchPlaceholder="Filter industries…" />
-          <SingleGroup title="Function" name="fn" value={filters.fn} options={functions}
-            onPick={onPick} limit={8} searchPlaceholder="Filter functions…" />
-          <SupplierGroup options={suppliers} value={filters.supplier}
+          <KeyGroup title="Family" name="family_id" value={filters.family_id} options={families}
+            onPick={onPick} limit={40} searchable={false} hideZero />
+          <KeyGroup title="Industry" name="industry" value={filters.industry} options={industries}
+            onPick={onPick} limit={8} searchPlaceholder="Filter industries…" hideZero />
+          <KeyGroup title="Function" name="fn" value={filters.fn} options={functions}
+            onPick={onPick} limit={8} searchPlaceholder="Filter functions…" hideZero />
+          <SupplierGroup options={suppliers} values={filters.supplier}
             onPick={(v) => onPick('supplier', v)} />
           {moreSuppliers > 0 && (
             <div className="ixp-sb-note">
               Listed: the producers counted as makers on the most products. The search finds the others.
             </div>
           )}
-          <SingleGroup title="Region" name="region" value={filters.region} options={regions}
-            onPick={onPick} limit={10} searchable={false} />
-          <SingleGroup title="Trend" name="trend" value={filters.trend} options={trends}
-            onPick={onPick} searchable={false} />
+          <KeyGroup title="Region" name="region" value={filters.region} options={regions}
+            onPick={onPick} limit={10} searchable={false} hideZero />
+          <KeyGroup title="Trend" name="trend" value={filters.trend} options={trends}
+            onPick={onPick} searchable={false} single />
         </>
       )}
     </FilterSidebar>

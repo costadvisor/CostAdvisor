@@ -272,6 +272,74 @@ def test_the_supplier_facet_and_filter_count_only_counting_makers_on_listed_card
         assert any(n == s["name"] and c in listed for n, c in counting), s["name"]
 
 
+def _pids(api, **params) -> set[str]:
+    return {i["pid"] for i in _all(api, **params)["items"]}
+
+
+def _two_busiest(facet: list[dict], key: str = "name") -> list:
+    ranked = sorted((f for f in facet if f["count"]), key=lambda f: -f["count"])
+    assert len(ranked) >= 2, facet
+    return [f[key] for f in ranked[:2]]
+
+
+def test_a_repeated_key_is_any_of_its_values_and_keys_all_apply(api):
+    """Audit A-01: two ticks in one group widen the grid (OR); two groups
+    narrow it (AND). A comma list is one literal value, not two."""
+    facets = _get(api, "/api/intel/facets", status=DEFAULT_VIEW)
+    pairs = {
+        "industry": _two_busiest(facets["industries"]),
+        "fn": _two_busiest(facets["functions"]),
+        "supplier": _two_busiest(facets["suppliers"]),
+        "region": _two_busiest(facets["regions"], "code"),
+        "family_id": _two_busiest(facets["families"], "id"),
+    }
+    for key, (a, b) in pairs.items():
+        one, other = _pids(api, status=DEFAULT_VIEW, **{key: a}), _pids(api, status=DEFAULT_VIEW, **{key: b})
+        both = _pids(api, status=DEFAULT_VIEW, **{key: [a, b]})
+        assert both == one | other, key
+    a, b = pairs["region"]
+    assert _all(api, status=DEFAULT_VIEW, region=f"{a},{b}")["total"] == 0
+    industry, region = pairs["industry"][0], pairs["region"][0]
+    crossed = _pids(api, status=DEFAULT_VIEW, industry=industry, region=region)
+    assert crossed == (_pids(api, status=DEFAULT_VIEW, industry=industry)
+                       & _pids(api, status=DEFAULT_VIEW, region=region))
+
+
+def test_facet_counts_follow_the_other_filters_but_not_their_own(api):
+    """Audit A-02: an option's count is what ticking it gives, under every
+    other active filter; the group's own pick leaves its counts alone."""
+    base = _get(api, "/api/intel/facets", status=DEFAULT_VIEW)
+    industry = _two_busiest(base["industries"])[0]
+    region = _two_busiest(base["regions"], "code")[0]
+    params = {"status": DEFAULT_VIEW, "industry": industry, "region": region}
+    body = _get(api, "/api/intel/facets", **params)
+    # Another industry counts under the region filter only, its own group left out.
+    for i in body["industries"][:12]:
+        assert i["count"] == _all(api, status=DEFAULT_VIEW, region=region, industry=i["name"])["total"], i
+    for r in body["regions"]:
+        assert r["count"] == _all(api, status=DEFAULT_VIEW, industry=industry, region=r["code"])["total"], r
+    for f in body["families"][:12]:
+        assert f["count"] == _all(api, family_id=f["id"], **params)["total"], f
+    for t in body["trends"]:
+        assert t["count"] == _all(api, trend=t["name"], **params)["total"], t
+    # Status counts follow every other filter; the status view is their own.
+    by_status = {s["code"]: s["count"] for s in body["statuses"]}
+    assert by_status == {code: _all(api, status=code, industry=industry, region=region)["total"]
+                         for code in STATUS_RANK}
+    assert body["counts"]["has_report"] == _all(api, has_report="true", **params)["total"]
+    # The header's "of N" and the view totals stay the status view's.
+    for key in ("products", "listed", "default_view"):
+        assert body["counts"][key] == base["counts"][key], key
+    # The option lists do not reshuffle; a pick outside the top suppliers stays listed.
+    assert [i["name"] for i in body["industries"]] == [i["name"] for i in base["industries"]]
+    assert {r["code"] for r in body["regions"]} == {r["code"] for r in base["regions"]}
+    listed = {s["name"] for s in body["suppliers"]}
+    directory = _get(api, "/api/intel/suppliers", limit=1000)["items"]
+    outside = next(s["name"] for s in reversed(directory) if s["name"] not in listed)
+    picked = _get(api, "/api/intel/facets", supplier=outside, **params)
+    assert outside in {s["name"] for s in picked["suppliers"]}
+
+
 def test_bad_filter_values_are_422(api):
     assert api.get("/api/intel/products", params={"trend": "sideways"}).status_code == 422
     assert api.get("/api/intel/products", params={"limit": 0}).status_code == 422
