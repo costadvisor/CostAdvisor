@@ -215,11 +215,12 @@ def test_actuals_follow_should_cost_and_ferric_chloride_drifts_above_it(db, conf
 
 def test_portfolio_summary_shows_the_story_not_the_base_price(db, config, seeded):
     """Monitor, the Negotiate list, Forecast and Dashboard read
-    /api/portfolio/summary. Its "should-cost today" is the current quarter's
-    should-cost, not the 2023Q1 base price, so the only price-drift alert is
-    the seed's story line (ferric chloride into Rotterdam)."""
+    /api/portfolio/summary. Its "should-cost today" is the should-cost at the
+    latest quarter with data (where the brief ends, audit D-01), not the 2023Q1
+    base price, so the only price-drift alert is the seed's story line (ferric
+    chloride into Rotterdam)."""
     from app.routers.portfolio import portfolio_summary
-    from app.services.costing_engine import _current_quarter
+    from app.services.costing_engine import latest_data_quarter
 
     result, _ = seeded
     owner = db.get(User, result.owner_id)
@@ -227,10 +228,9 @@ def test_portfolio_summary_shows_the_story_not_the_base_price(db, config, seeded
                                 db=db, current_user=owner)
     by_id = {m.cost_model_id: m for m in summary.models}
     assert set(by_id) == set(result.cost_model_ids.values())
-    now = _current_quarter()
     for cm_id, m in by_id.items():
         cm = db.get(CostModel, cm_id)
-        today = calculate_should_cost(db, cm, *now).should_cost
+        today = calculate_should_cost(db, cm, *latest_data_quarter(db, cm)).should_cost
         assert m.current_should_cost == pytest.approx(today, abs=1e-3)
         assert m.current_should_cost != pytest.approx(float(cm.current_formula.base_price))
     (story_key,) = [k for k in demo_buyer.DRIFT if k[0] == "BCI-FECL3-LIQ"]
