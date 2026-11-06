@@ -30,10 +30,16 @@ export default function EvoChart({ periods, theoretical, actual, refCost, compon
     : i => PAD.l + plotW * i / (N - 1);
   const yScale = v => PAD.t + (H - PAD.t - PAD.b) * (1 - (v - minV) / (maxV - minV || 1));
 
+  // A "nice" step (1, 2 or 5 × 10^n, fractions allowed): a whole-unit step drew
+  // no gridline at all on a €1.4–1.6 range and odd ticks (€59, €118…) on others.
   const gridLines = [];
-  const step = Math.max(1, Math.ceil((maxV - minV) / 6));
-  for (let v = Math.ceil(minV / step) * step; v <= maxV; v += step) {
-    gridLines.push(v);
+  const rawStep = (maxV - minV) / 6;
+  const mag = rawStep > 0 ? 10 ** Math.floor(Math.log10(rawStep)) : 1;
+  const f = rawStep / mag;
+  const step = rawStep > 0 ? (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * mag : 1;
+  const tickDp = step >= 1 ? 0 : Math.ceil(-Math.log10(step) - 1e-9);
+  for (let k = Math.ceil(minV / step); k * step <= maxV + 1e-9; k++) {
+    gridLines.push(k * step);
   }
 
   const thePath = theoretical.map((v, i) => `${i === 0 ? 'M' : 'L'}${xScale(i).toFixed(1)},${yScale(v).toFixed(1)}`).join(' ');
@@ -62,7 +68,7 @@ export default function EvoChart({ periods, theoretical, actual, refCost, compon
         <g key={i}>
           <line x1={PAD.l} y1={yScale(v)} x2={W - PAD.r} y2={yScale(v)} stroke="var(--chart-grid)" strokeWidth="1" />
           <text x={PAD.l - 6} y={yScale(v) + 3.5} fill="var(--muted)" fontSize="9" textAnchor="end" fontFamily="'JetBrains Mono', monospace">
-            {currencySymbol}{Math.round(v)}
+            {currencySymbol}{v.toLocaleString('en-US', { minimumFractionDigits: tickDp, maximumFractionDigits: tickDp })}
           </text>
         </g>
       ))}
