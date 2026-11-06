@@ -426,8 +426,10 @@ def list_nestable(
         except FormulaChainError as exc:
             out.append({
                 "cost_model_id": str(c.id),
+                "product_id": str(c.product_id),
                 "product_name": c.product.name if c.product else None,
                 "supplier_name": c.supplier.name if c.supplier else None,
+                "destination_country": c.destination_country,
                 "region": c.region,
                 "eligible": False,
                 # Named, not just excluded: "why is X missing from this list"
@@ -438,8 +440,12 @@ def list_nestable(
         fv = c.current_formula
         out.append({
             "cost_model_id": str(c.id),
+            # The product and ship-to tell two models of one product and
+            # supplier apart, and show which models share a product.
+            "product_id": str(c.product_id),
             "product_name": c.product.name if c.product else None,
             "supplier_name": c.supplier.name if c.supplier else None,
+            "destination_country": c.destination_country,
             "region": c.region,
             "eligible": fv is not None and fv.formula_type != "advanced",
             "reason": (

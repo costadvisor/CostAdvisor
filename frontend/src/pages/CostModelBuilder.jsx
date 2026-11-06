@@ -470,6 +470,11 @@ export default function CostModelBuilder() {
     return () => { cancelled = true; };
   }, [costModelId]);
 
+  // Other cost models on this product: its name, reference and unit are
+  // shared, so an edit here changes them there too. Family is the taxonomy's.
+  const productSiblings = nestable.filter(n => productId && n.product_id === productId);
+  const productFamily = products.find(p => p.id === productId)?.family?.name || null;
+
   const addComp = () => setComponents([...components, { label: '', commodity_name: '', parts: 0 }]);
   const removeComp = (i) => setComponents(components.filter((_, j) => j !== i));
 
@@ -1221,14 +1226,15 @@ export default function CostModelBuilder() {
 
         {/* RIGHT COLUMN */}
         <div>
-          {/* Product Family */}
+          {/* Product. "Family" means the taxonomy family everywhere else, so it
+              is shown read-only here and the name is called a name. */}
           <div className="ca-card" style={{ marginBottom: 16 }}>
-            <div className="ca-card-title">Product Family</div>
+            <div className="ca-card-title">Product</div>
             {editing ? (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div style={{ gridColumn: '1 / -1' }}>
-                  <label className="ca-label">Product Family</label>
-                  <input className="ca-input" placeholder="e.g. Active Carbon" value={productName}
+                  <label className="ca-label">Product name</label>
+                  <input className="ca-input" placeholder="e.g. Activated carbon, coal-based" value={productName}
                     onChange={e => setProductName(e.target.value)} />
                 </div>
                 <div>
@@ -1241,13 +1247,25 @@ export default function CostModelBuilder() {
                     {['kg', 't', 'lb'].map(u => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
+                {productSiblings.length > 0 && (
+                  <div style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--accent3)' }}>
+                    Also used by {productSiblings.map(n => [n.supplier_name || 'no supplier', n.destination_country].filter(Boolean).join(' → ')).join(', ')}.
+                    A new name, reference or unit applies there too.
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div style={{ gridColumn: '1 / -1' }}>
-                  <label className="ca-label">Product Family</label>
+                  <label className="ca-label">Product name</label>
                   <div style={{ fontSize: 13, padding: '7px 0', fontWeight: 600 }}>{productName || '\u2014'}</div>
                 </div>
+                {productFamily && (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label className="ca-label">Family</label>
+                    <div style={{ fontSize: 13, padding: '7px 0' }}>{productFamily}</div>
+                  </div>
+                )}
                 <div>
                   <label className="ca-label">Product Reference</label>
                   <div style={{ fontSize: 13, padding: '7px 0' }}>{formula || '\u2014'}</div>

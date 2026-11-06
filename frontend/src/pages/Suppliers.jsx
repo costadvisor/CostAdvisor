@@ -260,7 +260,7 @@ export default function Suppliers() {
                           <table className="ca-table" style={{ margin: '8px 0' }}>
                             <thead>
                               <tr>
-                                <th>Family</th>
+                                <th>Product</th>
                                 <th>Reference</th>
                                 <th>Producing Region</th>
                                 <th className="center">Gap %</th>

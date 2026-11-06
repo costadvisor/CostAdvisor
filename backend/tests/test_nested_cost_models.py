@@ -303,6 +303,9 @@ def test_nestable_offers_a_legal_candidate(db, client_as, tenant_a, lego):
     by_id = {c["cost_model_id"]: c for c in r.json()["candidates"]}
     assert by_id[str(lego["child"].id)]["eligible"] is True
     assert by_id[str(lego["child"].id)]["reason"] is None
+    # The builder tells sibling models of one product apart by these (audit C-10, C-18).
+    assert by_id[str(lego["child"].id)]["product_id"] == str(lego["child"].product_id)
+    assert "destination_country" in by_id[str(lego["child"].id)]
 
 
 # ── clone ─────────────────────────────────────────────────────────────────
