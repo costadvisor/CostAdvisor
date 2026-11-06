@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { registerAlertFn } from '../api';
+import { useEscapeKey } from './Modal';
 
 const ConfirmCtx = createContext(null);
 
@@ -18,13 +19,9 @@ export function ConfirmProvider({ children }) {
     registerAlertFn((msg) => showAlert({ title: 'Notice', message: msg }));
   }, [showAlert]);
 
-  // Close on Escape
-  useEffect(() => {
-    if (!dialog) return;
-    const handler = (e) => { if (e.key === 'Escape') handle(false); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [dialog]);
+  // Close on Escape. Through the shared hook, so a dialog underneath does not
+  // close on the same press.
+  useEscapeKey(!!dialog, () => handle(false));
 
   const handle = (result) => {
     dialog?.resolve(result);

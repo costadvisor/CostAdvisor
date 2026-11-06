@@ -1,5 +1,9 @@
 import { useEffect, useRef } from 'react';
 
+// Dialogs listening for Escape, newest last. Only the newest answers, so a
+// confirm or alert raised over a dialog closes alone, not both at once.
+const escapeStack = [];
+
 // Escape closes a dialog while `active`. For hand-rolled dialogs that do not
 // use <Modal>; pass active=false while a child dialog is open so one press
 // closes only the top one. onClose sits in a ref so an inline callback does
@@ -9,11 +13,16 @@ export function useEscapeKey(active, onClose) {
   onCloseRef.current = onClose;
   useEffect(() => {
     if (!active) return undefined;
+    const token = {};
+    escapeStack.push(token);
     const handleKey = (e) => {
-      if (e.key === 'Escape') onCloseRef.current();
+      if (e.key === 'Escape' && escapeStack[escapeStack.length - 1] === token) onCloseRef.current();
     };
     document.addEventListener('keydown', handleKey);
-    return () => document.removeEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('keydown', handleKey);
+      escapeStack.splice(escapeStack.indexOf(token), 1);
+    };
   }, [active]);
 }
 
