@@ -6,6 +6,7 @@ import exportCsv from '../../utils/exportCsv';
 import { DriftBar, GAP_STATUS as STATUS, gapStatus } from './wsCharts';
 import RadarView from '../../components/RadarView';
 import DemoDataNote from '../../components/DemoDataNote';
+import { qLabel, quarterKey } from '../../utils/quarters';
 import { fmtMoney, fmtSignedMoney, EXPOSURE_NOTE, rowExposure } from '../../utils/currency';
 
 /* Monitor — the standing question of the job: across everything I buy, where am
@@ -120,7 +121,15 @@ export default function MonitorArea() {
         familyLabel: fam?.name || 'No family',
         status,
         shouldCost: s ? s.current_should_cost : null,
+        // The quarter the should-cost is priced at (the latest with data, as
+        // on the brief) and the quarter of the last invoice.
+        asOf: s?.as_of_year ? qLabel(s.as_of_year, s.as_of_quarter) : null,
         actual: s ? s.latest_actual_price : null,
+        actualPeriod: s?.latest_actual_year ? qLabel(s.latest_actual_year, s.latest_actual_quarter) : null,
+        // An invoice is "in" only when it covers the should-cost's quarter; an
+        // older one leaves this quarter's price still awaited.
+        invoiceIn: !!(s && s.latest_actual_year && s.as_of_year
+          && quarterKey(s.latest_actual_year, s.latest_actual_quarter) >= quarterKey(s.as_of_year, s.as_of_quarter)),
         gap: s ? s.gap : null,
         gapPct: s ? s.gap_pct : null,
         exposure,
@@ -132,7 +141,8 @@ export default function MonitorArea() {
       ref: p.formula || null, name: p.name, supplier: null, region: null,
       currency: reportCur,
       familyLabel: p.family?.name || 'No family',
-      status: 'draft', shouldCost: null, actual: null, gap: null, gapPct: null, exposure: 0,
+      status: 'draft', shouldCost: null, asOf: null, actual: null, actualPeriod: null, invoiceIn: false,
+      gap: null, gapPct: null, exposure: 0,
     }));
     return [...cmRows, ...draftRows];
   }, [costModels, products, summaryByModel, productById, reportCur]);
@@ -182,8 +192,9 @@ export default function MonitorArea() {
   // two suppliers has two cost models but is one product of the portfolio.
   const liveProducts = new Set(costModels.filter(cm => summaryByModel[cm.id]).map(cm => cm.product_id)).size;
   const draftCount = rows.filter(r => r.status === 'draft').length;
-  // "Awaiting invoice" = a live should-cost exists but no actual price landed yet.
-  const awaitingInvoice = rows.filter(r => r.shouldCost != null && r.actual == null).length;
+  // "Awaiting invoice" = a live should-cost exists but no invoice covers its
+  // quarter yet (any invoice ever recorded used to count as "in").
+  const awaitingInvoice = rows.filter(r => r.shouldCost != null && !r.invoiceIn).length;
   const totalProducts = products.length;
   const stats = [
     { lbl: 'Products in portfolio', val: totalProducts, sub: `${completeCount} active cost model${completeCount === 1 ? '' : 's'} · ${draftCount} formula incomplete` },
@@ -229,7 +240,7 @@ export default function MonitorArea() {
                 r.familyLabel, r.ref || '', r.name, r.supplier || '', r.region || '', r.currency,
                 r.shouldCost != null ? r.shouldCost : '', r.actual != null ? r.actual : '',
                 r.gap != null ? r.gap : '', r.gapPct != null ? r.gapPct : '', r.exposure || '',
-                STATUS[r.status].label, r.kind === 'cm' ? (r.actual != null ? 'Received' : 'Awaited') : '',
+                STATUS[r.status].label, r.kind === 'cm' ? (r.invoiceIn ? `${r.actualPeriod} received` : 'Awaited') : '',
               ])
             )}>Export CSV</button>
           )}
@@ -338,14 +349,18 @@ export default function MonitorArea() {
                               </td>
                               <td className="center">
                                 {r.shouldCost != null ? (
-                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                    <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent)' }}>{fmtMoney(r.shouldCost, r.currency)}</span>
-                                    <Badge color="var(--accent)" bg="var(--success-bg)">live</Badge>
-                                  </div>
+                                  <>
+                                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                      <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent)' }}>{fmtMoney(r.shouldCost, r.currency)}</span>
+                                      <Badge color="var(--accent)" bg="var(--success-bg)">live</Badge>
+                                    </div>
+                                    {r.asOf && <div style={{ fontSize: 10, color: 'var(--muted)' }}>as of {r.asOf}</div>}
+                                  </>
                                 ) : <span style={{ color: 'var(--muted)' }}>—</span>}
                               </td>
                               <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.actual != null ? 'var(--accent4)' : 'var(--muted)' }}>
                                 {r.actual != null ? fmtMoney(r.actual, r.currency) : '—'}
+                                {r.actualPeriod && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{r.actualPeriod}</div>}
                               </td>
                               <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.gap > 0 ? 'var(--accent2)' : r.gap < 0 ? 'var(--accent)' : 'var(--muted)' }}>
                                 {r.gap != null ? fmtSignedMoney(r.gap, r.currency, { scale: r.shouldCost }) : '—'}
@@ -354,9 +369,12 @@ export default function MonitorArea() {
                               <td>{r.gapPct != null ? <DriftBar value={Math.abs(r.gapPct)} max={maxAbsGap} color={st.color} /> : null}</td>
                               <td className="center">
                                 {r.shouldCost != null
-                                  ? (r.actual != null
-                                    ? <Badge color="var(--accent)" bg="var(--success-bg)">Received</Badge>
-                                    : <Badge color="var(--accent3)" bg="var(--warn-bg)">Awaited</Badge>)
+                                  ? (r.invoiceIn
+                                    ? <Badge color="var(--accent)" bg="var(--success-bg)">{r.actualPeriod} received</Badge>
+                                    : <Badge color="var(--accent3)" bg="var(--warn-bg)"
+                                        title={r.actualPeriod ? `Last invoice ${r.actualPeriod}; none yet for ${r.asOf}` : 'No invoice recorded yet'}>
+                                        {r.asOf ? `${r.asOf} awaited` : 'Awaited'}
+                                      </Badge>)
                                   : <span style={{ color: 'var(--muted)' }}>—</span>}
                               </td>
                               <td className="center"><Badge color={st.color} bg={st.bg}>{st.label}</Badge></td>

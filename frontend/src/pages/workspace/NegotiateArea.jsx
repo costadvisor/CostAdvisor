@@ -4,6 +4,7 @@ import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { DriftBar, GAP_STATUS as STATUS, gapStatus } from './wsCharts';
 import DemoDataNote from '../../components/DemoDataNote';
+import { qLabel } from '../../utils/quarters';
 import { dominantCurrency, fmtMoney, fmtSignedMoney, EXPOSURE_NOTE, rowExposure } from '../../utils/currency';
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -82,7 +83,10 @@ export default function NegotiateArea() {
         currency: cm.currency || reportCur,
         status,
         shouldCost: s ? s.current_should_cost : null,
+        // Priced at the latest quarter with data, the quarter its brief ends at.
+        asOf: s?.as_of_year ? qLabel(s.as_of_year, s.as_of_quarter) : null,
         actual: s ? s.latest_actual_price : null,
+        actualPeriod: s?.latest_actual_year ? qLabel(s.latest_actual_year, s.latest_actual_quarter) : null,
         gap: s ? s.gap : null,
         gapPct: s ? s.gap_pct : null,
         exposure,
@@ -185,9 +189,11 @@ export default function NegotiateArea() {
                         </td>
                         <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.shouldCost != null ? 'var(--accent)' : 'var(--muted)' }}>
                           {r.shouldCost != null ? fmtMoney(r.shouldCost, r.currency) : '—'}
+                          {r.asOf && <div style={{ fontSize: 10, color: 'var(--muted)' }}>as of {r.asOf}</div>}
                         </td>
                         <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.actual != null ? 'var(--accent4)' : 'var(--muted)' }}>
                           {r.actual != null ? fmtMoney(r.actual, r.currency) : '—'}
+                          {r.actualPeriod && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{r.actualPeriod}</div>}
                         </td>
                         <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.gap > 0 ? 'var(--accent2)' : r.gap < 0 ? 'var(--accent)' : 'var(--muted)' }}>
                           {r.gap != null ? fmtSignedMoney(r.gap, r.currency, { scale: r.shouldCost }) : '—'}
