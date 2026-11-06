@@ -205,6 +205,7 @@ def facet_fixture(db, tenant_a):
     cm = CostModel(
         id=uuid.uuid4(), team_id=tenant_a["team_id"], product_id=product.id,
         created_by=tenant_a["user_id"], region="Europe", currency="USD",
+        destination_country="Rotterdam, NL",
     )
     db.add(cm)
     term = _term(db, KIND_COMPLIANCE_FLAG, f"eudr-{uuid.uuid4().hex[:6]}", "EUDR")
@@ -258,6 +259,8 @@ def test_the_faceted_query_answers_at_both_grains(db, tenant_a, client_as, facet
     assert th["product_id"] == str(f["product"].id)
     assert th["cost_model_id"] == str(f["cost_model"].id)
     assert th["cost_model_region"] == "Europe"
+    # Two models of one product read alike without their ship-to (audit C-18).
+    assert th["destination_country"] == "Rotterdam, NL"
     assert th["region_applies"] is True
 
 

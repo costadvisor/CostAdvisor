@@ -100,8 +100,15 @@ function ContractForm({ initial, suppliers, costModels, onCancel, onSaved }) {
   const { addToast } = useToast();
   const [form, setForm] = useState(initial);
   const [busy, setBusy] = useState(false);
+  const [allModels, setAllModels] = useState(false);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  // With a supplier picked, offer its cost models (and keep any already ticked);
+  // "Show all" lifts the filter.
+  const supplierPicked = !!form.supplier_id && !allModels;
+  const offeredModels = supplierPicked
+    ? costModels.filter(cm => String(cm.supplier_id) === String(form.supplier_id) || form.cost_model_ids.includes(cm.id))
+    : costModels;
   const deadline = previewDeadline(form.term_end, form.notice_days);
   // ISO dates compare as strings. The server refuses this too.
   const termInverted = !!(form.term_start && form.term_end && form.term_end < form.term_start);
@@ -244,6 +251,12 @@ function ContractForm({ initial, suppliers, costModels, onCancel, onSaved }) {
           <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 11 }}>
             {' '}· {form.cost_model_ids.length} selected
           </span>
+          {form.supplier_id && costModels.length > 0 && (
+            <button type="button" className="ca-btn-link" style={{ fontSize: 11, marginLeft: 10, fontWeight: 400 }}
+              onClick={() => setAllModels(v => !v)}>
+              {allModels ? "Only this supplier's" : `Show all ${costModels.length}`}
+            </button>
+          )}
         </div>
         {costModels.length === 0 ? (
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>No products with a cost model yet.</div>
@@ -252,13 +265,17 @@ function ContractForm({ initial, suppliers, costModels, onCancel, onSaved }) {
             display: 'flex', flexWrap: 'wrap', gap: 6,
             maxHeight: 140, overflowY: 'auto', padding: 2,
           }}>
-            {costModels.map(cm => {
+            {offeredModels.length === 0 && (
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>No cost models with this supplier.</div>
+            )}
+            {offeredModels.map(cm => {
               const on = form.cost_model_ids.includes(cm.id);
               return (
                 <button key={cm.id} type="button" onClick={() => toggleModel(cm.id)}
                   className={`ca-btn ca-btn-sm ${on ? 'ca-btn-primary' : 'ca-btn-ghost'}`}
                   style={{ fontSize: 10 }}>
-                  {cm.product_name}{cm.supplier_name ? ` · ${cm.supplier_name}` : ''}
+                  {/* The destination tells two models of one product and supplier apart. */}
+                  {cm.product_name}{cm.supplier_name ? ` · ${cm.supplier_name}` : ''}{cm.destination_country ? ` → ${cm.destination_country}` : ''}
                 </button>
               );
             })}

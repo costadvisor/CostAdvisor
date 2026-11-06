@@ -342,7 +342,7 @@ export default function PriceListImport() {
                             <option value="">Choose a cost model…</option>
                             {(row.match_candidates || []).map(c => (
                               <option key={c.cost_model_id} value={c.cost_model_id}>
-                                {c.product_name}{c.supplier_name ? ` · ${c.supplier_name}` : ''} ({c.score})
+                                {c.product_name}{c.supplier_name ? ` · ${c.supplier_name}` : ''}{c.destination_country ? ` → ${c.destination_country}` : ''} ({c.score})
                               </option>
                             ))}
                           </select>

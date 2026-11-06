@@ -81,6 +81,8 @@ class HitOut(BaseModel):
     product_name: str | None = None
     cost_model_id: uuid.UUID | None = None
     cost_model_region: str | None = None
+    supplier_name: str | None = None
+    destination_country: str | None = None
     region_applies: bool | None = None
 
 

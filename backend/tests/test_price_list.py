@@ -109,11 +109,12 @@ class _FakeSupplier:
 
 
 class _FakeCM:
-    def __init__(self, name, formula=None, supplier=None):
+    def __init__(self, name, formula=None, supplier=None, destination=None):
         self.id = uuid.uuid4()
         self.product = _FakeProduct(name, formula)
         self.supplier = _FakeSupplier(supplier) if supplier else None
         self.region = "Europe"
+        self.destination_country = destination
 
 
 def test_exact_match_on_name_ignores_punctuation_and_case():
@@ -148,6 +149,16 @@ def test_two_equally_named_products_are_ambiguous_not_a_coin_flip():
     mid, conf, ranked = pl.match_row("Caustic Soda", cands)
     assert conf == MATCH_AMBIGUOUS and mid is None
     assert len(ranked) == 2
+
+
+def test_candidates_name_their_ship_to():
+    """Audit C-18: one product from one supplier to two destinations read as two
+    identical options in the reviewer's dropdown."""
+    cands = [_FakeCM("Caustic Soda", supplier="INEOS", destination="Rotterdam, NL"),
+             _FakeCM("Caustic Soda", supplier="INEOS", destination="Antwerp, BE")]
+    _, conf, ranked = pl.match_row("Caustic Soda", cands)
+    assert conf == MATCH_AMBIGUOUS
+    assert {c["destination_country"] for c in ranked} == {"Rotterdam, NL", "Antwerp, BE"}
 
 
 def test_near_tie_on_a_fuzzy_score_is_ambiguous():

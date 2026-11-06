@@ -286,6 +286,12 @@ function Explorer({ teamId }) {
                         <td>
                           {grain === 'team' ? (h.product_name || '—')
                             : (h.template_name || h.subject_code)}
+                          {/* Supplier and ship-to tell two cost models of one product apart. */}
+                          {grain === 'team' && (h.supplier_name || h.destination_country) && (
+                            <span style={{ color: 'var(--muted)' }}>
+                              {' · '}{[h.supplier_name, h.destination_country].filter(Boolean).join(' → ')}
+                            </span>
+                          )}
                           <div style={{ fontSize: 9, color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace" }}>
                             {h.subject_code}
                           </div>

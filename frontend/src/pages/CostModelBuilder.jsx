@@ -912,7 +912,7 @@ export default function CostModelBuilder() {
                             <optgroup label="Nested cost model">
                               {nestable.filter(n => n.eligible).map(n => (
                                 <option key={n.cost_model_id} value={`model:${n.cost_model_id}`}>
-                                  {n.product_name}{n.supplier_name ? ` \u00b7 ${n.supplier_name}` : ''}
+                                  {n.product_name}{n.supplier_name ? ` \u00b7 ${n.supplier_name}` : ''}{n.destination_country ? ` \u2192 ${n.destination_country}` : ''}
                                 </option>
                               ))}
                             </optgroup>
