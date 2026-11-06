@@ -6,7 +6,9 @@ import { useState, useRef } from 'react';
  * change versus the previous day. Scaling/grid math mirrors IndexTrendChart.jsx.
  *
  * Props:
- *   series : ascending array of { date: 'YYYY-MM-DD', rate: number }
+ *   series : ascending array of { date: 'YYYY-MM-DD', rate: number, label? }
+ *            `label` (e.g. "Q3-23") replaces the date on the axis and tooltip,
+ *            so a quarterly series reads as the quarters the table names.
  *   color  : optional line colour (defaults to green/red by overall trend)
  */
 export default function PriceChart({ series, color }) {
@@ -115,7 +117,7 @@ export default function PriceChart({ series, color }) {
           const anchor = x <= PAD.l + 1 ? 'start' : x >= W - PAD.r - 1 ? 'end' : 'middle';
           return (
             <text key={i} x={x} y={H - 6} textAnchor={anchor} fill="var(--muted)" fontSize={9} fontFamily="'JetBrains Mono', monospace">
-              {fmt(d.date)}
+              {d.label || fmt(d.date)}
             </text>
           );
         })}
@@ -129,7 +131,7 @@ export default function PriceChart({ series, color }) {
           pointerEvents: 'none', whiteSpace: 'nowrap', zIndex: 5, boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
         }}>
           <div style={{ color: 'var(--text)', fontWeight: 600 }}>{Number(hp.rate).toFixed(4)}</div>
-          <div style={{ color: 'var(--muted)', fontSize: 10 }}>{hp.date}</div>
+          <div style={{ color: 'var(--muted)', fontSize: 10 }}>{hp.label || hp.date}</div>
           {dDelta != null && (
             <div style={{ color: dDelta >= 0 ? 'var(--accent2)' : 'var(--accent)', fontSize: 10, marginTop: 2 }}>
               {dDelta >= 0 ? '▲' : '▼'} {Math.abs(dDelta).toFixed(4)} ({dPct >= 0 ? '+' : ''}{dPct.toFixed(2)}%) vs prev

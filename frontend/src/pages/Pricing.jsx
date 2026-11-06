@@ -197,7 +197,7 @@ export default function Pricing() {
       to_year: toYear,
       to_quarter: toQuarter,
     })
-      .then(({ data }) => setAnalysis(data))
+      .then(({ data }) => setAnalysis({ ...data, from: { year: fromYear, quarter: fromQuarter }, to: { year: toYear, quarter: toQuarter } }))
       .catch(err => { setAnalysis(null); setAnalysisError(formatApiError(err)); })
       .finally(() => setLoadingAnalysis(false));
   };
@@ -216,7 +216,13 @@ export default function Pricing() {
   const fmtPrice = v => `${sym}${v.toLocaleString(undefined, { minimumFractionDigits: priceDecimals, maximumFractionDigits: priceDecimals })}`;
 
   const pricedRows = mergedRows.filter(r => r.price != null);
-  const chartSeries = pricedRows.map(r => ({ date: quarterStartDate(r.year, r.quarter), rate: Number(r.price) }));
+  // What the supplier's price actually did over the analysed span, beside what
+  // the indices say it should have done.
+  const priceAt = (p) => (p ? pricedRows.find(r => r.year === p.year && r.quarter === p.quarter)?.price ?? null : null);
+  const actualFrom = analysis ? priceAt(analysis.from) : null;
+  const actualTo = analysis ? priceAt(analysis.to) : null;
+  const actualChangePct = actualFrom && actualTo != null ? ((actualTo - actualFrom) / actualFrom) * 100 : null;
+  const chartSeries = pricedRows.map(r => ({ date: quarterStartDate(r.year, r.quarter), rate: Number(r.price), label: qLabel(r.year, r.quarter) }));
   const latest = pricedRows[pricedRows.length - 1];
   const latestVol = [...mergedRows].reverse().find(r => r.volume != null);
   const bothCount = mergedRows.filter(r => r.price != null && r.volume != null).length;
@@ -502,13 +508,36 @@ export default function Pricing() {
 
           {analysis && (
             <>
-              <div className="ca-result" style={{ marginBottom: 16 }}>
-                <div className="ca-result-label">Should-cost change · {analysis.from_label} → {analysis.to_label}</div>
-                <div className="ca-result-big" style={{ color: analysis.fair_change_pct > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
-                  {analysis.fair_change_pct > 0 ? '+' : ''}{analysis.fair_change_pct.toFixed(2)}%
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 16 }}>
+                <div className="ca-result">
+                  <div className="ca-result-label">Should-cost change · {analysis.from_label} → {analysis.to_label}</div>
+                  <div className="ca-result-big" style={{ color: analysis.fair_change_pct > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
+                    {analysis.fair_change_pct > 0 ? '+' : ''}{analysis.fair_change_pct.toFixed(2)}%
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+                    What the price should have moved by, given how the linked indices moved over this span.
+                  </div>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
-                  What the price should have moved by, given how the linked indices moved over this span.
+                <div className="ca-result">
+                  <div className="ca-result-label">Actual price change</div>
+                  {actualChangePct != null ? (
+                    <>
+                      <div className="ca-result-big" style={{ color: actualChangePct > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
+                        {actualChangePct > 0 ? '+' : ''}{actualChangePct.toFixed(2)}%
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+                        {fmtPrice(actualFrom)} → {fmtPrice(actualTo)}
+                        {' · '}
+                        <span style={{ color: actualChangePct - analysis.fair_change_pct > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
+                          {actualChangePct - analysis.fair_change_pct > 0 ? '+' : ''}{(actualChangePct - analysis.fair_change_pct).toFixed(1)} pts
+                        </span>{' '}vs the should-cost change
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+                      Needs a recorded price in both {analysis.from_label} and {analysis.to_label}.
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -542,13 +571,14 @@ export default function Pricing() {
                         </td>
                       </tr>
                     ))}
-                    {/* Margin row — always shown, zeros if no margin */}
+                    {/* Margin row — always shown. It follows no index, so its index
+                        columns are blank rather than a misleading 0.00. */}
                     <tr style={{ opacity: 0.6 }}>
                       <td>Margin</td>
                       <td className="right">{(analysis.margin_weight || 0).toFixed(1)}%</td>
-                      <td className="right">0.00</td>
-                      <td className="right">0.00</td>
-                      <td className="right" style={{ color: 'var(--muted)' }}>0.0%</td>
+                      <td className="right">—</td>
+                      <td className="right">—</td>
+                      <td className="right" style={{ color: 'var(--muted)' }}>—</td>
                       <td className="right" style={{ color: 'var(--muted)' }}>0.00%</td>
                     </tr>
                     {/* Total row */}
