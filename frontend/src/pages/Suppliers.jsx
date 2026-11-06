@@ -209,7 +209,8 @@ export default function Suppliers() {
                 <th style={{ width: 30 }}></th>
                 <th>Name</th>
                 <th>Country</th>
-                <th className="center">Products</th>
+                {/* Cost models, not products: one product to two ship-tos is two. */}
+                <th className="center">Cost models</th>
                 <th className="center">Created</th>
                 <th className="center">Actions</th>
               </tr>
@@ -237,7 +238,8 @@ export default function Suppliers() {
                         </span>
                       </td>
                       <td className="center" style={{ fontSize: 11, color: 'var(--muted)' }}>
-                        {s.created_at ? new Date(s.created_at).toLocaleDateString() : '\u2014'}
+                        {/* ISO date, as Contracts prints them: the browser locale read 11/6/2026. */}
+                        {s.created_at ? s.created_at.slice(0, 10) : '\u2014'}
                       </td>
                       <td className="center">
                         <button className="ca-btn ca-btn-ghost ca-btn-sm"
