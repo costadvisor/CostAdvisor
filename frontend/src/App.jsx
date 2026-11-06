@@ -136,9 +136,9 @@ export default function App() {
             <Route path="/strategy" element={<StrategyLandingPage />} />
             <Route path="/strategy/:slug" element={<StrategyCategoryPage />} />
 
-            {/* Was the index of six clickable mockups; all six are built, so it
-                now lists only what no coding session can close. */}
-            <Route path="/preview" element={<WhatsLeft />} />
+            {/* Internal status page, super admins only: anyone else gets the
+                plain 404 rather than a hint that the page exists. */}
+            <Route path="/preview" element={user?.is_super_admin ? <WhatsLeft /> : <NotFound />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

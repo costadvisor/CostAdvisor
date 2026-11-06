@@ -300,9 +300,9 @@ export default function Navbar() {
     // this is the only door for somebody holding just the Support Agent
     // platform role, who until now had full API access and no way in.
     ...(isSupportStaff ? [{ path: '/support-console', label: 'Support console' }] : []),
-    // Everything that was mocked here is built; the page now lists only the
-    // blockers no coding session closes.
-    { path: '/preview', label: 'What’s left' },
+    // Internal status page: it names unsigned DPAs and infra gaps, so only a
+    // super admin sees it (App.jsx guards the route the same way).
+    ...(user?.is_super_admin ? [{ path: '/preview', label: 'What’s left' }] : []),
   ];
 
   const handleLogout = async () => { setOpen(false); await logout(); };
