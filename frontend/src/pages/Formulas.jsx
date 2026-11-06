@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../components/Toast';
 import api from '../api';
@@ -352,8 +353,18 @@ function NameButton({ template, onOpen }) {
 }
 
 function CatalogSection({ rows, canEdit, onEdit, onDelete, onOpen, canFork = false, forkedOriginIds, onFork }) {
-  const [query, setQuery] = useState('');
-  const [gradeFilter, setGradeFilter] = useState('all');
+  // Search and grade live in the URL, so Back from a formula (or a reload)
+  // returns to the same filtered list.
+  const [params, setParams] = useSearchParams();
+  const setParam = (key, value, fallback) => setParams(prev => {
+    const next = new URLSearchParams(prev);
+    if (!value || value === fallback) next.delete(key); else next.set(key, value);
+    return next;
+  }, { replace: true });
+  const query = params.get('q') || '';
+  const setQuery = (v) => setParam('q', v, '');
+  const gradeFilter = params.get('grade') || 'all';
+  const setGradeFilter = (v) => setParam('grade', v, 'all');
   const [expanded, setExpanded] = useState(() => new Set());
   const [showPriceImport, setShowPriceImport] = useState(false);
   const [showRoundTrip, setShowRoundTrip] = useState(false);

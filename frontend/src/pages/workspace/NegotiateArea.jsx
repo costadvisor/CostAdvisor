@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { DriftBar } from './wsCharts';
@@ -37,7 +37,14 @@ export default function NegotiateArea() {
   const [reportCur, setReportCur] = useState('USD');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [search, setSearch] = useState('');
+  // The search lives in the URL so Back from a brief returns to the same list.
+  const [params, setParams] = useSearchParams();
+  const search = params.get('q') || '';
+  const setSearch = (v) => setParams(prev => {
+    const next = new URLSearchParams(prev);
+    if (v) next.set('q', v); else next.delete('q');
+    return next;
+  }, { replace: true });
 
   useEffect(() => {
     if (!activeTeamId) return;

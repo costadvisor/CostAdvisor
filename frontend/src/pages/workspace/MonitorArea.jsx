@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import exportCsv from '../../utils/exportCsv';
@@ -54,14 +54,27 @@ export default function MonitorArea() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [familyFilter, setFamilyFilter] = useState('all');
+  // Search, filters and view live in the URL: Monitor → Brief → Back is the
+  // triage loop, and as component state every return (or reload) reset them.
+  // `replace` keeps one history entry per visit, not one per keystroke.
+  const [params, setParams] = useSearchParams();
+  const setParam = (key, value, fallback) => setParams(prev => {
+    const next = new URLSearchParams(prev);
+    if (!value || value === fallback) next.delete(key); else next.set(key, value);
+    return next;
+  }, { replace: true });
+  const search = params.get('q') || '';
+  const setSearch = (v) => setParam('q', v, '');
+  const statusFilter = params.get('status') || 'all';
+  const setStatusFilter = (v) => setParam('status', v, 'all');
+  const familyFilter = params.get('family') || 'all';
+  const setFamilyFilter = (v) => setParam('family', v, 'all');
   const [closed, setClosed] = useState(() => new Set());   // groups open unless closed
   // 'drift' = the shipped should-cost-vs-actual table; 'radar' = the SCRUM-79
   // trigger radar. Two different questions — where am I overpaying now, and
   // what has a deadline on it — so they are views, not merged columns.
-  const [view, setView] = useState('drift');
+  const view = params.get('view') === 'radar' ? 'radar' : 'drift';
+  const setView = (v) => setParam('view', v, 'drift');
 
   useEffect(() => {
     if (!activeTeamId) return;
