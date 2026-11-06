@@ -23,6 +23,12 @@ const NO_FILTERS = { status: '', assignee: '', gem: '' };
 const NONE = 'none';
 const leverKeyOf = (a) => (a.lever_id != null ? `a${a.lever_id}` : a.custom_lever_id ? `c${a.custom_lever_id}` : NONE);
 
+/* Done means finished: an action marked Done at under 100% is moved to 100%
+   in the same save, so its bar and the Done count agree. */
+function withDonePct(a, status) {
+  return status === 'Done' && (a.pct_complete ?? 0) < 100 ? { status, pct_complete: 100 } : { status };
+}
+
 function PctCell({ value, onCommit, label, disabled }) {
   const [draft, setDraft] = useState(null);
   const commit = () => {
@@ -87,7 +93,8 @@ function ActionTable({ actions, today, onPatch, onEdit, onDelete, readOnly }) {
                 </td>
                 <td>
                   <select className={`ix-select so-status tone-${statusTone(a.status)}`} value={a.status}
-                    disabled={readOnly} aria-label={`Status of ${a.title}`} onChange={(e) => onPatch(a, { status: e.target.value })}>
+                    disabled={readOnly} aria-label={`Status of ${a.title}`}
+                    onChange={(e) => onPatch(a, withDonePct(a, e.target.value))}>
                     {ACTION_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </td>
