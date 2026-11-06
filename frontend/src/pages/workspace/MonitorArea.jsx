@@ -117,6 +117,10 @@ export default function MonitorArea() {
         name: cm.product_name || 'Unnamed product',
         supplier: cm.supplier_name || null,
         region: cm.region || null,
+        // Two cost models for one product and supplier differ by destination
+        // (and Incoterm), which the row has to show to tell them apart.
+        destination: cm.destination_country || null,
+        incoterm: cm.incoterm || null,
         currency: cm.currency || reportCur,
         familyLabel: fam?.name || 'No family',
         status,
@@ -345,7 +349,9 @@ export default function MonitorArea() {
                               <td style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: 'var(--muted)' }}>{r.ref || '—'}</td>
                               <td>
                                 <div style={{ fontWeight: 600, color: r.kind === 'draft' ? 'var(--text-secondary)' : 'var(--text)' }}>{r.name}</div>
-                                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.supplier || 'No supplier'}{r.region ? ` · ${r.region}` : ''}</div>
+                                <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                                  {r.supplier || 'No supplier'}{r.destination ? ` → ${r.destination}` : r.region ? ` · ${r.region}` : ''}{r.incoterm ? ` · ${r.incoterm}` : ''}
+                                </div>
                               </td>
                               <td className="center">
                                 {r.shouldCost != null ? (

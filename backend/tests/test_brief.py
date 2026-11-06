@@ -349,3 +349,12 @@ def test_rule_based_narrative_uses_since_and_app_money():
     )
     assert "fell 8.6% since Q1-23, taking €9.02/t off the should-cost" in text
     assert "over the period" not in text and ".015" not in text
+
+
+def test_gap_alert_names_supplier_and_destination(tenant_a, brief_model, db):
+    """Audit D-09: two cost models for one product differ by supplier or
+    destination, so an alert / radar headline names both."""
+    from app.services.alerts import _gap_trigger
+
+    cm = db.query(CostModel).filter(CostModel.id == brief_model.id).one()
+    assert _gap_trigger(db, cm, 10)["message"].startswith("Sodium Hydroxide (Acme Chemicals → France) is ")

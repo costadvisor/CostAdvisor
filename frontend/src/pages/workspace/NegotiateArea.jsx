@@ -80,6 +80,10 @@ export default function NegotiateArea() {
         name: cm.product_name || 'Unnamed product',
         supplier: cm.supplier_name || null,
         region: cm.region || null,
+        // Two cost models for one product and supplier differ by destination
+        // (and Incoterm), which the row has to show to tell them apart.
+        destination: cm.destination_country || null,
+        incoterm: cm.incoterm || null,
         currency: cm.currency || reportCur,
         status,
         shouldCost: s ? s.current_should_cost : null,
@@ -185,7 +189,9 @@ export default function NegotiateArea() {
                         <td style={{ width: 4, padding: 0, background: st.color }} />
                         <td>
                           <div style={{ fontWeight: 600, color: r.kind === 'draft' ? 'var(--text-secondary)' : 'var(--text)' }}>{r.name}</div>
-                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.supplier || 'No supplier'}{r.region ? ` · ${r.region}` : ''}</div>
+                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                                  {r.supplier || 'No supplier'}{r.destination ? ` → ${r.destination}` : r.region ? ` · ${r.region}` : ''}{r.incoterm ? ` · ${r.incoterm}` : ''}
+                                </div>
                         </td>
                         <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.shouldCost != null ? 'var(--accent)' : 'var(--muted)' }}>
                           {r.shouldCost != null ? fmtMoney(r.shouldCost, r.currency) : '—'}

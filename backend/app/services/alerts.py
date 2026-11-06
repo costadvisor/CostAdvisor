@@ -57,6 +57,15 @@ def _index_move_trigger(db, commodity_id, threshold):
     }
 
 
+def _model_name(cm) -> str:
+    """Product, supplier and destination: two cost models for one product (one
+    per supplier, or per destination) otherwise read identically in alerts
+    and radar headlines."""
+    name = cm.product.name if cm.product else "product"
+    route = " → ".join(x for x in (cm.supplier.name if cm.supplier else None, cm.destination_country) if x)
+    return f"{name} ({route})" if route else name
+
+
 def _gap_trigger(db, cm, threshold):
     from app.services.costing_engine import calculate_should_cost, latest_data_quarter
     if not cm.current_formula:
@@ -81,7 +90,7 @@ def _gap_trigger(db, cm, threshold):
         "dedup": f"gap:{cm.id}:{latest.year}Q{latest.quarter}:{'up' if gap_pct > 0 else 'down'}",
         # The quarter named is the should-cost's; the dedup key stays on the
         # invoice's quarter, so a new invoice is a new alert.
-        "message": f"{name} is {abs(gap_pct):.1f}% {direction} should-cost as of Q{sc_q} {sc_y} "
+        "message": f"{_model_name(cm)} is {abs(gap_pct):.1f}% {direction} should-cost as of Q{sc_q} {sc_y} "
                    f"— beyond your {threshold}% alert.",
         "detail": {"cost_model_id": str(cm.id), "product": name, "gap_pct": round(gap_pct, 2),
                    "should_cost": round(sc, 2), "actual": float(latest.price),
@@ -98,7 +107,7 @@ def _buy_window_trigger(db, cm):
     verb = "cheap" if sig.signal == "cheap" else "expensive"
     return {
         "dedup": f"buy_window:{cm.id}:{sig.signal}:{sig.deviation_pct}",
-        "message": f"{name} looks {verb} now ({sig.deviation_pct:+.1f}% vs its 4-quarter average).",
+        "message": f"{_model_name(cm)} looks {verb} now ({sig.deviation_pct:+.1f}% vs its 4-quarter average).",
         "detail": {"cost_model_id": str(cm.id), "product": name, "signal": sig.signal,
                    "deviation_pct": sig.deviation_pct},
     }

@@ -217,7 +217,7 @@ export default function Alerts() {
               <select className="ca-input" value={scopeId} onChange={e => setScopeId(e.target.value)}>
                 <option value="">{SCOPE_ALL_LABEL[scope === 'window' ? windowScope : scope]}</option>
                 {(scope === 'window' ? windowScope : scope) === 'product'
-                  && costModels.map(cm => <option key={cm.id} value={cm.id}>{cm.product_name}{cm.supplier_name ? ` · ${cm.supplier_name}` : ''}</option>)}
+                  && costModels.map(cm => <option key={cm.id} value={cm.id}>{cm.product_name}{cm.supplier_name ? ` · ${cm.supplier_name}` : ''}{cm.destination_country ? ` → ${cm.destination_country}` : ''}</option>)}
                 {(scope === 'window' ? windowScope : scope) === 'index'
                   && commodities.map(ci => <option key={ci.id} value={ci.id}>{ci.name}</option>)}
                 {windowScope === 'supplier'
