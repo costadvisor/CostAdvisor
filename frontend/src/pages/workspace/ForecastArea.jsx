@@ -80,15 +80,54 @@ export default function ForecastArea() {
     setLoading(true); setError(null);
     Promise.all([
       api.get('/api/portfolio/summary', { params: { team_id: activeTeamId } }),
-      api.get('/api/indexes/public-quarterly', { params: { limit: 16 } }),
-      // public-quarterly is a no-auth landing-page endpoint and deliberately
-      // carries no commodity_id, so the id has to come from the authenticated
-      // list. That id is what the projection endpoint is keyed on.
+      api.get('/api/cost-models/', { params: { team_id: activeTeamId } }),
+      // Commodity ids (the projection endpoint is keyed on them) and units.
       api.get('/api/indexes'),
     ])
-      .then(async ([sum, pub, all]) => {
+      .then(async ([sum, cmRes, all]) => {
         setModels(sum.data.models || []);
-        const series = pub.data || [];
+        // The indices under this team's own recipes (each cost model's current
+        // formula version, formula_versions[0]), the ones driving most products
+        // first. The landing page's headline list had none of them.
+        const usage = new Map();
+        (cmRes.data || []).forEach(cm => {
+          (cm.formula_versions?.[0]?.components || []).forEach(c => {
+            if (!c.commodity_name) return;
+            const u = usage.get(c.commodity_name) || { products: new Set(), weight: 0 };
+            u.products.add(cm.product_id);
+            u.weight += Number(c.weight) || 0;
+            usage.set(c.commodity_name, u);
+          });
+        });
+        const names = [...usage.entries()]
+          .sort((a, b) => (b[1].products.size - a[1].products.size) || (b[1].weight - a[1].weight))
+          .map(([name]) => name);
+        // The team's own quarterly values: they include the quarter means of
+        // monthly-only series (most recipe indices), which the landing page's
+        // public-quarterly endpoint does not read. One region per card, the
+        // one with the newest point, as the landing page picks it.
+        const unitByName = new Map((all.data || []).map(c => [c.name, c.unit]));
+        const fromYear = new Date().getFullYear() - 4;
+        const series = (await Promise.all(names.map(async name => {
+          try {
+            const { data } = await api.get('/api/indexes/values',
+              { params: { team_id: activeTeamId, commodity_name: name, from_year: fromYear } });
+            const rows = (data || []).filter(r => r.value != null);
+            if (!rows.length) return null;
+            const newest = rows.reduce((a, r) => (qOrd(r.year, r.quarter) > qOrd(a.year, a.quarter) ? r : a));
+            const points = rows.filter(r => r.region === newest.region)
+              .sort((a, r) => qOrd(a.year, a.quarter) - qOrd(r.year, r.quarter))
+              .slice(-16)
+              .map(r => ({ year: r.year, quarter: r.quarter, value: r.value }));
+            return {
+              commodity_name: name, region: newest.region, unit: unitByName.get(name) || null,
+              points, latest: points[points.length - 1].value,
+              products: usage.get(name).products.size,
+            };
+          } catch {
+            return null;   // one series failing must not blank the outlook
+          }
+        }))).filter(Boolean);
         setIndices(series);
         setSelected(s => s || series[0]?.commodity_name || null);
 
@@ -255,7 +294,7 @@ export default function ForecastArea() {
         </div>
 
         {indices.length === 0 ? (
-          <div style={{ padding: 20, color: 'var(--muted)' }}>No headline index data available yet.</div>
+          <div style={{ padding: 20, color: 'var(--muted)' }}>None of the indices under your cost models has quarterly data yet.</div>
         ) : (
           <>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -287,7 +326,9 @@ export default function ForecastArea() {
                     <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2 }}>
                       {ix.commodity_name}
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 8 }}>{ix.region}</div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 8 }}>
+                      {ix.region} · drives {ix.products} product{ix.products === 1 ? '' : 's'}
+                    </div>
                     <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>
                       {num(ix.latest, ix.unit)}
                     </div>
