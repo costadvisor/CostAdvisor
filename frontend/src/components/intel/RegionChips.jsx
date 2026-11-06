@@ -1,4 +1,6 @@
-import { REGION_CODES, REGION_LABELS, normalizeRegion, regionColor, sortRegions } from './palette';
+import {
+  REGION_CODES, REGION_CHIP_TEXT, REGION_LABELS, normalizeRegion, regionColor, sortRegions,
+} from './palette';
 
 export { REGION_CODES, REGION_COLORS, REGION_VARS, REGION_LABELS, regionColor, normalizeRegion } from './palette';
 
@@ -34,11 +36,11 @@ export default function RegionChips({
           return (
             <button key={code} type="button" className={cls} style={style} title={title}
               aria-pressed={isOn} disabled={!isAvail} onClick={() => onSelect(code)}>
-              {code}
+              {REGION_CHIP_TEXT[code] || code}
             </button>
           );
         }
-        return <span key={code} className={cls} style={style} title={title}>{code}</span>;
+        return <span key={code} className={cls} style={style} title={title}>{REGION_CHIP_TEXT[code] || code}</span>;
       })}
     </div>
   );

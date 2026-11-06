@@ -1,13 +1,14 @@
 import { memo } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  TrendBadge, SupplyBadge, fmt, regionColor, REGION_LABELS, UNPUBLISHED_LINE, productHref,
+  TrendBadge, SupplyBadge, fmt, regionColor, REGION_CODES, REGION_LABELS, UNPUBLISHED_LINE, productHref,
 } from '../../../components/intel';
 import { Sparkline } from '../../../components/charts';
 
 /* The mockup's region-dot strip: its seven regions always shown (greyed when the
- * card is not priced there), plus GL for the few global-only recipes. */
-const DOT_REGIONS = ['NA', 'LA', 'EU', 'MEA', 'IN', 'CN', 'APAC'];
+ * card is not priced there), plus GL for the few global-only recipes. Same
+ * order as every other region strip (palette REGION_CODES). */
+const DOT_REGIONS = REGION_CODES.filter((r) => r !== 'GLOBAL');
 
 function RegionDots({ regions }) {
   const on = new Set(regions || []);
