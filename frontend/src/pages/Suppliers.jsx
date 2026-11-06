@@ -2,7 +2,7 @@ import { Fragment, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
-import { useConfirm } from '../components/ConfirmDialog';
+import { useConfirm, useAlert } from '../components/ConfirmDialog';
 import { DriftBar } from './workspace/wsCharts';
 import exportCsv from '../utils/exportCsv';
 import { fmtMoney } from '../utils/currency';
@@ -11,6 +11,7 @@ export default function Suppliers() {
   const { activeTeamId } = useAuth();
   const navigate = useNavigate();
   const confirm = useConfirm();
+  const showAlert = useAlert();
   const [suppliers, setSuppliers] = useState([]);
   const [portfolio, setPortfolio] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -96,10 +97,26 @@ export default function Suppliers() {
       .finally(() => setSaving(false));
   };
 
-  const handleDelete = async (id) => {
-    const ok = await confirm({ title: 'Delete this supplier?', confirmLabel: 'Delete', danger: true });
+  // The server refuses to delete a supplier that cost models still name (it
+  // used to strip the supplier from all of them), so say why up front.
+  const handleDelete = async (s, models) => {
+    if (models.length > 0) {
+      showAlert({
+        title: `${s.name} is still in use`,
+        message: `It is the supplier of ${models.length} cost model${models.length === 1 ? '' : 's'}. Move them to another supplier (View model > Edit) before deleting it.`,
+      });
+      return;
+    }
+    const ok = await confirm({
+      title: `Delete ${s.name}?`,
+      message: 'Contracts with this supplier keep their terms but no longer name it.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
     if (!ok) return;
-    api.delete(`/api/suppliers/${id}`).then(fetchData).catch(console.error);
+    api.delete(`/api/suppliers/${s.id}`)
+      .then(fetchData)
+      .catch(err => showAlert({ title: "Couldn't delete the supplier", message: formatApiError(err) }));
   };
 
   const handleExportExcel = (id, name) => {
@@ -225,7 +242,7 @@ export default function Suppliers() {
                           </button>
                         )}
                         <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ marginLeft: 4, color: 'var(--accent2)' }}
-                          onClick={e => { e.stopPropagation(); handleDelete(s.id); }}>Delete</button>
+                          onClick={e => { e.stopPropagation(); handleDelete(s, models); }}>Delete</button>
                       </td>
                     </tr>
                     {isExpanded && (

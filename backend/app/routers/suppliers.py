@@ -620,6 +620,16 @@ def delete_supplier(
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
     require_permission(db, current_user, supplier.team_id, "suppliers.delete")
+    # Deleting used to null the supplier on every cost model that named it, with
+    # no warning. Refuse until they are moved to another supplier. (Contracts
+    # keep their history with no supplier by design: contract.supplier_id.)
+    n_models = db.query(CostModel).filter(CostModel.supplier_id == supplier.id).count()
+    if n_models:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{supplier.name} is the supplier of {n_models} cost model{'' if n_models == 1 else 's'}. "
+                   "Move them to another supplier (View model > Edit) before deleting it.",
+        )
     log_event(db, supplier.team_id, current_user.id, "delete", "supplier", str(supplier.id),
               previous_value={"name": supplier.name, "country": supplier.country})
     db.delete(supplier)
