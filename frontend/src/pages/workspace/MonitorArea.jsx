@@ -154,6 +154,12 @@ export default function MonitorArea() {
     () => [...new Set(rows.map(r => r.familyLabel))].sort(), [rows]);
 
   const q = search.trim().toLowerCase();
+  const filtersOn = q !== '' || statusFilter !== 'all' || familyFilter !== 'all';
+  const clearFilters = () => setParams(prev => {
+    const next = new URLSearchParams(prev);
+    ['q', 'status', 'family'].forEach(k => next.delete(k));
+    return next;
+  }, { replace: true });
   const filtered = rows.filter(r => {
     if (statusFilter !== 'all' && r.status !== statusFilter) return false;
     if (familyFilter !== 'all' && r.familyLabel !== familyFilter) return false;
@@ -225,8 +231,10 @@ export default function MonitorArea() {
               </button>
             ))}
           </div>
-          {view === 'drift' && filtered.length > 0 && (
-            <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => exportCsv(
+          {/* Always rendered (disabled when nothing matches), so the header
+              does not reflow when a filter empties the table. */}
+          {view === 'drift' && (
+            <button className="ca-btn ca-btn-ghost ca-btn-sm" disabled={filtered.length === 0} onClick={() => exportCsv(
               'monitor.csv',
               ['Family', 'Ref', 'Product', 'Supplier', 'Region', 'Currency', 'Should-cost', 'Actual', 'Gap', 'Gap %', 'Exposure', 'Status', 'Invoice'],
               filtered.map(r => [
@@ -274,7 +282,11 @@ export default function MonitorArea() {
             )}
           </div>
 
-          {/* Stats */}
+          {/* Stats: the whole portfolio, whatever the filters show — said so
+              when a filter is on, rather than recomputing FX-converted totals. */}
+          {filtersOn && (
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>Whole portfolio — the filters apply to the table below.</div>
+          )}
           {/* auto-fit, as on Negotiate: four fixed columns overflowed a phone. */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 14 }}>
             {stats.map(s => (
@@ -307,7 +319,10 @@ export default function MonitorArea() {
                 </thead>
                 <tbody>
                   {groups.length === 0 && (
-                    <tr><td colSpan={11} style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>No products match these filters.</td></tr>
+                    <tr><td colSpan={11} style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
+                      No products match these filters.{' '}
+                      <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={clearFilters}>Clear filters</button>
+                    </td></tr>
                   )}
                   {groups.map(group => {
                     const open = !closed.has(group.key);
