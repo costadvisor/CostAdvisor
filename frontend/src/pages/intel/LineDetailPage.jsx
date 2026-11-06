@@ -121,6 +121,10 @@ function LineDetail({ lineRef }) {
   ];
   const listed = listedOf(line);
   const playbooks = line.playbooks || [];
+  // The Report tab names the open report's playbook in its own bar; the
+  // header's button would be the same link twice on one screen (A-25).
+  const openReport = reports.find((r) => r.slug === params.get('report')) || reports[0];
+  const playbookInTab = tab === 'report' && !!openReport?.playbook_slug;
 
   const tabs = [
     { id: 'report', label: 'Report', count: reports.length || undefined },
@@ -153,7 +157,7 @@ function LineDetail({ lineRef }) {
             <PendingBadge show={line.pending} flags={line.flags} size="lg" />
           </>
         )}
-        actions={playbooks.length === 1 ? (
+        actions={playbooks.length === 1 && !playbookInTab ? (
           <Link className="ca-btn ca-btn-ghost ca-btn-sm" to={playbookHref(playbooks[0].slug)}
             title={`Strategy playbook: ${playbooks[0].name}`}>
             Strategy playbook →
