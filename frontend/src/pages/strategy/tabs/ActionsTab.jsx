@@ -8,6 +8,7 @@ import { useConfirm } from '../../../components/ConfirmDialog';
 import ActionForm from './ActionForm';
 import ActionTimeline, { actionWindow } from './ActionTimeline';
 import OppDialog from './OppDialog';
+import useUrlState from '../useUrlState';
 import {
   ACTION_STATUSES, countActions, isOverdue, statusTone, strategyUrl, todayIso, useTeamMembers, plural,
 } from './OppShared';
@@ -20,6 +21,7 @@ import '../../../styles/strategy-opps.css';
 
 const enc = encodeURIComponent;
 const NO_FILTERS = { status: '', assignee: '', gem: '' };
+const DEFAULT_VIEW = { view: 'table' };
 const NONE = 'none';
 const leverKeyOf = (a) => (a.lever_id != null ? `a${a.lever_id}` : a.custom_lever_id ? `c${a.custom_lever_id}` : NONE);
 
@@ -139,8 +141,9 @@ export default function ActionsTab({ slug, teamId }) {
   useEffect(() => { setActions(null); }, [slug, teamId]);
   const today = res.data?.today || todayIso();
 
-  const [filters, setFilters] = useState(NO_FILTERS);
-  const [view, setView] = useState('table');
+  const [filters, setFilters] = useUrlState(NO_FILTERS, 'act_');
+  const [{ view }, setViewState] = useUrlState(DEFAULT_VIEW, 'act_');
+  const setView = (value) => setViewState({ view: value });
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [dialog, setDialog] = useState(null);
   const seq = useRef({});

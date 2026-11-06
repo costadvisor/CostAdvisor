@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
 import {
@@ -6,11 +6,15 @@ import {
   KRALJIC_QUADRANTS, normalizeKraljicBadge,
 } from '../../components/intel';
 import LandingSuggestions from './LandingSuggestions';
+import useUrlState from './useUrlState';
 import '../../styles/strategy.css';
 
 /* Strategy landing: the team's adopted strategy categories (one per playbook
  * the team started), then the playbooks its portfolio reaches but has not
  * started ("Suggested from your portfolio"). Data: GET /api/strategy/categories. */
+
+const NO_FILTERS = { family: '', status: '', kraljic: '', owner: '' };
+const DEFAULT_SORT = { sort: 'overdue' };
 
 const SORTS = [
   { id: 'overdue', label: 'Actions overdue (default)' },
@@ -52,8 +56,9 @@ export default function StrategyLandingPage() {
     activeTeamId ? '/api/strategy/categories' : null,
     { team_id: activeTeamId },
   );
-  const [filters, setFilters] = useState({ family: '', status: '', kraljic: '', owner: '' });
-  const [sort, setSort] = useState('overdue');
+  const [filters, setFilters] = useUrlState(NO_FILTERS);
+  const [{ sort }, setSortState] = useUrlState(DEFAULT_SORT);
+  const setSort = (value) => setSortState({ sort: value });
 
   const adopted = useMemo(() => data?.adopted || [], [data]);
   const suggested = data?.suggested || [];
@@ -176,7 +181,7 @@ export default function StrategyLandingPage() {
           </select>
           {filtered && (
             <button type="button" className="ix-link ix-small"
-              onClick={() => setFilters({ family: '', status: '', kraljic: '', owner: '' })}>
+              onClick={() => setFilters(NO_FILTERS)}>
               Clear
             </button>
           )}
