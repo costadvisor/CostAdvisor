@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useToast } from '../../components/Toast';
+import { fmtPerUnit } from '../../utils/currency';
 
 /* Guided negotiation prep (Scrum 29).
  *
@@ -27,8 +28,8 @@ const VERDICT_STYLE = {
   unmapped: { color: 'var(--accent4)', bg: 'var(--accent4-dim)' },
 };
 
-const money = (v, cur, unit) =>
-  v == null ? '—' : `${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}/${unit}`;
+// Every ladder figure at the should-cost's scale, as on the brief (utils/currency).
+const money = (v, cur, unit, scale) => fmtPerUnit(v, cur, unit, { scale });
 
 const slug = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
@@ -48,7 +49,7 @@ function Ladder({ ladder }) {
         <div key={label} style={{ marginBottom: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4, gap: 10 }}>
             <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
-            <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{money(value, cur, unit)}</span>
+            <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{money(value, cur, unit, target)}</span>
           </div>
           <div style={{ background: 'var(--surface2)', height: 6, borderRadius: 3 }}>
             <div style={{
@@ -61,7 +62,7 @@ function Ladder({ ladder }) {
       {ladder.unexplained != null && (
         <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 14 }}>
           Unexplained portion of their price:{' '}
-          <strong style={{ color: 'var(--accent2)' }}>{money(ladder.unexplained, cur, unit)}</strong>
+          <strong style={{ color: 'var(--accent2)' }}>{money(ladder.unexplained, cur, unit, target)}</strong>
           {ladder.gap_pct != null && ` (${ladder.gap_pct > 0 ? '+' : ''}${ladder.gap_pct.toFixed(1)}%)`}
           . The should-cost has already consumed every verified index movement, so nothing they cite can
           re-explain this.

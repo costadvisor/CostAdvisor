@@ -189,7 +189,7 @@ export default function NegotiateArea() {
                           {r.actual != null ? fmtMoney(r.actual, r.currency) : '—'}
                         </td>
                         <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.gap > 0 ? 'var(--accent2)' : r.gap < 0 ? 'var(--accent)' : 'var(--muted)' }}>
-                          {r.gap != null ? fmtSignedMoney(r.gap, r.currency) : '—'}
+                          {r.gap != null ? fmtSignedMoney(r.gap, r.currency, { scale: r.shouldCost }) : '—'}
                           {r.gapPct != null && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{r.gapPct > 0 ? '+' : ''}{r.gapPct.toFixed(1)}%</div>}
                         </td>
                         <td>{r.gapPct != null ? <DriftBar value={Math.abs(r.gapPct)} max={maxAbsGap} color={st.color} /> : null}</td>

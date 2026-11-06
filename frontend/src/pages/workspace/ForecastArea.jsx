@@ -4,7 +4,7 @@ import { useAuth } from '../../AuthContext';
 import { useToast } from '../../components/Toast';
 import { qLabel } from '../../utils/quarters';
 import exportCsv from '../../utils/exportCsv';
-import { fmtMoney, EXPOSURE_NOTE } from '../../utils/currency';
+import { fmtMoney, fmtNumber, EXPOSURE_NOTE } from '../../utils/currency';
 import DemoDataNote from '../../components/DemoDataNote';
 import { MultiLineChart } from './wsCharts';
 
@@ -38,8 +38,7 @@ const STATUS = {
     help: 'Every quarter this run projected has since been observed. Re-run projections for a forward view.' },
 };
 
-const num = (v, unit) => (v == null ? '—'
-  : `${v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 2 : 0 })}${unit ? ` ${unit}` : ''}`);
+const num = (v, unit) => (v == null ? '—' : `${fmtNumber(v)}${unit ? ` ${unit}` : ''}`);
 
 const daysSince = (iso) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : null);
 
@@ -338,7 +337,7 @@ export default function ForecastArea() {
                       {run.method} over {run.history_points_used} quarters
                       {run.history_from_year != null && ` (${qLabel(run.history_from_year, run.history_from_quarter)}–${qLabel(run.history_to_year, run.history_to_quarter)})`}
                       {run.residual_std != null && `, residual σ ${run.residual_std.toFixed(2)}`}
-                      . Vintage {new Date(run.vintage_at).toLocaleDateString()}
+                      . Vintage {new Date(run.vintage_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                       {daysSince(run.vintage_at) > 30 && (
                         <span style={{ color: 'var(--accent3)' }}> — {daysSince(run.vintage_at)} days old, worth re-running</span>
                       )}

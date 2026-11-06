@@ -34,7 +34,8 @@ const SCOPE_ALL_LABEL = {
   supplier: 'All suppliers', contract: 'All contracts', '': 'Any scope',
 };
 
-const fmtTime = (iso) => new Date(iso).toLocaleString(undefined,
+// A fixed locale, as for money (utils/currency): the page reads the same in every browser.
+const fmtTime = (iso) => new Date(iso).toLocaleString('en-GB',
   { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 export default function Alerts() {

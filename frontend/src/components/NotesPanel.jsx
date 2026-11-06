@@ -8,7 +8,7 @@ import { useAuth } from '../AuthContext';
 
 const fmtTime = (iso) => {
   const d = new Date(iso);
-  return d.toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 };
 
 // Highlight @email mentions in the body.

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import api, { formatApiError } from '../api';
 import RegionSelect from './RegionSelect';
+import { fmtNumber } from '../utils/currency';
 
 // Mirrors CONF_BADGE on the Formulas page — kept local so the modal stays
 // drop-in usable from other pages later.
@@ -527,7 +528,7 @@ export default function FormulaDetailModal({ template, activeTeamId, canEdit, on
             {cov && !cov.needs_review && cov.reviewed_by && (
               <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 12, ...mono }}>
                 Reviewed by {cov.reviewed_by}
-                {cov.reviewed_at ? ` · ${new Date(cov.reviewed_at).toLocaleDateString()}` : ''}
+                {cov.reviewed_at ? ` · ${new Date(cov.reviewed_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}
               </div>
             )}
 
@@ -543,7 +544,7 @@ export default function FormulaDetailModal({ template, activeTeamId, canEdit, on
                 {evaluation?.evaluable && evaluation.should_cost != null ? (
                   <div>
                     <span style={{ ...mono, fontSize: 20, fontWeight: 700 }}>
-                      {evaluation.should_cost.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      {fmtNumber(evaluation.should_cost)}
                     </span>
                     <span style={{ ...mono, fontSize: 12, color: 'var(--text-secondary)', marginLeft: 6 }}>
                       {evaluation.currency || ''}
@@ -705,7 +706,7 @@ export default function FormulaDetailModal({ template, activeTeamId, canEdit, on
                           <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>
                             {ev
                               ? (ev.contribution_abs != null
-                                ? ev.contribution_abs.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                                ? fmtNumber(ev.contribution_abs)
                                 : `${ev.contribution_pct.toFixed(2)}%`)
                               : '—'}
                           </td>
@@ -724,7 +725,7 @@ export default function FormulaDetailModal({ template, activeTeamId, canEdit, on
                       {showEval && (
                         <td style={{ ...mono, fontSize: 12, fontWeight: 700, textAlign: 'right' }}>
                           {evaluation.should_cost != null
-                            ? evaluation.should_cost.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                            ? fmtNumber(evaluation.should_cost)
                             : `${evaluation.index_level_pct.toFixed(2)}%`}
                         </td>
                       )}
@@ -794,13 +795,13 @@ export default function FormulaDetailModal({ template, activeTeamId, canEdit, on
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
                         <Stat label="Target">
                           {negResult.target.should_cost != null
-                            ? negResult.target.should_cost.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                            ? fmtNumber(negResult.target.should_cost)
                             : `${negResult.target.index_level_pct?.toFixed(1)}% (index only)`}
                         </Stat>
-                        <Stat label="Ask">{negResult.position.ask?.toLocaleString(undefined, { maximumFractionDigits: 2 })}</Stat>
+                        <Stat label="Ask">{fmtNumber(negResult.position.ask)}</Stat>
                         <Stat label="Unexplained">
                           <span style={{ color: 'var(--accent2)' }}>
-                            {negResult.position.unexplained_remainder?.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            {fmtNumber(negResult.position.unexplained_remainder)}
                           </span>
                         </Stat>
                       </div>
