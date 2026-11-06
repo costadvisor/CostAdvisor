@@ -9,12 +9,16 @@ logger = logging.getLogger(__name__)
 _SYMBOL = {"EUR": "€", "USD": "$", "GBP": "£"}
 
 
-def fmt_money(v: float, currency: str | None, unit: str | None = None, signed: bool = False) -> str:
+def fmt_money(v: float, currency: str | None, unit: str | None = None, signed: bool = False,
+              scale: float | None = None) -> str:
     """Money the way the app prints it (frontend utils/currency fmtMoney):
     symbol (or ISO code) first, whole units from 100 up and cents below,
     thousands separators, sign before the symbol. fmt_money(-9.0152, "EUR",
-    "t") -> "-€9.02/t". Three-decimal euros read as thousands ("€291.161")."""
-    dp = 0 if abs(v) >= 100 else 2
+    "t") -> "-€9.02/t". Three-decimal euros read as thousands ("€291.161").
+    `scale` takes the decimals from another figure, as the frontend does for a
+    gap: fmt_money(34.85, "EUR", "t", scale=3517.41) -> "€35/t", the gap the
+    brief prints, not "€34.85/t"."""
+    dp = 0 if abs(v if scale is None else scale) >= 100 else 2
     body = f"{abs(v):,.{dp}f}"
     zero = float(body.replace(",", "")) == 0
     sign = "" if zero else "-" if v < 0 else "+" if signed else ""
@@ -41,11 +45,13 @@ async def generate_enhanced_narrative(
     num_periods: int,
     base_period_label: str = "",
     unit: str | None = None,
+    scale: float | None = None,
 ) -> str:
-    """Attempt LLM-enhanced narrative; fall back to rule-based on any failure."""
+    """Attempt LLM-enhanced narrative; fall back to rule-based on any failure.
+    `scale` is the should-cost: per-unit figures take its decimals (fmt_money)."""
     base = generate_narrative(
         product_name, supplier_name, drivers, gap, gap_pct,
-        total_impact, currency, period_label, num_periods, base_period_label, unit,
+        total_impact, currency, period_label, num_periods, base_period_label, unit, scale,
     )
     since = f"since {base_period_label}" if base_period_label else "since the formula's base quarter"
 
@@ -58,11 +64,11 @@ async def generate_enhanced_narrative(
         driver_lines.append(
             f"- {d['component_label']}: linked to {idx}, "
             f"index {'up' if d['index_change_pct'] >= 0 else 'down'} {abs(d['index_change_pct']):.1f}% {since}, "
-            f"moving the should-cost by {fmt_money(d['contribution_to_gap'], currency, unit, signed=True)} {since} "
+            f"moving the should-cost by {fmt_money(d['contribution_to_gap'], currency, unit, signed=True, scale=scale)} {since} "
             f"({d['direction']})"
         )
 
-    gap_str = (f"{fmt_money(gap, currency, unit, signed=True)} ({gap_pct:+.1f}% of should-cost)"
+    gap_str = (f"{fmt_money(gap, currency, unit, signed=True, scale=scale)} ({gap_pct:+.1f}% of should-cost)"
                if gap is not None and gap_pct is not None else "N/A")
     impact_str = fmt_money(total_impact, currency, signed=True) if total_impact is not None else "N/A"
 
@@ -101,9 +107,11 @@ def generate_narrative(
     num_periods: int,
     base_period_label: str = "",
     unit: str | None = None,
+    scale: float | None = None,
 ) -> str:
     """
-    Generate a rule-based negotiation narrative.
+    Generate a rule-based negotiation narrative. `scale` is the should-cost:
+    per-unit figures take its decimals, as on the brief (fmt_money).
 
     drivers: list of dicts with keys:
         component_label, index_name, index_change_pct, contribution_to_gap, direction
@@ -127,7 +135,7 @@ def generate_narrative(
         change = abs(d["index_change_pct"])
 
         idx_name = d["index_name"] or d["component_label"]
-        contribution = fmt_money(abs(d["contribution_to_gap"]), currency, unit)
+        contribution = fmt_money(abs(d["contribution_to_gap"]), currency, unit, scale=scale)
 
         impact_word = "adding" if d["contribution_to_gap"] >= 0 else "taking"
         to_from = "to" if d["contribution_to_gap"] >= 0 else "off"
@@ -159,13 +167,13 @@ def generate_narrative(
         if gap > 0.001:
             parts.append(
                 f"Current actual price exceeds should-cost by "
-                f"{fmt_money(abs(gap), currency, unit)} ({abs(gap_pct or 0):.1f}%), "
+                f"{fmt_money(abs(gap), currency, unit, scale=scale)} ({abs(gap_pct or 0):.1f}%), "
                 f"suggesting potential for negotiation."
             )
         elif gap < -0.001:
             parts.append(
                 f"Current actual price is below should-cost by "
-                f"{fmt_money(abs(gap), currency, unit)}, indicating supplier margin compression."
+                f"{fmt_money(abs(gap), currency, unit, scale=scale)}, indicating supplier margin compression."
             )
 
     return " ".join(parts)

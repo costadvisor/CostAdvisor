@@ -968,6 +968,7 @@ def calculate_brief(
         num_periods=len(periods),
         base_period_label=base_label,
         unit=out_unit,
+        scale=current_sc,
     )
 
     return BriefResult(

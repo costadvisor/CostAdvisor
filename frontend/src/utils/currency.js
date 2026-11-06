@@ -42,11 +42,12 @@ export const fmtMoney = (v, currency, { signed = false, decimals, scale } = {}) 
 // Gap-style money: always signed ("+€48", "−€9.02").
 export const fmtSignedMoney = (v, currency, opts = {}) => fmtMoney(v, currency, { ...opts, signed: true });
 
-// A price per unit: fmtPerUnit(291.16, 'EUR', 't') → "€291 /t";
-// fmtPerUnit(2.814, 'EUR', 'kg') → "€2.81 /kg". Same options as fmtMoney.
+// A price per unit: fmtPerUnit(291.16, 'EUR', 't') → "€291/t";
+// fmtPerUnit(2.814, 'EUR', 'kg') → "€2.81/kg". Same options as fmtMoney, and
+// the form the call script prints (backend narrative.fmt_money).
 export const fmtPerUnit = (v, currency, unit, opts = {}) => {
   const money = fmtMoney(v, currency, opts);
-  return unit && money !== '—' ? `${money} /${unit}` : money;
+  return unit && money !== '—' ? `${money}/${unit}` : money;
 };
 export const fmtPerTonne = (v, currency, opts) => fmtPerUnit(v, currency, 't', opts);
 export const fmtPerKg = (v, currency, opts) => fmtPerUnit(v, currency, 'kg', opts);

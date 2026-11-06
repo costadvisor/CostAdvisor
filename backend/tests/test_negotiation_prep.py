@@ -148,7 +148,8 @@ def test_below_should_cost_the_script_never_offers_more():
     body = " ".join(build_script(_Below(), []))
     assert "settle at" not in body
     assert "€1,807/t is already below our should-cost" in body
-    assert "€34.85/t below that" in body
+    # The gap at the should-cost's scale, as the brief prints it ("−€35").
+    assert "€35/t below that" in body and "34.85" not in body
 
 
 def test_an_excluded_claim_stays_out_of_the_script():

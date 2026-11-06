@@ -350,6 +350,20 @@ def test_rule_based_narrative_uses_since_and_app_money():
     assert "fell 8.6% since Q1-23, taking €9.02/t off the should-cost" in text
     assert "over the period" not in text and ".015" not in text
 
+    # With the should-cost as scale, a per-unit figure takes its decimals, so
+    # the narrative prints a gap or a driver the way the brief's table does.
+    assert fmt_money(34.85, "EUR", "t", scale=3517.41) == "€35/t"
+    scaled = generate_narrative(
+        "PAC", "Kemira",
+        [{"component_label": "Energy", "index_name": "EU power", "index_change_pct": -8.6,
+          "contribution_to_gap": -9.0152, "direction": "down"}],
+        gap=47.77, gap_pct=16.4, total_impact=None, currency="EUR",
+        period_label="Q3-24 to Q2-26", num_periods=8, base_period_label="Q1-23", unit="t",
+        scale=291.16,
+    )
+    assert "taking €9/t off the should-cost" in scaled
+    assert "exceeds should-cost by €48/t" in scaled
+
 
 def test_gap_alert_names_supplier_and_destination(tenant_a, brief_model, db):
     """Audit D-09: two cost models for one product differ by supplier or

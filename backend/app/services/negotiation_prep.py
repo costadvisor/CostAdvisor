@@ -125,10 +125,11 @@ def check_claim(claim, drivers, should_cost: float | None) -> CheckedClaim:
     )
 
 
-def _money(v: float, currency: str, unit: str) -> str:
+def _money(v: float, currency: str, unit: str, scale: float | None = None) -> str:
     # The app's money format (narrative.fmt_money), so the script reads the
-    # same figure the brief and the ladder show.
-    return fmt_money(v, currency, unit)
+    # same figure the brief and the ladder show: a gap at the should-cost's
+    # scale ("€35/t", as the brief prints it, not "€34.85/t").
+    return fmt_money(v, currency, unit, scale=scale)
 
 
 def build_script(brief, checked: list[CheckedClaim]) -> list[str]:
@@ -150,7 +151,7 @@ def build_script(brief, checked: list[CheckedClaim]) -> list[str]:
     if brief.current_actual_price is not None and brief.gap is not None:
         direction = "above" if brief.gap > 0 else "below"
         opening += (f" Your current price is {_money(brief.current_actual_price, cur, unit)}, "
-                    f"{_money(abs(brief.gap), cur, unit)} {direction} that.")
+                    f"{_money(abs(brief.gap), cur, unit, scale=brief.current_should_cost)} {direction} that.")
     lines.append(opening)
 
     for c in checked:
