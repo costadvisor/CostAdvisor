@@ -115,8 +115,10 @@ export default function Pricing() {
       }));
     }
     if (addVolume) {
+      // The quantity column is in the product's unit; without it the server
+      // used to store "kg" on a tonne-priced model.
       promises.push(api.put(`/api/volumes/${costModelId}/${addYear}/${addQuarter}`, {
-        year: addYear, quarter: addQuarter, volume: parseFloat(addVolume),
+        year: addYear, quarter: addQuarter, volume: parseFloat(addVolume), unit: model?.product_unit || undefined,
       }));
     }
     Promise.all(promises)
@@ -141,7 +143,7 @@ export default function Pricing() {
     }
     if (editVolume !== '') {
       promises.push(api.put(`/api/volumes/${costModelId}/${row.year}/${row.quarter}`, {
-        year: row.year, quarter: row.quarter, volume: parseFloat(editVolume),
+        year: row.year, quarter: row.quarter, volume: parseFloat(editVolume), unit: model?.product_unit || undefined,
       }));
     }
     Promise.all(promises)

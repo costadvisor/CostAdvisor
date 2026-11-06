@@ -263,9 +263,11 @@ def parse_volume_upload(content: bytes, filename: str) -> dict:
             })
             continue
         entry = {"year": year, "quarter": quarter, "volume": volume}
+        # A blank unit is left out: the router then uses the product's unit.
         if has_unit:
             v = row["unit"]
-            entry["unit"] = str(v).strip() if pd.notna(v) and str(v).strip() else "kg"
+            if pd.notna(v) and str(v).strip():
+                entry["unit"] = str(v).strip()
         rows.append(entry)
     return {"rows": rows, "errors": errors}
 
