@@ -35,6 +35,7 @@ const FIELDS = [
   ['unit', 'Unit'],
   ['incoterm', 'Incoterm'],
 ];
+const FIELD_NAME = { product_reference: 'product', price: 'price', currency: 'currency', unit: 'unit', incoterm: 'Incoterm' };
 
 function confColor(conf) {
   if (conf == null) return 'var(--muted)';
@@ -43,11 +44,16 @@ function confColor(conf) {
   return 'var(--accent2)';
 }
 
-function FieldCell({ entry }) {
+const isMissing = (entry) => !entry || entry.value === null || entry.value === undefined;
+
+function FieldCell({ entry, missingEverywhere }) {
   // An absent key means the parser did not find the field. That is not the
-  // same as found-and-empty, and the two must not render identically.
-  if (!entry || entry.value === null || entry.value === undefined) {
-    return <td><span style={{ fontSize: 11, color: 'var(--accent2)' }}>not found</span></td>;
+  // same as found-and-empty, and the two must not render identically. A field
+  // missing on every row is said once above the table, not in red per row.
+  if (isMissing(entry)) {
+    return missingEverywhere
+      ? <td><span style={{ fontSize: 11, color: 'var(--muted)' }} title="Not found in the document">—</span></td>
+      : <td><span style={{ fontSize: 11, color: 'var(--accent2)' }}>not found</span></td>;
   }
   const v = typeof entry.value === 'number' ? entry.value.toFixed(2) : String(entry.value);
   const snippet = entry.locator?.snippet;
@@ -71,20 +77,22 @@ function PeriodInput({ row, override, onChange }) {
   const year = override.year ?? row.period_year ?? '';
   const quarter = override.quarter ?? row.period_quarter ?? '';
   const derived = row.period_year != null && override.year == null && override.quarter == null;
+  // Widths fit the placeholder and value after the input's padding: at 66/46px
+  // they clipped to "yea" and an empty box.
   return (
-    <td>
+    <td style={{ minWidth: 170 }}>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
         <input
-          className="ca-input" type="number" value={year} placeholder="year"
+          className="ca-input" type="number" value={year} placeholder="Year"
           aria-label={`Year for row ${row.line_index + 1}`}
           onChange={e => onChange({ year: e.target.value === '' ? null : Number(e.target.value) })}
-          style={{ width: 66 }}
+          style={{ width: 90, flexShrink: 0 }}
         />
         <input
           className="ca-input" type="number" min={1} max={4} value={quarter} placeholder="Q"
           aria-label={`Quarter for row ${row.line_index + 1}`}
           onChange={e => onChange({ quarter: e.target.value === '' ? null : Number(e.target.value) })}
-          style={{ width: 46 }}
+          style={{ width: 64, flexShrink: 0 }}
         />
       </div>
       <div style={{ fontSize: 10, color: derived ? 'var(--muted)' : 'var(--accent3)', marginTop: 2 }}>
@@ -223,6 +231,10 @@ export default function PriceListImport() {
   };
 
   const pending = run ? run.rows.filter(r => r.status === 'pending') : [];
+  // Document-level fields (currency, unit, Incoterm) the reader found on no row.
+  const missingEverywhere = run && run.rows.length
+    ? FIELDS.map(([k]) => k).filter(k => run.rows.every(r => isMissing(r.fields[k])))
+    : [];
   const committedCount = run ? run.rows.filter(r => r.status === 'committed').length : 0;
 
   return (
@@ -282,6 +294,12 @@ export default function PriceListImport() {
             </span>
           </div>
 
+          {missingEverywhere.length > 0 && (
+            <div style={{ fontSize: 12, color: 'var(--accent3)', marginBottom: 10 }}>
+              Not found anywhere in the document: {missingEverywhere.map(k => FIELD_NAME[k]).join(', ')}.
+            </div>
+          )}
+
           <div className="ca-scroll-x ca-scroll-x--full">
             <table className="ca-table">
               <caption className="ca-sr-only">
@@ -314,7 +332,7 @@ export default function PriceListImport() {
                           aria-label={`Include row ${row.line_index + 1}`}
                         />
                       </td>
-                      {FIELDS.map(([k]) => <FieldCell key={k} entry={row.fields[k]} />)}
+                      {FIELDS.map(([k]) => <FieldCell key={k} entry={row.fields[k]} missingEverywhere={missingEverywhere.includes(k)} />)}
                       {done ? (
                         <td style={{ fontSize: 11, color: 'var(--muted)' }}>
                           {row.period_year ? qLabel(row.period_year, row.period_quarter) : '—'}
