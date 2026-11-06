@@ -119,7 +119,8 @@ export default function CategoriesPage() {
     return sortItems(filtered, sort);
   }, [searched, coverage, scopes, sort]);
 
-  const activeCount = (q ? 1 : 0) + (coverage ? 1 : 0) + (scopes.length ? 1 : 0);
+  // One per ticked value, as on the other catalogue pages.
+  const activeCount = (q ? 1 : 0) + (coverage ? 1 : 0) + scopes.length;
   const clearAll = () => setParams((prev) => {
     const next = new URLSearchParams(prev);
     ['q', 'coverage', 'scope'].forEach((k) => next.delete(k));
