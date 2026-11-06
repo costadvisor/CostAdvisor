@@ -282,7 +282,7 @@ export default function PriceListImport() {
             </span>
           </div>
 
-          <div className="ca-scroll-x">
+          <div className="ca-scroll-x ca-scroll-x--full">
             <table className="ca-table">
               <caption className="ca-sr-only">
                 Rows read from the price list, with the cost model each one matched and the period it applies to.

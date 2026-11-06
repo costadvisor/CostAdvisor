@@ -163,7 +163,7 @@ export default function Squeeze() {
       {/* Detail table */}
       <div className="ca-card">
         <div className="ca-card-title">Detail Table</div>
-        <div className="ca-scroll-x">
+        <div className="ca-scroll-x ca-scroll-x--full">
           <table className="ca-table">
             <thead>
               <tr>

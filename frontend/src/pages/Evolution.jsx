@@ -324,7 +324,7 @@ export default function Evolution() {
 
       <div className="ca-card">
         <div className="ca-card-title">Detail Table</div>
-        <div className="ca-scroll-x">
+        <div className="ca-scroll-x ca-scroll-x--full">
           <table className="ca-table">
             <thead><tr><th>Metric</th>{periods.map(p => <th key={p.period} className="center">{p.period}</th>)}</tr></thead>
             <tbody>

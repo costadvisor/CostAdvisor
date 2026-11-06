@@ -415,7 +415,7 @@ function ShouldCostBreakdownTable({ breakdown, error, sym }) {
 
   return (
     <div style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-      <div className="ca-scroll-x">
+      <div className="ca-scroll-x ca-scroll-x--full">
         <table className="ca-table" style={{ margin: 0 }}>
           <thead>
             <tr>

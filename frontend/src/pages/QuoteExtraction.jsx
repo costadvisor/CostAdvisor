@@ -295,7 +295,7 @@ export default function QuoteExtraction() {
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
               {run.filename} — {run.lines.length} line(s), {pendingCount} pending review
             </div>
-            <div className="ca-scroll-x">
+            <div className="ca-scroll-x ca-scroll-x--full">
               <table className="ca-table" style={{ width: '100%' }}>
                 <thead>
                   <tr><th style={{ width: 40 }}>#</th><th>Extracted fields</th><th style={{ width: 180 }}>Actions</th></tr>
