@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../components/Toast';
-import api from '../api';
+import api, { formatApiError } from '../api';
 import exportCsv from '../utils/exportCsv';
 import FormulaDetailModal from '../components/FormulaDetailModal';
 import FileUpload from '../components/FileUpload';
@@ -61,6 +61,8 @@ const REASON_LABEL = {
   line_and_type_code_disagree_on_proxy_status: 'Line and registry disagree on stand-in status',
   weight_set_does_not_close: 'Weights do not sum to 100',
   combo_has_no_cost_lines: 'No cost lines',
+  source_flags_a_pricing_gap: 'Source flags a pricing gap',
+  source_flags_the_margin_for_re_estimation: 'Source flags the margin for re-estimation',
 };
 
 const TIER_LABEL = {
@@ -89,6 +91,7 @@ export default function Formulas() {
   const [detailTemplate, setDetailTemplate] = useState(null);
   const [commodities, setCommodities] = useState([]);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [loadError, setLoadError] = useState(null);
 
   const platformTemplates = templates.filter(t => !t.team_id);
   const teamTemplates = templates.filter(t => t.team_id);
@@ -98,6 +101,7 @@ export default function Formulas() {
   const fetchData = async () => {
     if (!activeTeamId) return;
     setLoading(true);
+    setLoadError(null);
     try {
       const [tmplRes, permRes, cmRes] = await Promise.all([
         api.get('/api/formulas/', { params: { team_id: activeTeamId } }),
@@ -114,8 +118,9 @@ export default function Formulas() {
       const meRes = await api.get('/auth/me');
       const membership = meRes.data?.memberships?.find(m => m.team_id === activeTeamId);
       setCanEditTeam(membership?.role === 'owner' || membership?.role === 'admin');
-    } catch {
-      // silently fail — page shows empty state
+    } catch (e) {
+      // Said, not swallowed: an empty library and a failed load look the same.
+      setLoadError(formatApiError(e) || 'Could not load the formula library.');
     } finally {
       setLoading(false);
     }
@@ -183,8 +188,8 @@ export default function Formulas() {
     <div className="ca-page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
-          <h1 className="ca-page-title" style={{ marginBottom: 4 }}>Formula Library</h1>
-          <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
+          <h1 className="ca-h1">Formula Library</h1>
+          <p className="ca-subtitle" style={{ marginBottom: 0 }}>
             Reusable advanced formula templates for cost models
           </p>
         </div>
@@ -197,6 +202,11 @@ export default function Formulas() {
 
       {loading ? (
         <div style={{ padding: 48, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
+      ) : loadError ? (
+        <div className="ca-card" style={{ color: 'var(--accent2)' }}>
+          {loadError}{' '}
+          <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={fetchData}>Retry</button>
+        </div>
       ) : (
         <>
           <CatalogSection
@@ -307,7 +317,8 @@ function TrustBadge({ summary }) {
     lines.push(`Worst of ${summary.combo_count} regions (${spread})`);
   }
   for (const r of summary.reasons || []) {
-    const label = REASON_LABEL[r.reason] || r.reason;
+    // An unmapped code still reads as words, not as a snake_case key.
+    const label = REASON_LABEL[r.reason] || String(r.reason || '').replace(/_/g, ' ');
     const named = (r.subjects || []).join(', ');
     const more = r.subject_count > (r.subjects || []).length
       ? ` +${r.subject_count - r.subjects.length} more` : '';
@@ -685,14 +696,18 @@ function LineRows({ line, canEdit, onEdit, onDelete, onOpen, canFork = false, fo
             <TrustBadge summary={t.trust_summary} />
           </td>
           <td style={{ width: 150, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, whiteSpace: 'nowrap' }}>
-            <span
-              title={TIER_TITLE[t.catalog_meta?.coverage_tier]}
-              style={{ color: t.catalog_meta?.coverage_tier === 'blocked' ? 'var(--accent2)' : 'var(--text-secondary)' }}
-            >
-              {TIER_LABEL[t.catalog_meta?.coverage_tier] || '—'}
-            </span>
+            {/* The tier only when the card carries one: the live drop leaves it
+                null on every card, and a column of "—" said nothing. */}
+            {TIER_LABEL[t.catalog_meta?.coverage_tier] && (
+              <span
+                title={TIER_TITLE[t.catalog_meta.coverage_tier]}
+                style={{ color: t.catalog_meta.coverage_tier === 'blocked' ? 'var(--accent2)' : 'var(--text-secondary)' }}
+              >
+                {TIER_LABEL[t.catalog_meta.coverage_tier]} ·{' '}
+              </span>
+            )}
             <span style={{ color: 'var(--muted)' }}>
-              {' '}· {t.catalog_meta?.region_count ?? 0} {t.catalog_meta?.region_count === 1 ? 'region' : 'regions'}
+              {t.catalog_meta?.region_count ?? 0} {t.catalog_meta?.region_count === 1 ? 'region' : 'regions'}
             </span>
           </td>
           {showActions && (
