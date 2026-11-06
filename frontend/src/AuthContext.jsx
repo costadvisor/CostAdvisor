@@ -11,18 +11,19 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [pendingInviteCount, setPendingInviteCount] = useState(0);
 
-  // Read ?login_error from URL once on mount and clear it immediately so it
-  // doesn't persist across navigations or reloads.
-  const [loginError, setLoginError] = useState(() => {
+  // Read ?login_error from the URL once, then clear it so it doesn't persist
+  // across navigations or reloads. The initializer stays pure: StrictMode runs
+  // it twice in dev, and stripping the URL there left the second run with null.
+  const [loginError, setLoginError] = useState(
+    () => new URLSearchParams(window.location.search).get('login_error') || null,
+  );
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const err = params.get('login_error') || null;
-    if (err) {
-      params.delete('login_error');
-      const newSearch = params.toString();
-      window.history.replaceState(null, '', newSearch ? `?${newSearch}` : window.location.pathname);
-    }
-    return err;
-  });
+    if (!params.has('login_error')) return;
+    params.delete('login_error');
+    const newSearch = params.toString();
+    window.history.replaceState(null, '', newSearch ? `?${newSearch}` : window.location.pathname);
+  }, []);
 
   const fetchUser = useCallback(async () => {
     try {
