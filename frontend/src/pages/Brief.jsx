@@ -29,7 +29,9 @@ export default function Brief() {
     product_name, supplier_name, destination_country, currency, unit,
     current_should_cost, current_floor, current_actual_price, gap, gap_pct,
     total_impact, volumes_missing, period_label, evolution, narrative, drivers,
+    as_of_label, base_period_label,
   } = data;
+  const since = base_period_label ? `since ${base_period_label}` : 'since the base quarter';
   const sym = curSym(currency);
   // Every per-unit figure at the should-cost's scale (utils/currency), so the
   // header and the position card print one number one way, not "€291.16" and
@@ -111,7 +113,7 @@ export default function Brief() {
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: 'var(--accent)' }}>
               {money(current_should_cost)}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>per {unit} at {period_label}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>per {unit} as of {as_of_label || period_label}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Actual Price</div>
@@ -161,11 +163,16 @@ export default function Brief() {
           </div>
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-          {current_floor != null
-            ? <>Your defensible range for this product is <strong>{money(current_floor)}</strong> to{' '}
-                <strong>{money(current_should_cost)}</strong> — anchor the conversation near should-cost and hold
-                the floor as your walk-away point, not your opening offer.</>
-            : 'The floor (cost before margin) is not available for this formula.'}
+          {/* Already under should-cost: anchoring near it would argue the price up. */}
+          {gap !== null && gap < 0
+            ? <>You already pay <strong>{money(current_actual_price)}</strong>, below the should-cost of{' '}
+                <strong>{money(current_should_cost)}</strong>. Hold the current price; there is no case here
+                for paying more.</>
+            : current_floor != null
+              ? <>Your defensible range for this product is <strong>{money(current_floor)}</strong> to{' '}
+                  <strong>{money(current_should_cost)}</strong> — anchor the conversation near should-cost and hold
+                  the floor as your walk-away point, not your opening offer.</>
+              : 'The floor (cost before margin) is not available for this formula.'}
         </div>
       </div>
 
@@ -270,8 +277,10 @@ export default function Brief() {
             <tr>
               <th>Component</th>
               <th>Index</th>
-              <th className="center">Index Change</th>
-              <th className="center">Contribution to Gap</th>
+              {/* Measured from the formula's base quarter: should-cost movement,
+                  not a split of the supplier gap. */}
+              <th className="center">Index change {since}</th>
+              <th className="center">Should-cost change {since}</th>
               <th className="center">Direction</th>
             </tr>
           </thead>

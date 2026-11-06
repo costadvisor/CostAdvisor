@@ -99,13 +99,12 @@ export default function NegotiationPrepArea() {
     if (!said.trim()) return;
     setBusy(true);
     try {
-      // The period comes from the brief the prep was built at, so a claim is
-      // always checked against the window it was made about.
-      const [, q, yy] = prep.period_label.match(/Q(\d)-(\d{2})/) || [];
+      // Recorded against the quarter the prep's figures are as of (the window's
+      // last, sent as numbers) — parsing period_label took its first quarter.
       await api.post(`/api/negotiation-prep/${costModelId}/claims`, {
         said: said.trim(),
-        year: yy ? 2000 + Number(yy) : new Date().getFullYear(),
-        quarter: q ? Number(q) : Math.floor(new Date().getMonth() / 3) + 1,
+        year: prep.as_of_year ?? new Date().getFullYear(),
+        quarter: prep.as_of_quarter ?? Math.floor(new Date().getMonth() / 3) + 1,
         driver_label: driver || null,
         claimed_change_pct: claimedPct === '' ? null : Number(claimedPct),
       });
@@ -166,7 +165,7 @@ export default function NegotiationPrepArea() {
         <div style={{ minWidth: 0 }}>
           <h1 className="ca-h1">Prepare · {prep.product_name}</h1>
           <p className="ca-subtitle" style={{ marginBottom: 0 }}>
-            {prep.supplier_name || 'No supplier'} · {prep.period_label} — record what they claimed, see what
+            {prep.supplier_name || 'No supplier'} · as of {prep.as_of_label || prep.period_label} — record what they claimed, see what
             the indices actually did.
           </p>
         </div>

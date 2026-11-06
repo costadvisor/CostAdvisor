@@ -58,7 +58,12 @@ export default function NegotiateDetailArea() {
     product_name, supplier_name, destination_country, currency, unit,
     current_should_cost, current_floor, current_actual_price, gap, gap_pct,
     total_impact, volumes_missing, period_label, evolution, narrative, drivers,
+    as_of_label, base_period_label,
   } = data;
+  // A single figure is as of the window's last quarter; the window itself
+  // ("Q3-24 to Q2-26") is for the chart and the totals over it.
+  const asOf = as_of_label || period_label;
+  const since = base_period_label ? `since ${base_period_label}` : 'since the base quarter';
   const sym = curSym(currency);
   const money = (v, opts) => fmtMoney(v, currency, opts);
 
@@ -160,12 +165,12 @@ export default function NegotiateDetailArea() {
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 320px', minWidth: 0 }}>
               <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
-                No supplier price recorded for {period_label}
+                No supplier price recorded for {asOf}
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
                 The should-cost below is complete, but without a supplier price there is no gap to
-                negotiate against — so the assessment, the total impact and each driver's
-                contribution can't be calculated yet.
+                negotiate against — so the assessment and the total impact can't be
+                calculated yet.
                 {indicesFlat && ' The linked indices have also not moved over this period.'}
               </div>
             </div>
@@ -191,7 +196,7 @@ export default function NegotiateDetailArea() {
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: 'var(--accent)' }}>
               {money(current_should_cost, { decimals: dp })}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>per {unit} at {period_label}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>per {unit} as of {asOf}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Actual Price</div>
@@ -247,11 +252,17 @@ export default function NegotiateDetailArea() {
           </div>
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-          {current_floor != null
-            ? <>Your defensible range for this product is <strong>{money(current_floor, { decimals: dp })}</strong> to{' '}
-                <strong>{money(current_should_cost, { decimals: dp })}</strong> — anchor the conversation near should-cost and hold
-                the floor as your walk-away point, not your opening offer.</>
-            : 'The floor (cost before margin) is not available for this formula.'}
+          {/* Already under should-cost: anchoring "near should-cost" would argue
+              the price up, so the advice is to hold what you pay. */}
+          {hasActual && gap < 0
+            ? <>You already pay <strong>{money(current_actual_price, { decimals: dp })}</strong>, below the
+                should-cost of <strong>{money(current_should_cost, { decimals: dp })}</strong>. Hold the current
+                price; there is no case here for paying more.</>
+            : current_floor != null
+              ? <>Your defensible range for this product is <strong>{money(current_floor, { decimals: dp })}</strong> to{' '}
+                  <strong>{money(current_should_cost, { decimals: dp })}</strong> — anchor the conversation near should-cost and hold
+                  the floor as your walk-away point, not your opening offer.</>
+              : 'The floor (cost before margin) is not available for this formula.'}
         </div>
       </div>
 
@@ -366,9 +377,10 @@ export default function NegotiateDetailArea() {
         </div>
       )}
 
-      {/* Cost Drivers. "Contribution to gap" is undefined without a supplier price,
-          so that column is dropped rather than filled with a column of $0.000 — the
-          component's share of the should-cost is shown instead, which is real. */}
+      {/* Cost Drivers. A driver's figure (`contribution_to_gap` in the API) is how
+          far the should-cost moved on that line since the formula's base quarter —
+          not a split of the supplier gap, so it is labelled as what it is. Without
+          a supplier price the component's share of the should-cost is shown instead. */}
       <div className="ca-card" style={{ marginBottom: 16 }}>
         <div className="ca-card-title" style={{ marginBottom: 8 }}>
           {hasActual ? 'Top Cost Drivers' : 'Cost Components'}
@@ -384,8 +396,8 @@ export default function NegotiateDetailArea() {
                 <tr>
                   <th scope="col">Component</th>
                   <th scope="col">Index</th>
-                  <th scope="col" className="right">Index Change</th>
-                  <th scope="col" className="right">{hasActual ? 'Contribution to Gap' : 'Share of Should-Cost'}</th>
+                  <th scope="col" className="right">Index change {since}</th>
+                  <th scope="col" className="right">{hasActual ? `Should-cost change ${since}` : 'Share of Should-Cost'}</th>
                   <th scope="col" className="right">Direction</th>
                 </tr>
               </thead>
@@ -430,7 +442,7 @@ export default function NegotiateDetailArea() {
             {!hasActual && (
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
                 Each row shows what the component contributes to the should-cost. Once a supplier
-                price is recorded, this becomes each component's contribution to the gap.
+                price is recorded, this column shows how far each line moved the should-cost {since}.
               </div>
             )}
           </>
