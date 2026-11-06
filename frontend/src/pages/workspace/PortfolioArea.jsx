@@ -128,7 +128,10 @@ export default function PortfolioArea() {
     setLoading(true);
     setError(null);
     Promise.all([
-      api.get('/api/cost-models', { params: { team_id: activeTeamId } }),
+      // as_of: each model's latest quarter with data, where "today" is priced
+      // on Monitor, Negotiate and the brief (the calendar quarter only carries
+      // the last month forward).
+      api.get('/api/cost-models', { params: { team_id: activeTeamId, as_of: true } }),
       api.get('/api/products', { params: { team_id: activeTeamId } }),
       api.get('/api/formulas/', { params: { team_id: activeTeamId } }),
     ])
@@ -192,7 +195,7 @@ export default function PortfolioArea() {
     let cancelled = false;
     setSc(Object.fromEntries(costModels.map(cm => [cm.id, { status: 'loading' }])));
     costModels.forEach(cm => {
-      api.post('/api/costing/should-cost', { cost_model_id: cm.id, target_year: CUR_Y, target_quarter: CUR_Q })
+      api.post('/api/costing/should-cost', { cost_model_id: cm.id, target_year: cm.as_of_year || CUR_Y, target_quarter: cm.as_of_quarter || CUR_Q })
         .then(({ data }) => {
           if (cancelled) return;
           setSc(prev => ({ ...prev, [cm.id]: { status: 'ok', value: data.should_cost, currency: data.currency, unit: data.unit } }));
@@ -254,6 +257,10 @@ export default function PortfolioArea() {
 
   const filtersActive = familyFilter !== 'all' || statusFilter !== 'all' || !!search;
   const clearFilters = () => { setFamilyFilter('all'); setStatusFilter('all'); setSearch(''); };
+
+  // One quarter for every row, or say it is per model.
+  const asOfs = [...new Set(costModels.filter(cm => cm.as_of_year).map(cm => `Q${cm.as_of_quarter} ${cm.as_of_year}`))];
+  const asOfLabel = asOfs.length === 1 ? asOfs[0] : asOfs.length ? "each product's latest quarter with index data" : `Q${CUR_Q} ${CUR_Y}`;
 
   const supplierCount = new Set(costModels.map(cm => cm.supplier_name).filter(Boolean)).size;
   const regionCount = new Set(costModels.map(cm => cm.region).filter(Boolean)).size;
@@ -334,7 +341,7 @@ export default function PortfolioArea() {
           <button className="ca-btn ca-btn-primary" onClick={() => setShowAddProduct(true)}>+ Add product</button>
         </div>
       </div>
-      <p className="ca-subtitle" style={{ marginTop: 4 }}>Every product you buy, its supplier and route, and its live should-cost — evolved to Q{CUR_Q} {CUR_Y} by your linked indices.</p>
+      <p className="ca-subtitle" style={{ marginTop: 4 }}>Every product you buy, its supplier and route, and its live should-cost — evolved by your linked indices to {asOfLabel}.</p>
 
       <ProductFormModal
         isOpen={showAddProduct}

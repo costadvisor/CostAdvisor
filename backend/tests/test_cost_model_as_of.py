@@ -47,6 +47,11 @@ def test_single_read_names_the_latest_quarter_with_data(client_as, tenant_a, db)
         # No formula yet: nothing to price, so no as-of quarter.
         body = c.get(f"/api/cost-models/{bare.id}").json()
         assert body["as_of_year"] is None and body["as_of_quarter"] is None
+        # The list adds it only when asked (the Portfolio grid).
+        rows = {r["id"]: r for r in c.get(f"/api/cost-models?team_id={tenant_a['team_id']}&as_of=true").json()}
+        assert (rows[str(cm.id)]["as_of_year"], rows[str(cm.id)]["as_of_quarter"]) == (2025, 2)
+        rows = {r["id"]: r for r in c.get(f"/api/cost-models?team_id={tenant_a['team_id']}").json()}
+        assert rows[str(cm.id)]["as_of_year"] is None
     finally:
         db.execute(text("DELETE FROM cost_models WHERE id IN (:a, :b)"), {"a": str(cm.id), "b": str(bare.id)})
         db.query(IndexMonthlyValue).filter(IndexMonthlyValue.commodity_id == ci.id).delete(synchronize_session=False)
