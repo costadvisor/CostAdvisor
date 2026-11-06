@@ -287,6 +287,47 @@ def test_summary_prices_today_where_the_brief_does(client_as, tenant_a, brief_mo
     assert f"as of Q{CUR_Q} {CUR_Y}" in trig["message"]
 
 
+def test_today_is_the_last_actual_month_of_a_monthly_only_recipe(tenant_a, db):
+    """Audit D-01 review. Most recipe indices are monthly-only. With no invoice
+    on the model, "today" was the calendar quarter (the last month carried
+    forward); it is the quarter of the last actual month, never a forecast one."""
+    from sqlalchemy import text
+    from app.models.index_layer import IndexMonthlyValue
+    from app.services.costing_engine import _current_quarter, latest_data_quarter
+
+    ci = CommodityIndex(name=f"MonthlyOnly-{uuid.uuid4().hex[:8]}", currency="USD", unit="t")
+    db.add(ci)
+    db.flush()
+    db.add_all([
+        IndexMonthlyValue(commodity_id=ci.id, year=2025, month=m, value=100 + m, kind="actual")
+        for m in (1, 2, 3, 4)
+    ] + [IndexMonthlyValue(commodity_id=ci.id, year=2025, month=9, value=120, kind="forecast")])
+    product = Product(id=uuid.uuid4(), team_id=tenant_a["team_id"], created_by=tenant_a["user_id"],
+                      name="Monthly-only product", unit="t")
+    db.add(product)
+    db.flush()
+    cm = CostModel(id=uuid.uuid4(), team_id=tenant_a["team_id"], product_id=product.id,
+                   created_by=tenant_a["user_id"], region=REGION, currency="USD")
+    db.add(cm)
+    db.flush()
+    fv = FormulaVersion(cost_model_id=cm.id, base_price=100, base_year=2025, base_quarter=1,
+                        formula_type="simple", margin_type="pct", margin_value=0)
+    db.add(fv)
+    db.flush()
+    db.add(FormulaComponent(formula_version_id=fv.id, label="Feed", commodity_id=ci.id, weight=1))
+    db.commit()
+    try:
+        db.refresh(cm)
+        # April is the last actual month: Q2-25. The September forecast is not data.
+        assert latest_data_quarter(db, cm) == (2025, 2)
+        assert latest_data_quarter(db, cm) != _current_quarter()
+    finally:
+        db.execute(text("DELETE FROM cost_models WHERE id = :id"), {"id": str(cm.id)})
+        db.query(IndexMonthlyValue).filter(IndexMonthlyValue.commodity_id == ci.id).delete(synchronize_session=False)
+        db.query(CommodityIndex).filter(CommodityIndex.id == ci.id).delete(synchronize_session=False)
+        db.commit()
+
+
 def test_summary_drift_is_sign_aware_and_savings_are_no_exposure(client_as, tenant_a, brief_model, db):
     """Audit D-04 / D-05 / D-06. Above: actual 150 vs should-cost 111 is +35.1%
     of the should-cost (not of the base price), drift-flagged, and 39 x 10 of

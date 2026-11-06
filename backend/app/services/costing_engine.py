@@ -209,6 +209,7 @@ def _available_index_range(db: Session, cost_model: CostModel):
     """Find the min/max (year, quarter) across both index data and pricing data
     for this cost model, so the date range reflects all available information."""
     from app.models.index_data import IndexValue
+    from app.models.index_layer import IndexMonthlyValue
     from sqlalchemy import func
 
     min_yq, max_yq = None, None
@@ -235,6 +236,20 @@ def _available_index_range(db: Session, cost_model: CostModel):
         ).filter(IndexValue.commodity_id.in_(commodity_ids)).first()
         if row and row[0] is not None:
             min_yq, max_yq = row
+
+        # Most recipe indices are monthly-only: their actual months count too
+        # (forecast months are not data), or a model with no invoice yet had no
+        # range and "the latest quarter with data" fell back to the calendar
+        # quarter, which only carries the last month forward.
+        mrow = db.query(
+            func.min(IndexMonthlyValue.year * 100 + IndexMonthlyValue.month),
+            func.max(IndexMonthlyValue.year * 100 + IndexMonthlyValue.month),
+        ).filter(IndexMonthlyValue.commodity_id.in_(commodity_ids),
+                 IndexMonthlyValue.kind == "actual").first()
+        if mrow and mrow[0] is not None:
+            m_min, m_max = ((ym // 100) * 10 + (ym % 100 + 2) // 3 for ym in mrow)
+            min_yq = m_min if min_yq is None else min(min_yq, m_min)
+            max_yq = m_max if max_yq is None else max(max_yq, m_max)
 
     # Check actual pricing data for this cost model
     price_row = db.query(
