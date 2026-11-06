@@ -19,6 +19,7 @@ from app.services.costing_engine import (
 from app.services.data_resolver import get_single_index_value, index_lookup_cache
 from app.services.fx_converter import convert_price
 from app.services.permissions import require_permission
+from app.services.thresholds import effective_threshold
 
 router = APIRouter()
 
@@ -75,7 +76,11 @@ class PortfolioModelSummary(BaseModel):
     gap_pct: float | None
     cumulative_impact: float | None
     flag_index_moved: bool
+    # Paying more than should-cost by more than the team's alert threshold.
     flag_price_drift: bool
+    # Paying less than should-cost by more than the threshold: worth knowing,
+    # never an alert (a sign-blind flag labelled these "Above should-cost").
+    flag_below_should_cost: bool = False
 
 
 class PortfolioKPIs(BaseModel):
@@ -129,6 +134,9 @@ def _portfolio_summary(db: Session, team_id: uuid.UUID, reporting_currency: str)
     largest_exposure = 0.0
     largest_exposure_id = None
     models_flagged = 0
+    # The team's alert threshold (the one /alerts edits), not a literal 10%.
+    # A currency threshold is meaningful here: both sides are money.
+    threshold = effective_threshold(db, team_id)
 
     for cm in cost_models:
         fv = cm.current_formula
@@ -148,16 +156,18 @@ def _portfolio_summary(db: Session, team_id: uuid.UUID, reporting_currency: str)
         latest_actual, actual_y, actual_q = latest_price_by_cm.get(cm.id, (None, None, None))
 
         gap = (latest_actual - current_sc) if latest_actual is not None else None
-        base_price = float(fv.base_price)
-        gap_pct = (gap / base_price * 100) if (gap is not None and base_price) else None
+        # Gap % of the should-cost it is compared with, as on the brief and in alerts.
+        gap_pct = (gap / current_sc * 100) if (gap is not None and current_sc) else None
 
         # Calculate cumulative impact if volumes exist
         cumulative_impact = None
         if cm.id in total_volume_by_cm and gap is not None:
             cumulative_impact = gap * total_volume_by_cm[cm.id]
 
-        # Flags
-        flag_price_drift = abs(gap_pct) > 10 if gap_pct is not None else False
+        # Flags. Sign-aware: paying 12% under should-cost is not drift to fix.
+        drift = gap_pct if threshold.is_pct else gap
+        flag_price_drift = drift is not None and drift > threshold.value
+        flag_below = drift is not None and drift < -threshold.value
         flag_index_moved = False
 
         # Check if indices moved >5% since base date without new formula version
@@ -183,7 +193,9 @@ def _portfolio_summary(db: Session, team_id: uuid.UUID, reporting_currency: str)
         if flag_price_drift or flag_index_moved:
             models_flagged += 1
 
-        exposure = abs(cumulative_impact) if cumulative_impact is not None else (abs(gap) if gap else 0)
+        # Money at stake is what you overpay: a model priced under should-cost
+        # adds nothing (abs() counted savings as exposure and ranked them).
+        exposure = max(cumulative_impact if cumulative_impact is not None else (gap or 0.0), 0.0)
 
         # Convert exposure to reporting currency for aggregation
         fx_exposure = exposure
@@ -195,7 +207,7 @@ def _portfolio_summary(db: Session, team_id: uuid.UUID, reporting_currency: str)
 
         total_exposure += fx_exposure
         if fx_exposure > largest_exposure:
-            largest_exposure = exposure
+            largest_exposure = fx_exposure    # in the reporting currency, like the total
             largest_exposure_id = cm.id
 
         summaries.append(PortfolioModelSummary(
@@ -217,10 +229,11 @@ def _portfolio_summary(db: Session, team_id: uuid.UUID, reporting_currency: str)
             cumulative_impact=round(cumulative_impact, 2) if cumulative_impact is not None else None,
             flag_index_moved=flag_index_moved,
             flag_price_drift=flag_price_drift,
+            flag_below_should_cost=flag_below,
         ))
 
-    # Sort by exposure descending
-    summaries.sort(key=lambda s: abs(s.cumulative_impact or s.gap or 0), reverse=True)
+    # Sort by exposure (money overpaid) descending
+    summaries.sort(key=lambda s: max(s.cumulative_impact or s.gap or 0, 0), reverse=True)
 
     return PortfolioResponse(
         models=summaries,

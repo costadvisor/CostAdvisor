@@ -617,8 +617,10 @@ def calculate_evolution(
             actual = _apply_unit(_apply_fx(db, actual, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
 
         gap = (actual - theoretical) if actual is not None else None
-        bp_display = _apply_unit(_apply_fx(db, period_base_price, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
-        gap_pct = (gap / bp_display * 100) if (gap is not None and bp_display) else None
+        # Gap % of the should-cost it is compared with, as the lists, alerts
+        # and supplier trust compute it. Over the base price, one gap read
+        # 15.9% here and 16.3% in an alert.
+        gap_pct = (gap / theoretical * 100) if (gap is not None and theoretical) else None
 
         periods_out.append(EvolutionPeriod(
             period=label,
@@ -733,8 +735,10 @@ def calculate_squeeze(
             actual = _apply_unit(_apply_fx(db, actual, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
 
         gap = (actual - theoretical) if actual is not None else None
-        bp_display = _apply_unit(_apply_fx(db, period_base_price, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
-        gap_pct = (gap / bp_display * 100) if (gap is not None and bp_display) else None
+        # Gap % of the should-cost it is compared with, as the lists, alerts
+        # and supplier trust compute it. Over the base price, one gap read
+        # 15.9% here and 16.3% in an alert.
+        gap_pct = (gap / theoretical * 100) if (gap is not None and theoretical) else None
 
         vol, vol_projected = volume_data.get((year, quarter), (0.0, True))
         # Convert volume units if needed
@@ -846,8 +850,10 @@ def calculate_brief(
             actual = _apply_unit(_apply_fx(db, actual, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
 
         gap = (actual - theoretical) if actual is not None else None
-        bp_display = _apply_unit(_apply_fx(db, period_base_price, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
-        gap_pct = (gap / bp_display * 100) if (gap is not None and bp_display) else None
+        # Gap % of the should-cost it is compared with, as the lists, alerts
+        # and supplier trust compute it. Over the base price, one gap read
+        # 15.9% here and 16.3% in an alert.
+        gap_pct = (gap / theoretical * 100) if (gap is not None and theoretical) else None
 
         evo_periods.append(EvolutionPeriod(
             period=label, year=year, quarter=quarter, month=month,

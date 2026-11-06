@@ -117,7 +117,7 @@ def test_brief_happy_path(client_as, tenant_a, brief_model):
     assert b["current_should_cost"] == pytest.approx(111.0)
     assert b["current_actual_price"] == pytest.approx(150.0)
     assert b["gap"] == pytest.approx(39.0)          # verdict signal
-    assert b["gap_pct"] == pytest.approx(39.0)
+    assert b["gap_pct"] == pytest.approx(39.0 / 111.0 * 100, abs=0.01)   # of the should-cost
     assert b["volumes_missing"] is False
     assert b["total_impact"] == pytest.approx(390.0)  # gap * volume
 
@@ -285,3 +285,37 @@ def test_summary_prices_today_where_the_brief_does(client_as, tenant_a, brief_mo
     cm = db.query(CostModel).filter(CostModel.id == brief_model.id).one()
     trig = _gap_trigger(db, cm, 10)
     assert f"as of Q{CUR_Q} {CUR_Y}" in trig["message"]
+
+
+def test_summary_drift_is_sign_aware_and_savings_are_no_exposure(client_as, tenant_a, brief_model, db):
+    """Audit D-04 / D-05 / D-06. Above: actual 150 vs should-cost 111 is +35.1%
+    of the should-cost (not of the base price), drift-flagged, and 39 x 10 of
+    exposure. Below: at 90 the gap is -21, flagged below should-cost, never as
+    drift, and adds nothing to exposure. The threshold is the team's."""
+    from app.models.team import Team
+
+    c = client_as(tenant_a)
+    params = {"team_id": str(tenant_a["team_id"])}
+
+    def row_and_kpis():
+        s = c.get("/api/portfolio/summary", params=params).json()
+        return next(m for m in s["models"] if m["cost_model_id"] == str(brief_model.id)), s["kpis"]
+
+    row, kpis = row_and_kpis()
+    assert row["gap_pct"] == pytest.approx(39.0 / 111.0 * 100, abs=0.01)
+    assert row["flag_price_drift"] is True and row["flag_below_should_cost"] is False
+    assert kpis["total_exposure"] == pytest.approx(390.0)
+
+    team = db.query(Team).filter(Team.id == tenant_a["team_id"]).one()
+    team.default_threshold_pct = 40
+    db.commit()
+    row, _ = row_and_kpis()
+    assert row["flag_price_drift"] is False      # 35.1% is under the team's 40%
+
+    team.default_threshold_pct = 10
+    db.query(ActualPrice).filter(ActualPrice.cost_model_id == brief_model.id).update({"price": 90})
+    db.commit()
+    row, kpis = row_and_kpis()
+    assert row["gap"] == pytest.approx(-21.0)
+    assert row["flag_price_drift"] is False and row["flag_below_should_cost"] is True
+    assert kpis["total_exposure"] == pytest.approx(0.0)
