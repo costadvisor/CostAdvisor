@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 
-const SUPPORT_EMAIL = 'alexis@staminachem.com';
+export const SUPPORT_EMAIL = 'alexis@staminachem.com';
 
 export default function Footer() {
   return (
