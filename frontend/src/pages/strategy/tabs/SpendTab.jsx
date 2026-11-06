@@ -56,7 +56,8 @@ export default function SpendTab({ slug, teamId, category }) {
   if (!data) return null;
 
   const cur = data.currency || 'EUR';
-  const money = (v) => fmt.money(v, cur);
+  // A value that rounds to nothing reads €0, never -€0.
+  const money = (v) => fmt.money(typeof v === 'number' && Math.round(v) === 0 ? 0 : v, cur);
   const illus = data.illustrative
     ? <span className="st-illus" title="This team's prices and volumes are made up for the demo">Illustrative demo data</span>
     : null;
@@ -79,16 +80,23 @@ export default function SpendTab({ slug, teamId, category }) {
     ? ((pair.actual_price_index / pair.should_cost_index) - 1) * 100 : null;
   const basePeriod = quarterLabel(data.evolution_base);
 
-  const supplierItems = (data.by_supplier || []).map((s, i) => ({
+  // A cost model with prices but no volumes still adds a supplier and a site
+  // row worth nothing: only rows with spend are drawn and counted, and the
+  // supplier count (KPI, caption, donut) is of named suppliers.
+  const hasSpend = (r) => Math.round(Number(r.value) || 0) > 0;
+  const supplierItems = (data.by_supplier || []).filter(hasSpend).map((s, i) => ({
     key: s.key ?? i,
     label: s.name || 'No supplier set',
+    named: !!s.name,
     value: s.value,
     pct: s.pct,
     pctText: fmt.share(s.pct, { dp: 1 }),
     color: s.name ? seriesColor(i) : 'var(--muted)',
   }));
+  const supplierCount = supplierItems.filter((s) => s.named).length;
 
-  const siteItems = (data.by_site || []).map((s) => ({ key: s.key, value: s.value, ...siteParts(s) }));
+  const siteItems = (data.by_site || []).filter(hasSpend)
+    .map((s) => ({ key: s.key, value: s.value, ...siteParts(s) }));
 
   const productItems = (data.by_product || []).map((p) => ({
     key: p.key,
@@ -109,8 +117,8 @@ export default function SpendTab({ slug, teamId, category }) {
 
       <div className="ix-kpis st-kpis">
         <KpiTile label="Total annual spend" value={money(data.total)} size="lg"
-          sub={`${fmt.plural((data.by_product || []).length, 'product')} · ${fmt.plural((data.by_site || []).length, 'site')}`} />
-        <KpiTile label="Suppliers" value={conc ? fmt.num(conc.suppliers) : '—'} sub="with spend in this category" />
+          sub={`${fmt.plural((data.by_product || []).length, 'product')} · ${fmt.plural(siteItems.length, 'site')}`} />
+        <KpiTile label="Suppliers" value={conc ? fmt.num(supplierCount) : '—'} sub="with spend in this category" />
         <KpiTile label="Top supplier share" value={conc ? fmt.share(conc.top_share_pct, { dp: 1 }) : '—'}
           sub={conc?.top_supplier || null} />
         <KpiTile label="Concentration (HHI)" value={conc ? fmt.num(conc.hhi) : '—'}
@@ -131,9 +139,9 @@ export default function SpendTab({ slug, teamId, category }) {
       )}
 
       <div className="ix-split">
-        <Panel title="Spend by supplier" caption={`${fmt.plural(supplierItems.length, 'supplier')}`}>
+        <Panel title="Spend by supplier" caption={fmt.plural(supplierCount, 'supplier')}>
           <div className="st-donut-wrap">
-            <SpendDonut items={supplierItems} size={190} centerValue={supplierItems.filter((s) => s.label !== 'No supplier set').length}
+            <SpendDonut items={supplierItems} size={190} centerValue={supplierCount}
               colorOf={(d) => d.color} />
             <div className="st-donut-legend" role="list" aria-label="Spend by supplier">
               {supplierItems.map((s) => (
