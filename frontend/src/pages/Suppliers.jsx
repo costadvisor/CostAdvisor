@@ -15,6 +15,7 @@ export default function Suppliers() {
   const [suppliers, setSuppliers] = useState([]);
   const [portfolio, setPortfolio] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [country, setCountry] = useState('');
@@ -29,18 +30,21 @@ export default function Suppliers() {
   const [trustResolution, setTrustResolution] = useState(null);
   const [computingTrust, setComputingTrust] = useState(false);
 
+  // A failed load must not read as "No suppliers yet". The portfolio summary
+  // only adds the per-supplier cost models, so its failure leaves the list up.
   const fetchData = () => {
     if (!activeTeamId) return;
     setLoading(true);
     Promise.all([
       api.get('/api/suppliers', { params: { team_id: activeTeamId } }),
-      api.get('/api/portfolio/summary', { params: { team_id: activeTeamId } }),
+      api.get('/api/portfolio/summary', { params: { team_id: activeTeamId } }).catch(() => null),
     ])
       .then(([sRes, pRes]) => {
         setSuppliers(sRes.data);
-        setPortfolio(pRes.data.models || []);
+        setPortfolio(pRes?.data.models || []);
+        setLoadError(null);
       })
-      .catch(console.error)
+      .catch(err => setLoadError(formatApiError(err)))
       .finally(() => setLoading(false));
   };
 
@@ -84,7 +88,7 @@ export default function Suppliers() {
     setComputingTrust(true);
     api.post('/api/suppliers/trust-scores/compute-all', null, { params: { team_id: activeTeamId } })
       .then(() => fetchTrustScores())
-      .catch(console.error)
+      .catch(err => showAlert({ title: "Couldn't compute trust scores", message: formatApiError(err) }))
       .finally(() => setComputingTrust(false));
   };
 
@@ -93,7 +97,7 @@ export default function Suppliers() {
     setSaving(true);
     api.post(`/api/suppliers?team_id=${activeTeamId}`, { name: name.trim(), country: country.trim() || null })
       .then(() => { setName(''); setCountry(''); setShowForm(false); fetchData(); })
-      .catch(console.error)
+      .catch(err => showAlert({ title: "Couldn't add the supplier", message: formatApiError(err) }))
       .finally(() => setSaving(false));
   };
 
@@ -129,7 +133,7 @@ export default function Suppliers() {
         a.click();
         URL.revokeObjectURL(url);
       })
-      .catch(console.error);
+      .catch(err => showAlert({ title: "Couldn't export the supplier", message: formatApiError(err) }));
   };
 
   const getSupplierModels = (supplierId) =>
@@ -185,6 +189,11 @@ export default function Suppliers() {
 
       {loading ? (
         <div style={{ padding: 20, color: 'var(--muted)' }}>Loading...</div>
+      ) : loadError ? (
+        <div className="ca-card" style={{ textAlign: 'center', padding: 32 }}>
+          <div style={{ color: 'var(--accent2)', fontSize: 12, marginBottom: 14 }}>Couldn't load your suppliers — {loadError}</div>
+          <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={fetchData}>Try again</button>
+        </div>
       ) : suppliers.length === 0 ? (
         <div className="ca-card" style={{ textAlign: 'center', padding: 48 }}>
           <div style={{ color: 'var(--text-secondary)', marginBottom: 14 }}>
