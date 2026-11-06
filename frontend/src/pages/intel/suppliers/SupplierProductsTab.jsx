@@ -11,7 +11,9 @@ import { productPath, linePath, ROLE_LABEL } from './supplierUtils';
 /* Every product card this supplier is linked to, grouped by product line, with
  * its role, evidence label, integration, manufacturing regions and sites.
  * The API puts counting links first and distributors last; groups keep that
- * order. No share column (house rule 6). */
+ * order. The links that do not count toward the maker floor sit in their own
+ * section after the counted ones, so the counted part matches the header's
+ * "N products tracked here · M product lines". No share column (house rule 6). */
 
 function ProductRow({ p }) {
   const [open, setOpen] = useState(false);
@@ -56,6 +58,23 @@ function ProductRow({ p }) {
   );
 }
 
+/* Rows grouped by product line, in the order they come. */
+function groupByLine(rows) {
+  const out = [];
+  const byKey = new Map();
+  rows.forEach((p) => {
+    const key = p.line?.id != null ? `l${p.line.id}` : `none-${p.family?.id ?? ''}`;
+    let g = byKey.get(key);
+    if (!g) {
+      g = { key, line: p.line, family: p.family?.name, items: [] };
+      byKey.set(key, g);
+      out.push(g);
+    }
+    g.items.push(p);
+  });
+  return out;
+}
+
 export default function SupplierProductsTab({ supplier: s, family, onFamilyChange }) {
   const products = useMemo(() => s.products || [], [s.products]);
   const [q, setQ] = useState('');
@@ -95,23 +114,28 @@ export default function SupplierProductsTab({ supplier: s, family, onFamilyChang
     });
   }, [products, activeFamily, integratedOnly, role, q]);
 
-  const groups = useMemo(() => {
-    const out = [];
-    const byKey = new Map();
-    filtered.forEach((p) => {
-      const key = p.line?.id != null ? `l${p.line.id}` : `none-${p.family?.id ?? ''}`;
-      let g = byKey.get(key);
-      if (!g) {
-        g = { key, line: p.line, family: p.family?.name, items: [] };
-        byKey.set(key, g);
-        out.push(g);
-      }
-      g.items.push(p);
-    });
-    return out;
-  }, [filtered]);
+  // Only a directory maker has counted products to match; a generic name or a
+  // maker outside the directory lists its links as one block.
+  const countedTotal = products.filter((p) => p.counts).length;
+  const split = !s.is_bucket && s.in_directory !== false && countedTotal > 0 && countedTotal < products.length;
+  const sections = useMemo(() => {
+    if (!split) return [{ key: 'all', rows: filtered, groups: groupByLine(filtered) }];
+    const counted = filtered.filter((p) => p.counts);
+    const other = filtered.filter((p) => !p.counts);
+    return [
+      { key: 'counted', rows: counted, groups: groupByLine(counted) },
+      { key: 'other', rows: other, groups: groupByLine(other) },
+    ];
+  }, [filtered, split]);
 
   const bothRoles = roleCounts.producer > 0 && roleCounts.distributor > 0;
+  const [main] = sections;
+  // Published lines only, as the header counts them (not the "not yet published" group).
+  const lines = fmt.plural(main.groups.filter((g) => g.line).length, 'product line');
+  const caption = split
+    ? `${fmt.num(main.rows.length)} of ${fmt.plural(countedTotal, 'counted product')} · ${lines} · `
+      + `${fmt.plural(products.length - countedTotal, 'other link')}`
+    : `${fmt.num(filtered.length)} of ${fmt.plural(products.length, 'product')} · ${lines}`;
 
   return (
     <div className="ix-stack">
@@ -143,9 +167,11 @@ export default function SupplierProductsTab({ supplier: s, family, onFamilyChang
 
       <Panel
         title="Products"
-        caption={`${fmt.num(filtered.length)} of ${fmt.plural(products.length, 'product')} · ${fmt.plural(groups.length, 'product line')}`}
+        caption={caption}
         flush
-        footer="Counted maker links first, distributors last. Regions are where the product is made."
+        footer={split
+          ? 'Counted maker links first, distributors last; then the other links, which do not count toward the maker floor (the Evidence column says why). Regions are where the product is made.'
+          : 'Counted maker links first, distributors last. Regions are where the product is made.'}
       >
         {filtered.length === 0 ? (
           <EmptyState variant="bare" title="No products match these filters" />
@@ -171,21 +197,33 @@ export default function SupplierProductsTab({ supplier: s, family, onFamilyChang
                 </tr>
               </thead>
               <tbody>
-                {groups.map((g) => (
-                  <Fragment key={g.key}>
-                    <tr className="ixs-group">
-                      <td colSpan={6}>
-                        <div className="ixs-group-cell">
-                          {g.family && <span className="ixs-group-fam">{g.family}</span>}
-                          {g.family && <span className="ixs-group-sep" aria-hidden>›</span>}
-                          {g.line
-                            ? <Link className="ixs-group-line" to={linePath(g.line.id)}>{g.line.name}</Link>
-                            : <span className="ixs-group-line">{UNPUBLISHED_LINE}</span>}
-                          <span className="ixs-group-count">{fmt.plural(g.items.length, 'product')}</span>
-                        </div>
-                      </td>
-                    </tr>
-                    {g.items.map((p) => <ProductRow key={p.pid} p={p} />)}
+                {sections.map((sec) => sec.rows.length > 0 && (
+                  <Fragment key={sec.key}>
+                    {sec.key === 'other' && (
+                      <tr className="ixs-section">
+                        <td colSpan={6}>
+                          Other links · {fmt.plural(sec.rows.length, 'product')}
+                          <span className="ixs-section-sub">Named on these products, but not counted as a maker here</span>
+                        </td>
+                      </tr>
+                    )}
+                    {sec.groups.map((g) => (
+                      <Fragment key={g.key}>
+                        <tr className="ixs-group">
+                          <td colSpan={6}>
+                            <div className="ixs-group-cell">
+                              {g.family && <span className="ixs-group-fam">{g.family}</span>}
+                              {g.family && <span className="ixs-group-sep" aria-hidden>›</span>}
+                              {g.line
+                                ? <Link className="ixs-group-line" to={linePath(g.line.id)}>{g.line.name}</Link>
+                                : <span className="ixs-group-line">{UNPUBLISHED_LINE}</span>}
+                              <span className="ixs-group-count">{fmt.plural(g.items.length, 'product')}</span>
+                            </div>
+                          </td>
+                        </tr>
+                        {g.items.map((p) => <ProductRow key={p.pid} p={p} />)}
+                      </Fragment>
+                    ))}
                   </Fragment>
                 ))}
               </tbody>
