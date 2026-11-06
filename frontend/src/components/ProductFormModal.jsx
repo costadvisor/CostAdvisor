@@ -54,8 +54,9 @@ function PickedValue({ title, detail, onClear, clearLabel }) {
 }
 
 /* A search box with its result list inline below it. Inline (not a floating
-   popover) because the modal body scrolls: a popover would be clipped. */
-function SearchList({ id, label, placeholder, query, onQuery, items, onPick, renderItem, footer }) {
+   popover) because the modal body scrolls: a popover would be clipped. Also the
+   builder's catalogue-recipe picker. */
+export function SearchList({ id, label, placeholder, query, onQuery, items, onPick, renderItem, footer, autoFocus }) {
   const [active, setActive] = useState(0);
   useEffect(() => { setActive(0); }, [items]);
 
@@ -80,6 +81,7 @@ function SearchList({ id, label, placeholder, query, onQuery, items, onPick, ren
         placeholder={placeholder}
         onChange={e => onQuery(e.target.value)}
         onKeyDown={onKeyDown}
+        autoFocus={autoFocus}
       />
       {(items.length > 0 || footer) && (
         <div style={{

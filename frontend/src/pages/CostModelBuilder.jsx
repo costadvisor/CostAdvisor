@@ -12,6 +12,7 @@ import { stripReservedFns } from '../utils/formulaFns';
 import NumberInput from '../components/NumberInput';
 import { normalizeVarMap } from '../components/VariableMapEditor';
 import IndexCombo from '../components/IndexCombo';
+import { SearchList } from '../components/ProductFormModal';
 import { curSym, fmtPerUnit } from '../utils/currency';
 import { qLabel, currentQuarter } from '../utils/quarters';
 
@@ -813,48 +814,9 @@ export default function CostModelBuilder() {
                               position: 'absolute', right: 0, top: 'calc(100% + 4px)',
                               background: 'var(--surface)', border: '1px solid var(--border)',
                               borderRadius: 8, boxShadow: 'var(--shadow-popover)',
-                              zIndex: 50, minWidth: 280, maxHeight: 300, overflowY: 'auto', padding: 6,
+                              zIndex: 50, width: 380, maxWidth: '85vw', padding: 8,
                             }}>
-                              {formulaTemplates.length === 0 ? (
-                                <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--muted)' }}>
-                                  No templates available
-                                </div>
-                              ) : (
-                                [
-                                  { label: 'Default', items: formulaTemplates.filter(t => !t.team_id) },
-                                  { label: 'Team', items: formulaTemplates.filter(t => t.team_id) },
-                                ].map(group => group.items.length > 0 && (
-                                  <div key={group.label}>
-                                    <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '6px 8px 2px' }}>
-                                      {group.label}
-                                    </div>
-                                    {group.items.map(t => (
-                                      <button
-                                        key={t.id}
-                                        style={{
-                                          display: 'block', width: '100%', textAlign: 'left',
-                                          padding: '6px 10px', borderRadius: 4, fontSize: 12,
-                                          border: 'none', cursor: 'pointer', background: 'transparent',
-                                          color: 'var(--text)',
-                                        }}
-                                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface2)'; }}
-                                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                                        onClick={() => loadTemplateIntoModel(t)}
-                                      >
-                                        <span style={{ fontWeight: 600 }}>{t.name}</span>
-                                        {t.code && (
-                                          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--muted)', marginLeft: 6 }}>
-                                            {t.code}
-                                          </span>
-                                        )}
-                                        {t.description && (
-                                          <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>{t.description}</span>
-                                        )}
-                                      </button>
-                                    ))}
-                                  </div>
-                                ))
-                              )}
+                              <TemplatePicker templates={formulaTemplates} onPick={loadTemplateIntoModel} />
                             </div>
                           )}
                         </div>
@@ -965,44 +927,10 @@ export default function CostModelBuilder() {
                           <div style={{
                             position: 'absolute', right: 0, top: 'calc(100% + 4px)',
                             background: 'var(--surface)', border: '1px solid var(--border)',
-                            borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
-                            zIndex: 50, minWidth: 260, maxHeight: 300, overflowY: 'auto', padding: 6,
+                            borderRadius: 8, boxShadow: 'var(--shadow-popover)',
+                            zIndex: 50, width: 380, maxWidth: '85vw', padding: 8,
                           }}>
-                            {formulaTemplates.length === 0 ? (
-                              <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--muted)' }}>
-                                No templates available
-                              </div>
-                            ) : (
-                              [
-                                { label: 'Default', items: formulaTemplates.filter(t => !t.team_id) },
-                                { label: 'Team', items: formulaTemplates.filter(t => t.team_id) },
-                              ].map(group => group.items.length > 0 && (
-                                <div key={group.label}>
-                                  <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '6px 8px 2px' }}>
-                                    {group.label}
-                                  </div>
-                                  {group.items.map(t => (
-                                    <button
-                                      key={t.id}
-                                      style={{
-                                        display: 'block', width: '100%', textAlign: 'left',
-                                        padding: '6px 10px', borderRadius: 4, fontSize: 12,
-                                        border: 'none', cursor: 'pointer', background: 'transparent',
-                                        color: 'var(--text)',
-                                      }}
-                                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface2)'; }}
-                                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                                      onClick={() => loadTemplateIntoModel(t)}
-                                    >
-                                      <span style={{ fontWeight: 600 }}>{t.name}</span>
-                                      {t.description && (
-                                        <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>{t.description}</span>
-                                      )}
-                                    </button>
-                                  ))}
-                                </div>
-                              ))
-                            )}
+                            <TemplatePicker templates={formulaTemplates} onPick={loadTemplateIntoModel} />
                           </div>
                         )}
                       </div>
@@ -1411,6 +1339,46 @@ export default function CostModelBuilder() {
       />
     )}
     </>
+  );
+}
+
+// The catalogue is ~1,750 recipes: a scrolling list of all of them in a 300px
+// popover could not be searched. Type a name, code, family or line; with no
+// query the team's own recipes come first. Ranking as ProductFormModal's.
+const TEMPLATE_PICKER_MAX = 50;
+function TemplatePicker({ templates, onPick }) {
+  const [query, setQuery] = useState('');
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const hits = !q ? templates : templates.filter(t =>
+      `${t.name} ${t.code || ''} ${t.family?.name || t.family_name || ''} ${t.product_line?.name || ''}`.toLowerCase().includes(q));
+    const rank = (t) => (q && (t.code || '').toLowerCase() === q ? 0 : q && t.name.toLowerCase().startsWith(q) ? 1 : 2);
+    return [...hits].sort((a, b) => (!!b.team_id - !!a.team_id) || rank(a) - rank(b) || a.name.localeCompare(b.name));
+  }, [templates, query]);
+  const shown = matches.slice(0, TEMPLATE_PICKER_MAX);
+  const footer = templates.length === 0 ? 'No templates available.'
+    : matches.length === 0 ? 'No recipe matches.'
+      : matches.length > TEMPLATE_PICKER_MAX
+        ? `First ${TEMPLATE_PICKER_MAX} of ${matches.length.toLocaleString('en-US')}. Type to narrow.`
+        : null;
+  return (
+    <SearchList
+      id="builder-template" label="Catalogue recipes" autoFocus
+      placeholder="Search name, code, family or line…"
+      query={query} onQuery={setQuery} items={shown} onPick={onPick} footer={footer}
+      renderItem={(t) => (
+        <>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>{t.name}</span>
+          {t.code && (
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--muted)', marginLeft: 6 }}>{t.code}</span>
+          )}
+          {t.team_id && <span className="ca-badge" style={{ marginLeft: 6, fontSize: 9 }}>Team</span>}
+          <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>
+            {[t.family?.name || t.family_name, t.product_line?.name].filter(Boolean).join(' › ') || t.description || ''}
+          </span>
+        </>
+      )}
+    />
   );
 }
 
