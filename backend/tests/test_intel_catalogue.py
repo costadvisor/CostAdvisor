@@ -111,7 +111,8 @@ def test_facets_follow_the_status_filter(api):
     assert body["status_filter"] == ["live", "supply_exception"]
     assert body["counts"]["products"] == len(default)
     assert sum(f["count"] for f in body["families"]) == len(default)
-    # The status checkboxes and the header totals never follow the filter.
+    # The status checkboxes and the header totals never follow the status
+    # filter itself (the checkboxes follow the other filters: see below).
     assert body["counts"]["listed"] == len(expect.listed_codes())
     assert body["counts"]["default_view"] == len(default)
     everything = _get(api, "/api/intel/facets", status="all")

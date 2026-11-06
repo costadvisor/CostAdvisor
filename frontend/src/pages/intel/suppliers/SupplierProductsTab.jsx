@@ -140,8 +140,10 @@ export default function SupplierProductsTab({ supplier: s, family, onFamilyChang
   return (
     <div className="ix-stack">
       <div className="ixs-prod-toolbar" role="group" aria-label="Filter products">
+        {/* With other links the caption reconciles the totals; a bare 73 here
+            would read against the header's 67 counted (A-10). */}
         <button type="button" className="ix-pill" aria-pressed={!activeFamily} onClick={() => onFamilyChange('')}>
-          All families <span className="ix-count">{products.length}</span>
+          All families {!split && <span className="ix-count">{products.length}</span>}
         </button>
         {familyCounts.length > 1 && familyCounts.map((f) => (
           <button key={f.id} type="button" className="ix-pill" aria-pressed={activeFamily === f.id}
