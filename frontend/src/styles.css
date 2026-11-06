@@ -430,6 +430,9 @@ body, #root {
 
 /* Scroll */
 .ca-scroll-x { overflow-x: auto; overflow-y: auto; max-height: 440px; max-width: 100%; }
+/* A full-page table grows with the page: the 440px cap above is for drawers and
+   cards, and on a page it hid most rows behind a second scrollbar. */
+.ca-scroll-x--full { max-height: none; overflow-y: visible; }
 
 /* Range input */
 input[type=range] { padding: 0; cursor: pointer; accent-color: var(--accent); }

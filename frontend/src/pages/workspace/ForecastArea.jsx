@@ -371,7 +371,7 @@ export default function ForecastArea() {
       <div className="ca-card" style={{ marginBottom: 20 }}>
         <div className="ca-card-title">Portfolio — current should-cost vs price</div>
         {models.length ? (
-          <div className="ca-scroll-x">
+          <div className="ca-scroll-x ca-scroll-x--full">
             <table className="ca-table">
               <caption className="ca-sr-only">Current should-cost against the latest actual price, per product.</caption>
               <thead>

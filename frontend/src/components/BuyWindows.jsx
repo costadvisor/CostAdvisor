@@ -81,7 +81,7 @@ export default function BuyWindows({ data, loading, error }) {
         </div>
         <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={handleCsv}>Export CSV</button>
       </div>
-      <div className="ca-scroll-x">
+      <div className="ca-scroll-x ca-scroll-x--full">
         <table className="ca-table" style={{ width: '100%' }}>
           <thead>
             <tr>

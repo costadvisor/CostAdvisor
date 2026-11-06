@@ -153,7 +153,7 @@ export default function NegotiateArea() {
           <input className="ca-input" style={{ width: 240, marginBottom: 12 }} placeholder="Search product or supplier…" value={search} onChange={e => setSearch(e.target.value)} />
 
           <div className="ca-card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div className="ca-scroll-x">
+            <div className="ca-scroll-x ca-scroll-x--full">
               <table className="ca-table" style={{ width: '100%' }}>
                 <thead>
                   <tr>
