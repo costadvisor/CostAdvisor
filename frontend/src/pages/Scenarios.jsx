@@ -102,12 +102,23 @@ export default function Scenarios() {
   };
 
   return (
-    <div style={{ maxWidth: 760, margin: '0 auto', padding: '24px 16px' }}>
-      <h2 style={{ marginBottom: 4 }}>Scenarios</h2>
-      <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
-        Reusable cost-structure templates — a named % breakdown you can start a should-cost
-        sketch from before a product has a full formula.
-      </p>
+    // The shared page header, as every other page has: this was a 760px
+    // column with a small plain title.
+    <div className="ca-page ca-fade-in">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+          <div className="ca-h1">Scenarios</div>
+          <p className="ca-subtitle">
+            Reusable cost-structure templates — a named % breakdown you can start a should-cost
+            sketch from before a product has a full formula.
+          </p>
+        </div>
+        {scenarios?.length > 0 && !showForm && (
+          <button className="ca-btn ca-btn-primary ca-btn-sm" style={{ flexShrink: 0 }} onClick={() => setShowForm(true)}>
+            + New scenario
+          </button>
+        )}
+      </div>
       {err && <div style={{ fontSize: 12, color: 'var(--accent2)', marginBottom: 10 }}>{err}</div>}
 
       {showForm && (
@@ -133,11 +144,6 @@ export default function Scenarios() {
         </div>
       ) : (
         <>
-          {!showForm && (
-            <button className="ca-btn ca-btn-primary ca-btn-sm" onClick={() => setShowForm(true)} style={{ marginBottom: 12 }}>
-              + New scenario
-            </button>
-          )}
           {scenarios.map(s => (
             <div key={s.id} className="ca-card" style={{ marginBottom: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>

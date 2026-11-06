@@ -588,15 +588,17 @@ export default function Contracts() {
 
   return (
     <div className="ca-page ca-fade-in">
+      {/* The title block shrinks and the actions do not, so the buttons stay
+          top-right instead of wrapping under the long subtitle. */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-        <div>
+        <div style={{ flex: '1 1 320px', minWidth: 0 }}>
           <div className="ca-h1">Contracts</div>
           <p className="ca-subtitle" style={{ marginBottom: 0 }}>
             Ordered by notice deadline — the date after which you can no longer give notice
             is the one hard deadline the radar has, so the soonest sits first.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
           {contracts.length > 0 && (
             <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => exportCsv(
               'contracts.csv',

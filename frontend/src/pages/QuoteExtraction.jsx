@@ -278,11 +278,11 @@ export default function QuoteExtraction() {
 
   return (
     <div className="ca-page ca-fade-in">
-      <div className="ca-h1" style={{ marginBottom: 4 }}>Quote Extraction</div>
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
+      <div className="ca-h1">Quote Extraction</div>
+      <p className="ca-subtitle">
         Upload a supplier quote or price list (PDF). Every extracted field carries a confidence
         and a locator back into the document — nothing lands in the quote record until you confirm it.
-      </div>
+      </p>
 
       <div className="ca-card" style={{ marginBottom: 16 }}>
         <button className="ca-btn ca-btn-primary ca-btn-sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
