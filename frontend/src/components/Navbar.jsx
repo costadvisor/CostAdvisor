@@ -348,7 +348,7 @@ export default function Navbar() {
         key={item.path}
         to={item.path}
         {...shared}
-        aria-current={location.pathname.startsWith(item.path) ? 'page' : undefined}
+        aria-current={isUnder(location.pathname, item.path) ? 'page' : undefined}
         onClick={() => setOpen(false)}
       >
         {item.label}
