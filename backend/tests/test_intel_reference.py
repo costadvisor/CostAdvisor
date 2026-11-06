@@ -539,6 +539,45 @@ def test_supplier_filters_and_paging(api, db):
     assert name in {it["name"] for it in found["items"]}
 
 
+def _supplier_ids(api, **params) -> set[str]:
+    body = api.get("/api/intel/suppliers", params={"limit": 1000, **params}).json()
+    return {it["id"] for it in body["items"]}
+
+
+def test_several_families_or_industries_match_any_of_them(api):
+    """Audit A-01: a repeated key ORs its values; different keys all apply."""
+    full = api.get("/api/intel/suppliers", params={"limit": 1}).json()
+    fams = [f["id"] for f in sorted(full["families"], key=lambda f: -f["count"])[:2]]
+    inds = [i["name"] for i in full["industries"][:2]]
+    for key, (a, b) in (("family_id", fams), ("industry", inds)):
+        both = _supplier_ids(api, **{key: [a, b]})
+        assert both == _supplier_ids(api, **{key: a}) | _supplier_ids(api, **{key: b}), key
+    crossed = _supplier_ids(api, family_id=fams, industry=inds[0])
+    assert crossed == _supplier_ids(api, family_id=fams) & _supplier_ids(api, industry=inds[0])
+    # An unknown industry matches nothing, alone or beside a real one.
+    assert _supplier_ids(api, industry="no-such-industry") == set()
+    assert _supplier_ids(api, industry=["no-such-industry", inds[0]]) == _supplier_ids(api, industry=inds[0])
+
+
+def test_the_industries_filtered_on_lead_each_card(api):
+    """Audit A-18: the card gets the head of its industry list, so a match
+    deep in the list must be moved up or the card cannot show why it matched."""
+    full = api.get("/api/intel/suppliers", params={"limit": 1000}).json()
+    deep = next(it for it in full["items"] if it["industry_count"] > svc.LIST_TOP_INDUSTRIES)
+    detail = api.get(f"/api/intel/suppliers/{deep['id']}").json()
+    shown = {i["name"] for i in deep["industries"]}
+    tail = next(i["name"] for i in reversed(detail["industries"]) if i["name"] not in shown)
+    other = full["industries"][0]["name"]
+    body = api.get("/api/intel/suppliers", params={"limit": 1000, "industry": [tail, other]}).json()
+    assert body["items"]
+    for it in body["items"]:
+        picked = [i["name"] for i in it["industries"] if i["name"] in (tail, other)]
+        assert picked and it["industries"][:len(picked)] == [
+            i for i in it["industries"] if i["name"] in (tail, other)], it["name"]
+        assert len(it["industries"]) <= svc.LIST_TOP_INDUSTRIES
+    assert tail in {i["name"] for i in next(it for it in body["items"] if it["id"] == deep["id"])["industries"]}
+
+
 def test_supplier_detail_lists_links_with_evidence_counting_first(api, db):
     sid = _a_maker(db)
     d = api.get(f"/api/intel/suppliers/{sid}").json()

@@ -108,8 +108,9 @@ def get_industry(slug: str, db: Session = Depends(get_db),
 @router.get("/suppliers", response_model=SupplierListOut)
 def list_suppliers(
     q: str | None = Query(None, description="Substring of the producer name or an alias"),
-    family_id: int | None = Query(None),
-    industry: str | None = Query(None, description="Industry slug or name"),
+    family_id: list[int] | None = Query(None, description="Repeat for several: makes any of them"),
+    industry: list[str] | None = Query(None, description="Industry slug or name; repeat for several "
+                                                          "(serves any of them)"),
     min_products: int = Query(1, ge=1),
     integrated: bool | None = Query(None),
     limit: int = Query(100, ge=1, le=1000),

@@ -48,10 +48,10 @@ export default function SuppliersPage() {
   // The unfiltered directory: the option lists, the grand total, generic names.
   const base = useApi(SUPPLIERS_URL, { limit: 1 });
 
-  // Single-select groups: each group's counts come from the list with every
-  // other filter applied, so a count is what you get by picking that option.
-  const famFacet = useApi(filters.family_id ? SUPPLIERS_URL : null, apiParams(filters, { omit: 'family_id', limit: 1 }));
-  const indFacet = useApi(filters.industry ? SUPPLIERS_URL : null, apiParams(filters, { omit: 'industry', limit: 1 }));
+  // Each group's counts come from the list with every other filter applied
+  // (its own left out), so a count is what you get by ticking that option.
+  const famFacet = useApi(filters.family_id.length ? SUPPLIERS_URL : null, apiParams(filters, { omit: 'family_id', limit: 1 }));
+  const indFacet = useApi(filters.industry.length ? SUPPLIERS_URL : null, apiParams(filters, { omit: 'industry', limit: 1 }));
   const optionTotals = useTotals({
     integratedYes: apiParams(filters, { omit: 'integrated', integrated: 'true' }),
     integratedNo: apiParams(filters, { omit: 'integrated', integrated: 'false' }),
@@ -63,7 +63,7 @@ export default function SuppliersPage() {
   const familyColor = useFamilyColors(familyNames);
 
   const familyOptions = useMemo(() => {
-    const src = filters.family_id ? famFacet.data : data;
+    const src = filters.family_id.length ? famFacet.data : data;
     const counts = new Map((src?.families || []).map((f) => [String(f.id), f.count]));
     const known = src ? counts : null;
     return [...(baseData?.families || [])]
@@ -75,12 +75,12 @@ export default function SuppliersPage() {
       }));
   }, [baseData, data, famFacet.data, filters.family_id]);
   const familyName = useMemo(() => {
-    const hit = (baseData?.families || []).find((f) => String(f.id) === filters.family_id);
-    return hit?.name || '';
-  }, [baseData, filters.family_id]);
+    const names = new Map((baseData?.families || []).map((f) => [String(f.id), f.name]));
+    return (id) => names.get(id) || 'Family';
+  }, [baseData]);
 
   const industryOptions = useMemo(() => {
-    const src = filters.industry ? indFacet.data : data;
+    const src = filters.industry.length ? indFacet.data : data;
     const counts = new Map((src?.industries || []).map((i) => [i.name, i.count]));
     const known = src ? counts : null;
     return (baseData?.industries || []).map((i) => ({
@@ -99,10 +99,11 @@ export default function SuppliersPage() {
   const firstLoad = list.loading && !data;
   const refreshing = list.loading && !!data;
 
+  // One chip per ticked value; its × takes that value off alone.
   const chips = [
     filters.q && { key: 'q', label: `“${filters.q}”` },
-    filters.family_id && { key: 'family_id', label: familyName || 'Family' },
-    filters.industry && { key: 'industry', label: filters.industry },
+    ...filters.family_id.map((v) => ({ key: 'family_id', value: v, label: familyName(v) })),
+    ...filters.industry.map((v) => ({ key: 'industry', value: v, label: v })),
     filters.integrated && {
       key: 'integrated',
       label: filters.integrated === 'true' ? 'Integrated on 1+ products' : 'Not integrated',
@@ -136,13 +137,13 @@ export default function SuppliersPage() {
           onClick={clearSearchAndFilters} />
         <SidebarDivider />
         <FilterGroup title="Product family" options={familyOptions}
-          selected={filters.family_id ? [filters.family_id] : []}
-          onChange={(v) => setFilter('family_id', v[0] || '')}
-          multi={false} limit={30} searchable={false} />
+          selected={filters.family_id}
+          onChange={(v) => setFilter('family_id', v)}
+          limit={30} searchable={false} hideZero />
         <FilterGroup title="Industry" options={industryOptions}
-          selected={filters.industry ? [filters.industry] : []}
-          onChange={(v) => setFilter('industry', v[0] || '')}
-          multi={false} limit={8} searchPlaceholder="Filter industries…" />
+          selected={filters.industry}
+          onChange={(v) => setFilter('industry', v)}
+          limit={8} searchPlaceholder="Filter industries…" hideZero />
         <FilterGroup title="Integration" options={integratedOptions}
           selected={filters.integrated ? [filters.integrated] : []}
           onChange={(v) => setFilter('integrated', v[0] || '')}
@@ -170,10 +171,10 @@ export default function SuppliersPage() {
         {chips.length > 0 && (
           <div className="ixs-active" aria-label="Active filters">
             {chips.map((c) => (
-              <button key={c.key} type="button" className="ix-chip accent ixs-active-chip"
+              <button key={`${c.key}:${c.value ?? ''}`} type="button" className="ix-chip accent ixs-active-chip"
                 onClick={() => {
                   if (c.key === 'q') { lastWritten.current = ''; setQInput(''); }
-                  setFilter(c.key, '');
+                  setFilter(c.key, c.value != null ? filters[c.key].filter((x) => x !== c.value) : '');
                 }}
                 aria-label={`Remove filter ${c.label}`}>
                 {c.label}
@@ -208,7 +209,7 @@ export default function SuppliersPage() {
             <div className={`ix-grid ix-grid-lg ixs-grid${refreshing ? ' is-refreshing' : ''}`} aria-busy={refreshing}>
               {items.map((s) => (
                 <SupplierCard key={s.id} supplier={s} familyColor={familyColor}
-                  familyId={filters.family_id} industry={filters.industry} />
+                  familyIds={filters.family_id} industries={filters.industry} />
               ))}
             </div>
             <div className="ixs-more">
