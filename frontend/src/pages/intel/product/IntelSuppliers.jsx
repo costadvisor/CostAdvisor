@@ -43,7 +43,15 @@ function SupplierName({ s }) {
 
   let name;
   if (linkable.length === 1 && (s.producers || []).length === 1) {
-    name = <Link className="ixi-sup-link" to={supplierHref(linkable[0].producer_id)}>{s.name}</Link>;
+    // The supplier page's name, so one maker reads the same one click apart
+    // ("BASF", not "BASF SE"); the authored name stays on hover.
+    const p = linkable[0];
+    name = (
+      <Link className="ixi-sup-link" to={supplierHref(p.producer_id)}
+        title={p.name && p.name !== s.name ? `Named in the source as ${s.name}` : undefined}>
+        {p.name || s.name}
+      </Link>
+    );
   } else {
     name = <span className="ixi-sup-name">{s.name}</span>;
   }
