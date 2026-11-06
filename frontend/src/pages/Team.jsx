@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { useConfirm } from '../components/ConfirmDialog';
+import { useEscapeKey } from '../components/Modal';
 import RoleBadge from '../components/RoleBadge';
 import ProviderCredentialsSection from '../components/ProviderCredentialsSection';
 
@@ -56,6 +57,7 @@ function CreateTeamModal({ onClose, onCreated }) {
   const nameRef = useRef(null);
 
   useEffect(() => { nameRef.current?.focus(); }, []);
+  useEscapeKey(true, onClose);
 
   const addMember = () => {
     const email = newEmail.trim();
@@ -94,7 +96,8 @@ function CreateTeamModal({ onClose, onCreated }) {
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 300,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }} onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="ca-card" style={{ width: 480, maxWidth: '92vw', padding: 24 }}>
+      <div className="ca-card" role="dialog" aria-modal="true" aria-label="Create New Team"
+        style={{ width: 480, maxWidth: '92vw', padding: 24 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <div style={{ fontSize: 15, fontWeight: 600 }}>Create New Team</div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--muted)', lineHeight: 1 }}>×</button>
@@ -165,6 +168,7 @@ function AddMembersModal({ teamId, onClose, onDone }) {
   const firstRef = useRef(null);
 
   useEffect(() => { firstRef.current?.focus(); }, []);
+  useEscapeKey(true, onClose);
 
   const addRow = () => setEntries(prev => [...prev, { email: '', role: 'member' }]);
   const updateRow = (i, field, val) => setEntries(prev => prev.map((e, j) => j === i ? { ...e, [field]: val } : e));
@@ -189,7 +193,8 @@ function AddMembersModal({ teamId, onClose, onDone }) {
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 300,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }} onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="ca-card" style={{ width: 480, maxWidth: '92vw', padding: 24 }}>
+      <div className="ca-card" role="dialog" aria-modal="true" aria-label="Add Members"
+        style={{ width: 480, maxWidth: '92vw', padding: 24 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <div style={{ fontSize: 15, fontWeight: 600 }}>Add Members</div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--muted)', lineHeight: 1 }}>×</button>

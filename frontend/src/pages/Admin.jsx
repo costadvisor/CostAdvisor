@@ -6,6 +6,7 @@ import { useConfirm, useAlert } from '../components/ConfirmDialog';
 import Tooltip from '../components/Tooltip';
 import { invalidateRegions } from '../components/RegionSelect';
 import SupportAdminTab from '../components/SupportAdminTab';
+import { useEscapeKey } from '../components/Modal';
 
 const ADMIN_TABS = ['users', 'teams', 'audit', 'requests', 'regions', 'support', 'settings'];
 
@@ -328,6 +329,8 @@ function EditRoleModal({ user, platformRoles, onSetRole, onClose, onRefresh }) {
   const [assignedRoleIds, setAssignedRoleIds] = useState(new Set());
   const [loadingRoles, setLoadingRoles] = useState(true);
 
+  useEscapeKey(true, onClose);
+
   useEffect(() => {
     api.get(`/api/admin/users/${user.id}/platform-roles`)
       .then(r => setAssignedRoleIds(new Set(r.data.map(x => x.id))))
@@ -360,7 +363,8 @@ function EditRoleModal({ user, platformRoles, onSetRole, onClose, onRefresh }) {
 
   return (
     <div className="ca-modal-backdrop" onClick={onClose}>
-      <div className="ca-modal" style={{ width: 400 }} onClick={e => e.stopPropagation()}>
+      <div className="ca-modal" style={{ width: 400 }} onClick={e => e.stopPropagation()}
+        role="dialog" aria-modal="true" aria-label="Edit Platform Roles">
         <div className="ca-modal-header">
           <div className="ca-modal-title">Edit Platform Roles</div>
           <button className="ca-modal-close" onClick={onClose}>×</button>
@@ -1159,6 +1163,7 @@ function RegionsTab({ regions, onRefresh }) {
 
 function RegionFormModal({ region, allRegions, onClose, onSaved }) {
   const isEdit = !!region;
+  useEscapeKey(true, onClose);
   const [code, setCode] = useState(region?.code || '');
   const [name, setName] = useState(region?.name || '');
   const [parentId, setParentId] = useState(region?.parent_id ?? '');
@@ -1192,7 +1197,8 @@ function RegionFormModal({ region, allRegions, onClose, onSaved }) {
 
   return (
     <div className="ca-modal-backdrop" onClick={onClose}>
-      <div className="ca-modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
+      <div className="ca-modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}
+        role="dialog" aria-modal="true" aria-label={isEdit ? 'Edit region' : 'Add region'}>
         <div className="ca-modal-header">
           <div className="ca-modal-title">{isEdit ? 'Edit region' : 'Add region'}</div>
           <button className="ca-modal-close" onClick={onClose}>×</button>
@@ -1251,9 +1257,11 @@ function RegionFormModal({ region, allRegions, onClose, onSaved }) {
 function UserDetailPanel({ user, onClose, onNavigateToTeam, platformRoles,
   onSetPlatformRole, onImpersonate, onDelete, onRestore, currentUser, isImpersonating, onRefresh }) {
   const [showEditRole, setShowEditRole] = useState(false);
+  // While the roles dialog is open on top, Escape is that dialog's.
+  useEscapeKey(!!user && !showEditRole, onClose);
   if (!user) return null;
   return (
-    <div style={{
+    <div role="dialog" aria-modal="true" aria-label="User details" style={{
       position: 'fixed', top: 0, right: 0,
       width: 360, height: '100vh',
       background: 'var(--surface)',
@@ -1563,6 +1571,7 @@ function DemoRequestsTab({ requests, currentUser, onRefresh }) {
   const [search, setSearch] = useState('');
   const [actionDialog, setActionDialog] = useState(null); // { type: 'accept'|'reject', req }
   const [actionRemarks, setActionRemarks] = useState('');
+  useEscapeKey(!!actionDialog, () => setActionDialog(null));
   const [editingRemarks, setEditingRemarks] = useState(null); // req.id
   const [editingRemarksText, setEditingRemarksText] = useState('');
 
@@ -1621,7 +1630,8 @@ function DemoRequestsTab({ requests, currentUser, onRefresh }) {
             style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.5)' }}
             onClick={() => setActionDialog(null)}
           />
-          <div style={{
+          <div role="dialog" aria-modal="true"
+            aria-label={actionDialog.type === 'accept' ? 'Accept Demo Request' : 'Reject Demo Request'} style={{
             position: 'fixed', zIndex: 201, top: '50%', left: '50%',
             transform: 'translate(-50%,-50%)', background: 'var(--surface)',
             border: '1px solid var(--border)', borderRadius: 10, padding: 24, width: 420,

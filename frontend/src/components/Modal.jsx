@@ -1,18 +1,32 @@
 import { useEffect, useRef } from 'react';
 
+// Escape closes a dialog while `active`. For hand-rolled dialogs that do not
+// use <Modal>; pass active=false while a child dialog is open so one press
+// closes only the top one. onClose sits in a ref so an inline callback does
+// not re-subscribe on every render.
+export function useEscapeKey(active, onClose) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!active) return undefined;
+    const handleKey = (e) => {
+      if (e.key === 'Escape') onCloseRef.current();
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [active]);
+}
+
 export default function Modal({ isOpen, onClose, title, children, width = 420 }) {
   const modalRef = useRef(null);
 
+  useEscapeKey(isOpen, onClose);
+
+  // Focus the modal when it opens (only then: re-focusing on every render
+  // would pull focus out of a field being typed in).
   useEffect(() => {
-    if (!isOpen) return;
-    const handleKey = (e) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handleKey);
-    // Focus trap: focus the modal when opened
-    modalRef.current?.focus();
-    return () => document.removeEventListener('keydown', handleKey);
-  }, [isOpen, onClose]);
+    if (isOpen) modalRef.current?.focus();
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -24,6 +38,9 @@ export default function Modal({ isOpen, onClose, title, children, width = 420 })
         onClick={(e) => e.stopPropagation()}
         ref={modalRef}
         tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={typeof title === 'string' ? title : undefined}
       >
         <div className="ca-modal-header">
           <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 15 }}>
