@@ -328,3 +328,9 @@ a.st-demand-ind:hover .st-demand-ind-name { color: var(--accent); text-decoratio
   .ix-kpis.st-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .st-filters-sort { margin-left: 0; }
 }
+/* Phones: the status and owner selects drop under the title instead of
+   squeezing it to one letter per line. */
+@media (max-width: 700px) {
+  .st-category .ix-dh-row { flex-wrap: wrap; }
+  .st-category .ix-dh-actions { width: 100%; flex-wrap: wrap; padding-top: 0; }
+}
