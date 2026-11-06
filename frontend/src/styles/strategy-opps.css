@@ -297,6 +297,14 @@ button.so-obj-pill.is-on:hover { color: var(--surface); opacity: .88; }
   .so-aform.is-inline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .so-aform.is-inline > .so-field:first-child { grid-column: 1 / -1; }
 }
+/* Phones: the note and "Use playbook" go under the objective's name instead
+   of running past the screen edge. */
+@media (max-width: 700px) {
+  .so-obj-row { grid-template-columns: 16px minmax(0, 1fr) 96px; row-gap: 6px; }
+  .so-obj-note, .so-obj-reset { grid-column: 2 / -1; }
+  .so-obj-reset { text-align: left; }
+  .so-obj-reset:empty { display: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   .so-chev, .so-lever { transition: none; }
   .so-lever.is-selected::before { animation: none; }
