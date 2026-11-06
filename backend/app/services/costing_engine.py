@@ -290,6 +290,15 @@ def _default_period_range(db: Session, cost_model: CostModel):
     return from_year, from_quarter, to_year, to_quarter
 
 
+def latest_data_quarter(db: Session, cost_model: CostModel) -> tuple[int, int]:
+    """The quarter "should-cost today" is priced at on every list, alert and
+    brief: the last quarter with data for this model, which is where a brief's
+    window ends. A calendar quarter past the data only carries the last monthly
+    value forward, so the lists and the brief disagreed (sometimes in sign)."""
+    _, _, y, q = _default_period_range(db, cost_model)
+    return y, q
+
+
 # ── Conversion helpers ────────────────────────────────────────
 
 def _apply_fx(db: Session, value: float, from_ccy: str, to_ccy: str | None, year: int, quarter: int, team_id=None) -> float:

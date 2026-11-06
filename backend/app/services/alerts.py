@@ -58,13 +58,14 @@ def _index_move_trigger(db, commodity_id, threshold):
 
 
 def _gap_trigger(db, cm, threshold):
-    from app.services.costing_engine import _current_quarter, calculate_should_cost
+    from app.services.costing_engine import calculate_should_cost, latest_data_quarter
     if not cm.current_formula:
         return None
-    # Should-cost now, at the current quarter. With no target quarter the
-    # engine evaluates at the formula's base quarter, i.e. the base price.
-    now_y, now_q = _current_quarter()
-    sc = calculate_should_cost(db, cm, target_year=now_y, target_quarter=now_q).should_cost
+    # Should-cost now, at the latest quarter with data, as the Monitor list and
+    # the brief price it. With no target quarter the engine evaluates at the
+    # formula's base quarter, i.e. the base price.
+    sc_y, sc_q = latest_data_quarter(db, cm)
+    sc = calculate_should_cost(db, cm, target_year=sc_y, target_quarter=sc_q).should_cost
     latest = (
         db.query(ActualPrice).filter(ActualPrice.cost_model_id == cm.id)
         .order_by(ActualPrice.year.desc(), ActualPrice.quarter.desc()).first()
@@ -78,7 +79,9 @@ def _gap_trigger(db, cm, threshold):
     direction = "above" if gap_pct > 0 else "below"
     return {
         "dedup": f"gap:{cm.id}:{latest.year}Q{latest.quarter}:{'up' if gap_pct > 0 else 'down'}",
-        "message": f"{name} is {abs(gap_pct):.1f}% {direction} should-cost in Q{latest.quarter} {latest.year} "
+        # The quarter named is the should-cost's; the dedup key stays on the
+        # invoice's quarter, so a new invoice is a new alert.
+        "message": f"{name} is {abs(gap_pct):.1f}% {direction} should-cost as of Q{sc_q} {sc_y} "
                    f"— beyond your {threshold}% alert.",
         "detail": {"cost_model_id": str(cm.id), "product": name, "gap_pct": round(gap_pct, 2),
                    "should_cost": round(sc, 2), "actual": float(latest.price),

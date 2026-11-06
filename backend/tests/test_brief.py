@@ -263,3 +263,25 @@ def test_brief_requires_briefs_view_permission(client_as, user_factory, tenant_a
 
     r = client_as(member).post("/api/costing/brief", json={"cost_model_id": str(brief_model.id)})
     assert r.status_code == 403, r.text
+
+
+def test_summary_prices_today_where_the_brief_does(client_as, tenant_a, brief_model, db):
+    """Audit D-01: the Monitor / Negotiate lists (GET /api/portfolio/summary)
+    and the brief price "today" at one quarter — the latest with data — so a
+    row and the brief it opens show the same should-cost and gap. The summary
+    names that quarter, and the gap alert's message names it too."""
+    from app.services.alerts import _gap_trigger
+
+    c = client_as(tenant_a)
+    brief = c.post("/api/costing/brief", json={"cost_model_id": str(brief_model.id)}).json()
+    summary = c.get("/api/portfolio/summary", params={"team_id": str(tenant_a["team_id"])}).json()
+    row = next(m for m in summary["models"] if m["cost_model_id"] == str(brief_model.id))
+
+    assert (row["as_of_year"], row["as_of_quarter"]) == (CUR_Y, CUR_Q)
+    assert (row["latest_actual_year"], row["latest_actual_quarter"]) == (CUR_Y, CUR_Q)
+    assert row["current_should_cost"] == pytest.approx(brief["current_should_cost"])
+    assert row["gap"] == pytest.approx(brief["gap"])
+
+    cm = db.query(CostModel).filter(CostModel.id == brief_model.id).one()
+    trig = _gap_trigger(db, cm, 10)
+    assert f"as of Q{CUR_Q} {CUR_Y}" in trig["message"]
