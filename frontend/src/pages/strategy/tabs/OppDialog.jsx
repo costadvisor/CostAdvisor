@@ -27,6 +27,7 @@ export default function OppDialog({ title, onClose, width = 560, children }) {
     if (asking.current) return;
     if (!dirty.current) { onCloseRef.current(); return; }
     asking.current = true;
+    const field = document.activeElement;
     const ok = await confirm({
       title: 'Discard your changes?',
       message: 'What you entered in this form has not been saved.',
@@ -35,6 +36,9 @@ export default function OppDialog({ title, onClose, width = 560, children }) {
     });
     asking.current = false;
     if (ok) onCloseRef.current();
+    // Kept editing: back to the field the question interrupted (the confirm
+    // leaves focus on the page).
+    else if (boxRef.current?.contains(field)) field.focus();
   };
   const closeAskingRef = useRef(closeAsking);
   closeAskingRef.current = closeAsking;
