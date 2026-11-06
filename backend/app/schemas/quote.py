@@ -32,6 +32,16 @@ class QuoteExtractionRunOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class QuoteExtractionRunSummary(BaseModel):
+    """One upload in the recent list, without its lines or text."""
+    id: uuid.UUID
+    filename: str
+    status: str
+    created_at: datetime
+    line_count: int
+    pending_count: int
+
+
 class QuoteLineConfirm(BaseModel):
     """Optional per-field overrides — a human can correct any extracted
     value before it lands in the permanent quote record."""

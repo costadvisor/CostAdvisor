@@ -187,6 +187,30 @@ def test_confirm_reject_state_machine(db, tenant_a, client_as, monkeypatch):
         _cleanup_quotes(db, [run_id] if run_id else [])
 
 
+def test_recent_runs_list_keeps_unreviewed_lines_reachable(db, tenant_a, tenant_b, client_as, monkeypatch):
+    """Audit C-15: a run lived only in the page's state, so leaving /quotes
+    before confirming lost its pending lines. The list names each upload and how
+    many lines still await review, and stays inside the team."""
+    _mock_extract(monkeypatch)
+    c = client_as(tenant_a)
+    run_id = None
+    try:
+        r = _upload(c, tenant_a["team_id"])
+        run_id = r.json()["id"]
+        line = r.json()["lines"][1]
+        assert c.post(f"/api/quotes/lines/{line['id']}/reject").status_code == 200
+
+        r = c.get("/api/quotes/runs", params={"team_id": str(tenant_a["team_id"])})
+        assert r.status_code == 200, r.text
+        row = next(x for x in r.json() if x["id"] == run_id)
+        assert (row["filename"], row["line_count"], row["pending_count"]) == ("quote.pdf", 2, 1)
+
+        r = client_as(tenant_b).get("/api/quotes/runs", params={"team_id": str(tenant_a["team_id"])})
+        assert r.status_code == 403
+    finally:
+        _cleanup_quotes(db, [run_id] if run_id else [])
+
+
 def test_permission_and_rls(db, tenant_a, tenant_b, client_as, monkeypatch):
     _mock_extract(monkeypatch)
     c = client_as(tenant_a)

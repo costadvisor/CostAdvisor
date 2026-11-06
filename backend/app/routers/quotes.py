@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.models.product import Product
@@ -11,6 +11,7 @@ from app.models.user import User
 from app.routers.auth import get_current_user
 from app.schemas.quote import (
     QuoteExtractionRunOut,
+    QuoteExtractionRunSummary,
     QuoteLineConfirm,
     QuoteRecordLineOut,
     QuoteRecordOut,
@@ -64,6 +65,35 @@ async def extract(
     out = QuoteExtractionRunOut.model_validate(run)
     db.commit()
     return out
+
+
+@router.get("/runs", response_model=list[QuoteExtractionRunSummary])
+def list_runs(
+    team_id: uuid.UUID,
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Recent uploads, newest first, with how many lines still await review.
+    A run lived only in the page's state, so leaving /quotes before confirming
+    lost the unreviewed lines even though they were stored."""
+    require_permission(db, current_user, team_id, "prices.view")
+    runs = (
+        db.query(QuoteExtractionRun)
+        .options(selectinload(QuoteExtractionRun.lines))
+        .filter(QuoteExtractionRun.team_id == team_id)
+        .order_by(QuoteExtractionRun.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        QuoteExtractionRunSummary(
+            id=r.id, filename=r.filename, status=r.status, created_at=r.created_at,
+            line_count=len(r.lines),
+            pending_count=sum(1 for line in r.lines if line.status == "pending"),
+        )
+        for r in runs
+    ]
 
 
 @router.get("/runs/{run_id}", response_model=QuoteExtractionRunOut)
