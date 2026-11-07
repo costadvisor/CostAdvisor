@@ -318,6 +318,12 @@ export default function NegotiateDetailArea() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)' }}>
             <div style={{ width: 20, height: 0, borderTop: '2px dashed var(--accent)' }} /> Should-Cost
           </div>
+          {/* The chart's faint "REF" line. Here it is the should-cost the cards above
+              quote; on Evolution and Squeeze it is the formula's base price, which
+              the brief response does not carry, so it is named here. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)' }}>
+            <div style={{ width: 20, height: 0, borderTop: '1px dashed var(--chart-ref-text)' }} /> REF = Should-cost today ({asOf})
+          </div>
         </div>
       </div>
 
@@ -335,7 +341,7 @@ export default function NegotiateDetailArea() {
                * height (31px); a percentage height on the bar then resolved
                * against an indefinite parent and collapsed. The chart has never
                * shown a difference between $1.94 and $0.16. */
-              const PLOT_H = 96;
+              const PLOT_H = 140;
               // Scale against the total, not the largest component, so bar heights
               // are read as shares of the should-cost the total bar represents.
               const scaleMax = Math.max(Math.abs(current_should_cost) || 0, ...drivers.map(d => Math.abs(d.component_cost)), 0.001);
@@ -343,23 +349,26 @@ export default function NegotiateDetailArea() {
               const column = (key, { value, color, opacity, label, bold, divider }) => (
                 <div key={key} style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end',
-                  flex: 1, minWidth: 44, height: '100%',
+                  flex: 1, minWidth: 76, height: '100%',
                   ...(divider ? { borderLeft: '1px solid var(--border)', paddingLeft: 6, marginLeft: 2 } : {}),
                 }}>
-                  <div style={{ fontSize: 9, color: bold ? color : 'var(--muted)', fontWeight: bold ? 700 : 400, marginBottom: 3, whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace" }}>
+                  <div style={{ fontSize: 10, color: bold ? color : 'var(--muted)', fontWeight: bold ? 700 : 400, marginBottom: 3, whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace" }}>
                     {money(value, { decimals: dp })}
                   </div>
                   <div
                     style={{ width: '58%', height: barPx(value), background: color, borderRadius: '3px 3px 0 0', opacity }}
                     title={`${label} — ${money(value, { decimals: dp })}`}
                   />
-                  <div style={{ fontSize: 8, fontWeight: bold ? 700 : 400, color: 'var(--text-secondary)', marginTop: 5, textAlign: 'center', lineHeight: 1.25, minHeight: 20 }}>
+                  <div style={{ fontSize: 10, fontWeight: bold ? 700 : 400, color: 'var(--text-secondary)', marginTop: 5, textAlign: 'center', lineHeight: 1.25, minHeight: 26, overflowWrap: 'anywhere' }}>
                     {label}
                   </div>
                 </div>
               );
+              // Readable labels need wider columns than a phone has: the row
+              // scrolls inside its card there, like the drivers table below.
               return (
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: PLOT_H + 46 }}>
+                <div style={{ overflowX: 'auto' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: PLOT_H + 64 }}>
                   {drivers.map((d, i) => column(i, {
                     value: d.component_cost, color: 'var(--accent4)', opacity: 0.85, label: d.component_label,
                   }))}
@@ -367,6 +376,7 @@ export default function NegotiateDetailArea() {
                     value: current_should_cost, color: 'var(--accent)', opacity: 0.75,
                     label: 'SHOULD-COST', bold: true, divider: true,
                   })}
+                </div>
                 </div>
               );
             })()}
