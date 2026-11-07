@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 
 /* URL-synced tabs (?tab=…), WAI-ARIA tablist with automatic activation.
  *
@@ -13,16 +13,19 @@ import { useSearchParams } from 'react-router-dom';
 
 export function useTabParam(ids, defaultId, param = 'tab') {
   const [params, setParams] = useSearchParams();
+  const location = useLocation();
   const fallback = defaultId ?? ids[0];
   const raw = params.get(param);
   const active = raw && ids.includes(raw) ? raw : fallback;
+  // The entry keeps its state (fromList, fromSearch), or switching tabs would
+  // make "Back" forget the page came from a filtered list.
   const setActive = useCallback((id) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set(param, id);
       return next;
-    }, { replace: true });
-  }, [setParams, param]);
+    }, { replace: true, state: location.state });
+  }, [setParams, param, location.state]);
   return [active, setActive];
 }
 
