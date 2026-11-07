@@ -98,6 +98,8 @@ def test_team_is_on_the_dream_plan_with_default_roles(db, config, seeded):
     assert "products.delete" in roles["Owner"]
     assert "products.delete" not in roles["Admin"]
     assert "products.edit" not in roles["Member"]
+    # Member never gets contracts.* (permissions.py); the fallback took every .view.
+    assert not {k for k in roles["Member"] if k.startswith("contracts.")}
 
     memberships = {m.user_id: m.role for m in
                    db.query(TeamMembership).filter(TeamMembership.team_id == team.id).all()}
@@ -111,6 +113,7 @@ def test_team_is_on_the_dream_plan_with_default_roles(db, config, seeded):
     assert has_permission(db, member, team.id, "strategy.edit")
     assert has_permission(db, member, team.id, "products.view")
     assert not has_permission(db, member, team.id, "products.edit")
+    assert not has_permission(db, member, team.id, "contracts.view")
     assert has_permission(db, admin, team.id, "products.edit")
     assert not has_permission(db, admin, team.id, "products.delete")
 
