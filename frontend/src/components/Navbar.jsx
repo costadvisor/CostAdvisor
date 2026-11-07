@@ -270,8 +270,8 @@ export default function Navbar() {
   };
 
   // Old flat-nav pages with no slot in the primary nav. This is not a
-  // leftovers list — /quotes has no other inbound link anywhere in the app,
-  // so for it this menu is the sole entry point. Products, Suppliers, Formulas
+  // leftovers list — /quotes has no slot in the primary nav (only a link from
+  // Price lists), so this menu is its main entry point. Products, Suppliers, Formulas
   // and Alerts now also sit in the Portfolio/Negotiation groups;
   // they stay here so nothing a user already knows how to reach moves away.
   // The Wave 3 combo grid (/intelligence/combos) is off the menu; its route
