@@ -249,7 +249,8 @@ export default function Dashboard() {
                             <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
                               <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => navigate(`/cost-models/${m.cost_model_id}`)}>View</button>
                               <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => navigate(`/cost-models/${m.cost_model_id}/evolution`)}>Evo</button>
-                              <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => navigate(`/cost-models/${m.cost_model_id}/brief`)}>Brief</button>
+                              {/* The Negotiate brief, which links on to prep, as Monitor's does. */}
+                              <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => navigate(`/negotiate/${m.cost_model_id}`)}>Brief</button>
                               <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ color: 'var(--accent2)' }} onClick={() => handleDelete(m.cost_model_id)}>Del</button>
                             </div>
                           </td>
@@ -305,7 +306,7 @@ export default function Dashboard() {
                     </div>
                     <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
                       <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={e => { e.stopPropagation(); navigate(`/cost-models/${m.cost_model_id}`); }}>View</button>
-                      <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={e => { e.stopPropagation(); navigate(`/cost-models/${m.cost_model_id}/brief`); }}>Brief</button>
+                      <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={e => { e.stopPropagation(); navigate(`/negotiate/${m.cost_model_id}`); }}>Brief</button>
                       <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ color: 'var(--accent2)' }} onClick={e => { e.stopPropagation(); handleDelete(m.cost_model_id); }}>Delete</button>
                     </div>
                   </div>
