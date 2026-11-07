@@ -275,7 +275,7 @@ export default function Pricing() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}`)}>View model</button>
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/squeeze`)}>Squeeze</button>
-          <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/brief`)}>Brief</button>
+          <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/negotiate/${costModelId}`)}>Brief</button>
           {/* Primary is Evolution: entering an actual price only pays off when you
               see it against the should-cost, which is the next step from here. */}
           <button className="ca-btn ca-btn-primary" onClick={() => navigate(`/cost-models/${costModelId}/evolution`)}>Evolution</button>
