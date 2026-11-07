@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import ProtectedRoute, { RequireTeam } from './ProtectedRoute';
 import Navbar from './components/Navbar';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -11,7 +11,6 @@ import CostModelBuilder from './pages/CostModelBuilder';
 import Evolution from './pages/Evolution';
 import Squeeze from './pages/Squeeze';
 
-import Brief from './pages/Brief';
 import Pricing from './pages/Pricing';
 import Dashboard from './pages/Dashboard';
 import Suppliers from './pages/Suppliers';
@@ -59,6 +58,14 @@ import SupplierDetailPage from './pages/intel/SupplierDetailPage';
 import StrategyLandingPage from './pages/strategy/StrategyLandingPage';
 import StrategyCategoryPage from './pages/strategy/StrategyCategoryPage';
 import { useAuth } from './AuthContext';
+
+// The legacy brief page left the Negotiation journey and had no link to prep;
+// old links and bookmarks land on the Negotiate brief, query kept.
+function LegacyBriefRedirect() {
+  const { costModelId } = useParams();
+  const { search } = useLocation();
+  return <Navigate to={`/negotiate/${costModelId}${search}`} replace />;
+}
 
 export default function App() {
   const { user } = useAuth();
@@ -114,7 +121,7 @@ export default function App() {
                 <Route path="/cost-models/:costModelId" element={<CostModelBuilder />} />
                 <Route path="/cost-models/:costModelId/evolution" element={<Evolution />} />
 
-                <Route path="/cost-models/:costModelId/brief" element={<Brief />} />
+                <Route path="/cost-models/:costModelId/brief" element={<LegacyBriefRedirect />} />
                 <Route path="/cost-models/:costModelId/pricing" element={<Pricing />} />
                 <Route path="/cost-models/:costModelId/squeeze" element={<Squeeze />} />
                 <Route path="/indexes" element={<Navigate to="/index-library" replace />} />
