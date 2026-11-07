@@ -412,6 +412,9 @@ const SOURCE_LABEL = {
   composite: 'composite', fixed: 'fixed', team_override: 'override',
   scraped_region: 'scraped', scraped_global: 'scraped (global)',
   scraped_any_region: 'scraped (other region)', scraped_temporal_carry_forward: 'scraped (carried)',
+  // The as-of quarter is usually published monthly data: without these the
+  // raw enum (monthly_actual) showed on every line.
+  monthly_actual: 'monthly', monthly_partial_quarter: 'monthly (partial quarter)',
   monthly_carry_forward: 'carried forward',
 };
 
