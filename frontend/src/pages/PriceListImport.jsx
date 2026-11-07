@@ -423,7 +423,7 @@ export default function PriceListImport() {
                 {recent.map(r => (
                   <tr key={r.id}>
                     <td>{r.filename}</td>
-                    <td style={{ color: 'var(--muted)' }}>{new Date(r.created_at).toLocaleString()}</td>
+                    <td style={{ color: 'var(--muted)' }}>{new Date(r.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
                     <td>{r.status}</td>
                     <td style={{ textAlign: 'right' }}>{r.row_count}</td>
                     <td style={{ textAlign: 'right' }}>{r.committed_count}</td>
