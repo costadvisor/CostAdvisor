@@ -137,6 +137,11 @@ export default function Dashboard() {
   // portfolio with only small gaps doesn't render every bar near-full).
   const maxAbsGap = Math.max(25, ...sortedModels.map(m => Math.abs(m.gap_pct || 0)));
 
+  // The quarter the summary prices "today" at (its latest with data), not the
+  // calendar quarter, which only carries the last month forward.
+  const asOfs = [...new Set(sortedModels.filter(m => m.as_of_year).map(m => `Q${m.as_of_quarter} ${m.as_of_year}`))];
+  const asOfLabel = asOfs.length === 1 ? asOfs[0] : asOfs.length ? "each product's latest quarter with index data" : null;
+
   const SortHeader = ({ label, field, title }) => (
     <th className="center" title={title} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(field)}>
       {label} {sortKey === field ? (sortDir === 'asc' ? '\u25B2' : '\u25BC') : ''}
@@ -165,7 +170,7 @@ export default function Dashboard() {
           <button className="ca-btn ca-btn-primary" onClick={() => navigate('/cost-models/new')}>+ New Model</button>
         </div>
       </div>
-      <p className="ca-subtitle">Q{Math.ceil((new Date().getMonth() + 1) / 3)} {new Date().getFullYear()} &mdash; All cost models for your team, ranked by exposure.</p>
+      <p className="ca-subtitle">{asOfLabel && <>As of {asOfLabel} &mdash; </>}All cost models for your team, ranked by exposure.</p>
 
       {view === 'matrix' ? (
         <PriorityMatrix data={matrix} loading={matrixLoading} error={matrixErr} />
