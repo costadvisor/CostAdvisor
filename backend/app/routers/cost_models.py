@@ -228,7 +228,9 @@ def update_cost_model(
     changes = {}
     for field in ["supplier_id", "destination_country", "destination_region", "region", "currency", "incoterm"]:
         val = getattr(data, field, None)
-        if val is not None:
+        # Only what changed: the form submits every field, and the log read
+        # "region: Europe -> Europe" for each one.
+        if val is not None and str(val) != str(getattr(cm, field)):
             changes[field] = {"old": str(getattr(cm, field)), "new": str(val)}
             setattr(cm, field, val)
 
