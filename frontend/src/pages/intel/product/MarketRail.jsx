@@ -92,8 +92,9 @@ function SeasonVol({ data }) {
 /* An imported recipe whose series resolve grades "high" until an expert
  * reviews it (a pricing gap caps it at medium), so the grade says where it
  * comes from. */
-const IMPORTED_HIGH_TIP = 'The source data carries no proxy classification; every imported recipe '
-  + 'whose series resolve is graded high until an expert reviews it.';
+const IMPORTED_HIGH_TIP = 'Cost lines priced on a stand-in (proxy) index do not lower this grade yet, '
+  + 'so every imported recipe whose series resolve is graded high until an expert reviews it. '
+  + 'Index sources, on the Product Intelligence tab, notes where an index stands in.';
 
 function Confidence({ data }) {
   const t = data.trust;
