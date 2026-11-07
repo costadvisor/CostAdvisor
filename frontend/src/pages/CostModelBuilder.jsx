@@ -38,7 +38,8 @@ export default function CostModelBuilder() {
   const [editing, setEditing] = useState(!costModelId);
   const [loadError, setLoadError] = useState(null);
   const [modelLoadError, setModelLoadError] = useState(null);
-  const [justCreated, setJustCreated] = useState(false);
+  // Set by the create below: the new id mounts a fresh builder (App keys it).
+  const [justCreated, setJustCreated] = useState(() => Boolean(location.state?.justCreated));
 
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -435,8 +436,7 @@ export default function CostModelBuilder() {
         const { data } = await api.post(`/api/cost-models?team_id=${activeTeamId}`, payload);
         setEditing(false);
         setSnapshot(null);
-        setJustCreated(true);
-        navigate(`/cost-models/${data.id}`, { replace: true });
+        navigate(`/cost-models/${data.id}`, { replace: true, state: { justCreated: true } });
       }
     } catch (err) {
       showAlert({ title: 'Error saving', message: formatApiError(err) });

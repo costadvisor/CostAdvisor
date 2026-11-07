@@ -67,6 +67,14 @@ function LegacyBriefRedirect() {
   return <Navigate to={`/negotiate/${costModelId}${search}`} replace />;
 }
 
+/* One builder per model: unkeyed, moving between /cost-models/new and a model
+ * (or two models) kept the last one's state, such as its not-found card or
+ * its formula on the New page. */
+function CostModelBuilderRoute() {
+  const { costModelId } = useParams();
+  return <CostModelBuilder key={costModelId || 'new'} />;
+}
+
 export default function App() {
   const { user } = useAuth();
   const location = useLocation();
@@ -117,8 +125,8 @@ export default function App() {
 
               {/* Everything below reads team data and waits for a team. */}
               <Route element={<RequireTeam />}>
-                <Route path="/cost-models/new" element={<CostModelBuilder />} />
-                <Route path="/cost-models/:costModelId" element={<CostModelBuilder />} />
+                <Route path="/cost-models/new" element={<CostModelBuilderRoute />} />
+                <Route path="/cost-models/:costModelId" element={<CostModelBuilderRoute />} />
                 <Route path="/cost-models/:costModelId/evolution" element={<Evolution />} />
 
                 <Route path="/cost-models/:costModelId/brief" element={<LegacyBriefRedirect />} />
