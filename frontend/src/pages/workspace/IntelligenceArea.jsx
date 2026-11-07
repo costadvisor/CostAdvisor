@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
+import { RegionChips, normalizeRegion } from '../../components/intel';
 import { Sparkline } from './wsCharts';
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -147,10 +148,25 @@ export default function IntelligenceArea() {
   const [loading, setLoading] = useState(true);
   const [deriving, setDeriving] = useState(false);
   const [error, setError] = useState(null);
-  const [search, setSearch] = useState('');
-  const [regionFilter, setRegionFilter] = useState('all');
-  const [page, setPage] = useState(0);
   const [catalogTotal, setCatalogTotal] = useState(null);
+
+  // Search, region and page live in the URL (replaced, as on the other
+  // Intelligence lists), so Back from a combo lands on the same view.
+  const [params, setParams] = useSearchParams();
+  const search = params.get('q') || '';
+  const regionFilter = normalizeRegion(params.get('region')) || 'all';
+  const setParam = useCallback((changes) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      Object.entries(changes).forEach(([k, v]) => {
+        if (v === null || v === undefined || v === '') next.delete(k); else next.set(k, v);
+      });
+      return next;
+    }, { replace: true });
+  }, [setParams]);
+  const setSearch = (v) => setParam({ q: v, page: null });
+  const setRegionFilter = (r) => setParam({ region: r === 'all' ? null : r, page: null });
+  const setPage = (p) => setParam({ page: p > 0 ? p + 1 : null });
 
   // The catalogue index: every (template, region) pair. This is the cross-library
   // coverage listing unit 11 added — a catalogue needs all of them, so it asks
@@ -210,18 +226,23 @@ export default function IntelligenceArea() {
   const libraryCombos = useMemo(
     () => combos.filter(c => byId[c.template_id]), [combos, byId]);
 
+  // Drop codes (combos carry the app's names: Europe, Latam, …), drawn by
+  // RegionChips in the house order like every other region strip.
   const regions = useMemo(
-    () => [...new Set(libraryCombos.map(c => c.region))].sort(), [libraryCombos]);
+    () => [...new Set(libraryCombos.map(c => normalizeRegion(c.region)))], [libraryCombos]);
 
   const q = search.trim().toLowerCase();
   const filtered = useMemo(() => libraryCombos.filter(c => {
-    if (regionFilter !== 'all' && c.region !== regionFilter) return false;
+    if (regionFilter !== 'all' && normalizeRegion(c.region) !== regionFilter) return false;
     if (!q) return true;
     const t = byId[c.template_id];
     return `${c.template_code || ''} ${c.template_name || ''} ${t?.family?.name || ''} ${t?.product_line?.name || ''}`
       .toLowerCase().includes(q);
   }), [libraryCombos, regionFilter, q, byId]);
 
+  // 1-based in the URL; a page past the end (a shorter list) shows the last.
+  const lastPage = Math.max(0, Math.ceil(filtered.length / BATCH) - 1);
+  const page = Math.min(Math.max(0, (Number(params.get('page')) || 1) - 1), lastPage);
   const pageCombos = filtered.slice(page * BATCH, page * BATCH + BATCH);
   const pageKey = pageCombos.map(c => `${c.template_id}:${c.region}`).join('|');
 
@@ -247,7 +268,6 @@ export default function IntelligenceArea() {
   }, [activeTeamId, pageKey]);
 
   useEffect(derive, [derive]);
-  useEffect(() => { setPage(0); }, [regionFilter, q]);
 
   // Grouped by family for the same reason the old page was: a catalogue this
   // size is unreadable as a flat grid.
@@ -295,13 +315,12 @@ export default function IntelligenceArea() {
             <input className="ca-input" style={{ width: 220 }}
               placeholder="Search formula, code or family…"
               value={search} onChange={e => setSearch(e.target.value)} />
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
               <button className={filterBtn(regionFilter === 'all')}
                 onClick={() => setRegionFilter('all')}>All regions</button>
-              {regions.map(r => (
-                <button key={r} className={filterBtn(regionFilter === r)}
-                  onClick={() => setRegionFilter(r)}>{r}</button>
-              ))}
+              <RegionChips regions={regions} ariaLabel="Region"
+                active={regionFilter === 'all' ? [] : regionFilter}
+                onSelect={r => setRegionFilter(r === regionFilter ? 'all' : r)} />
             </div>
             <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ marginLeft: 'auto' }}
               onClick={() => navigate('/portfolio')}
@@ -359,7 +378,8 @@ export default function IntelligenceArea() {
                     name={`${c.template_name || c.template_code} · ${c.region}`}
                     family={byId[c.template_id]?.family?.name || 'No family'}
                     onOpen={() => navigate(
-                      `/intelligence/combo/${c.template_id}/${encodeURIComponent(c.region)}`)}
+                      `/intelligence/combo/${c.template_id}/${encodeURIComponent(c.region)}`,
+                      { state: { fromList: true } })}
                   />
                 ))}
               </div>
@@ -369,10 +389,10 @@ export default function IntelligenceArea() {
           {filtered.length > BATCH && (
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 16 }}>
               <button className="ca-btn ca-btn-ghost ca-btn-sm" disabled={page === 0}
-                onClick={() => setPage(p => p - 1)}>← Previous</button>
+                onClick={() => setPage(page - 1)}>← Previous</button>
               <button className="ca-btn ca-btn-ghost ca-btn-sm"
                 disabled={(page + 1) * BATCH >= filtered.length}
-                onClick={() => setPage(p => p + 1)}>Next →</button>
+                onClick={() => setPage(page + 1)}>Next →</button>
             </div>
           )}
         </>

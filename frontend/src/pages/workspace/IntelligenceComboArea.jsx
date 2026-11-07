@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Sparkline } from './wsCharts';
@@ -373,6 +373,7 @@ export default function IntelligenceComboArea() {
   const { templateId, region, costModelId } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { activeTeamId } = useAuth();
 
   const [tab, setTab] = useState('derived');
@@ -432,8 +433,14 @@ export default function IntelligenceComboArea() {
 
   return (
     <div className="ca-page ca-fade-in">
+      {/* From the combos grid, Back is history, so the grid keeps its search,
+          region and page; opened directly, it goes to the grid. */}
       <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ marginBottom: 10 }}
-        onClick={() => navigate(params.get('from') === 'portfolio' ? '/portfolio' : '/intelligence/combos')}>
+        onClick={() => {
+          if (params.get('from') === 'portfolio') navigate('/portfolio');
+          else if (location.state?.fromList && window.history.length > 1) navigate(-1);
+          else navigate('/intelligence/combos');
+        }}>
         ← Back
       </button>
 
