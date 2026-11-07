@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import api from '../api';
+import api, { formatApiError } from '../api';
 import { qLabel, QUARTER_OPTS } from '../utils/quarters';
 import QuarterPriceList from '../components/QuarterPriceList';
 
@@ -9,6 +9,7 @@ export default function SupplierPurchases() {
   const navigate = useNavigate();
   const [supplierName, setSupplierName] = useState('');
   const [models, setModels] = useState(null); // per-model purchase data
+  const [loadError, setLoadError] = useState(null);
   const [expandedQuarter, setExpandedQuarter] = useState(null);
   const [addingQuarter, setAddingQuarter] = useState(false);
   const [newQuarterVal, setNewQuarterVal] = useState(
@@ -16,12 +17,16 @@ export default function SupplierPurchases() {
   );
 
   const fetchData = () => {
+    setLoadError(null);
     api.get(`/api/suppliers/${supplierId}/purchase-history`)
       .then(res => {
         setSupplierName(res.data.supplier_name);
         setModels(res.data.models);
       })
-      .catch(console.error);
+      // A bad or unknown id used to leave the page on "Loading..." for ever.
+      .catch(err => setLoadError([404, 422].includes(err?.response?.status)
+        ? 'This supplier was not found. It may have been deleted, or the link is wrong.'
+        : `Couldn't load this supplier's purchases: ${formatApiError(err)}`));
   };
 
   useEffect(fetchData, [supplierId]);
@@ -87,6 +92,13 @@ export default function SupplierPurchases() {
     setExpandedQuarter(qKey);
     setAddingQuarter(false);
   };
+
+  if (loadError && !models) return (
+    <div className="ca-page ca-fade-in">
+      <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => navigate('/suppliers')}>← Suppliers</button>
+      <div className="ca-card" style={{ color: 'var(--accent2)', marginTop: 12 }}>{loadError}</div>
+    </div>
+  );
 
   const quarters = getQuarters();
 
