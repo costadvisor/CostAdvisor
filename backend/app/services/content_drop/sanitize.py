@@ -72,7 +72,10 @@ def served_compliance(entries: Any) -> Any:
 #    share at all, so the instruction is removed together with the connector
 #    that introduces it ("; ", " - ", ", so ", ", and ") and the sentence is
 #    closed with a full stop. A continuation after it (", and note that …")
-#    becomes its own sentence. Nothing else in the note changes.
+#    becomes its own sentence. The instruction often sits in brackets
+#    ("… not disclosed (share:0 = not disclosed)."), so the empty brackets it
+#    leaves go too. A sentence repeated back to back (a source-side append)
+#    is kept once. Nothing else in the note changes.
 # 2. current_events: the internal phrase "sibling PID(s)" (a PID is the
 #    source's product code) reads "related product(s)".
 _Q = r"[\"'“”‘’]?"
@@ -90,6 +93,10 @@ _SHARE0_INSTRUCTION = re.compile(
     # a continuation (", and note …") or the sentence's own full stop
     r"(?:(?P<cont>,\s+and\s+)(?P<next>\w)|\.?)",
     re.IGNORECASE)
+_EMPTY_BRACKETS = re.compile(r"\s*\(\s*\)")
+# A sentence (from a sentence start to a full stop; the lazy match runs past
+# the stops inside "J.R." or "Ph. Eur.") followed by copies of itself.
+_REPEATED_SENTENCE = re.compile(r"(?:^|(?<=[.!?]\s))(\S.*?[.!?])(?:\s+\1)+(?=\s|$)")
 _SIBLING_PID = re.compile(r"\bsibling\s+PID(s?)\b")
 
 
@@ -101,11 +108,16 @@ def _drop_share0(m: re.Match) -> str:
 
 
 def clean_supplier_note(text: str | None) -> str | None:
-    """The supplier note without the data-team instruction about `share:0`.
+    """The supplier note without the data-team instruction about `share:0`,
+    the empty brackets it leaves, or a sentence repeated back to back.
     None when nothing is left."""
     if not isinstance(text, str) or not text:
         return text
-    out = _SHARE0_INSTRUCTION.sub(_drop_share0, text).strip()
+    out = _EMPTY_BRACKETS.sub("", _SHARE0_INSTRUCTION.sub(_drop_share0, text))
+    prev = None
+    while out != prev:                        # "A. A. B. A. B." needs two passes
+        prev, out = out, _REPEATED_SENTENCE.sub(r"\1", out)
+    out = out.strip()
     return out or None
 
 
