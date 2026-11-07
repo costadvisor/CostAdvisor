@@ -201,7 +201,7 @@ export default function Squeeze() {
               <tr style={{ background: 'var(--neutral-bg-soft)' }}>
                 <td>Cumulative</td>
                 {periods.map((p, i) => <td key={i} className="center" style={{ fontWeight: 600 }}>
-                  {fmtMoney(p.cumulative_impact, currency, { decimals: 0 })}
+                  {fmtSignedMoney(p.cumulative_impact, currency, { decimals: 0 })}
                 </td>)}
               </tr>
             </tbody>
