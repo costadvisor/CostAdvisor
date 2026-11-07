@@ -93,7 +93,7 @@ export default function Navbar() {
   /* ── Primary nav: the mockups' dropdown groups (DEMO_BUILD_SPEC §7) ──
    * Intelligence ▾ (the platform reference: catalogue, lines, the demand axis,
    * producers, index library) · Portfolio ▾ (what the team buys) · Strategy ·
-   * Negotiation ▾ (monitor → forecast → negotiate, plus the formula library)
+   * Negotiation ▾ (monitor → forecast → negotiate, plus formulas and alerts)
    * — with Dashboard, Team and Admin top-level as before. Every destination
    * the old flat tabs reached is still one click into a group. `match` widens
    * a group's active highlight to routes that have no menu entry of their own
@@ -126,6 +126,7 @@ export default function Navbar() {
         { path: '/forecast', label: 'Forecast' },
         { path: '/negotiate', label: 'Negotiate' },
         { path: '/formulas', label: 'Formulas' },
+        { path: '/alerts', label: 'Alerts' },
       ],
     },
     { kind: 'link', path: '/team', label: 'Team', badge: pendingInviteCount || 0 },
@@ -269,9 +270,9 @@ export default function Navbar() {
   };
 
   // Old flat-nav pages with no slot in the primary nav. This is not a
-  // leftovers list — /alerts and /quotes have no other inbound link anywhere
-  // in the app, so for those this menu is the sole entry point. Products,
-  // Suppliers and Formulas now also sit in the Portfolio/Negotiation groups;
+  // leftovers list — /quotes has no other inbound link anywhere in the app,
+  // so for it this menu is the sole entry point. Products, Suppliers, Formulas
+  // and Alerts now also sit in the Portfolio/Negotiation groups;
   // they stay here so nothing a user already knows how to reach moves away.
   // The Wave 3 combo grid (/intelligence/combos) is off the menu; its route
   // stays, and the combo pages are reached from Portfolio.
