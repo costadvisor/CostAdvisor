@@ -30,13 +30,13 @@ const TAB_IDS = ['report', 'products', 'demand'];
  * switch: the switch restores each tab's window offset here. Taken from the
  * last scroll while the tab was shown; kept per line for the session, so a
  * Back that lands on another tab still finds the report's place; cleared
- * when the line is opened afresh. */
+ * when the line is opened afresh (by id, or by key: the id REPLACE). */
 function useTabPlaces(tab, storeKey) {
   const navType = useNavigationType();
   const places = useRef(null);
   if (places.current === null) {
     let saved = {};
-    if (navType !== 'PUSH') {
+    if (navType === 'POP') {
       try { saved = JSON.parse(sessionStorage.getItem(storeKey)) || {}; } catch { saved = {}; }
     }
     places.current = saved;
