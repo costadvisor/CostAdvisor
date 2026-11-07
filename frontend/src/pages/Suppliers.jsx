@@ -7,6 +7,12 @@ import { DriftBar } from './workspace/wsCharts';
 import exportCsv from '../utils/exportCsv';
 import { fmtMoney } from '../utils/currency';
 
+// A portfolio summary row belongs to a supplier by id. A row without the
+// supplier_id key (older server) falls back to the name, which merged two
+// suppliers that share one.
+const suppliedBy = (m, supplierId, supplierName) =>
+  (m.supplier_id !== undefined ? String(m.supplier_id) === String(supplierId) : m.supplier_name === supplierName);
+
 export default function Suppliers() {
   const { activeTeamId } = useAuth();
   const navigate = useNavigate();
@@ -136,8 +142,10 @@ export default function Suppliers() {
       .catch(err => showAlert({ title: "Couldn't export the supplier", message: formatApiError(err) }));
   };
 
-  const getSupplierModels = (supplierId) =>
-    portfolio.filter(m => m.supplier_name === suppliers.find(s => s.id === supplierId)?.name);
+  const getSupplierModels = (supplierId) => {
+    const s = suppliers.find(x => x.id === supplierId);
+    return s ? portfolio.filter(m => suppliedBy(m, s.id, s.name)) : [];
+  };
 
   return (
     <div className="ca-page ca-fade-in">
@@ -380,7 +388,7 @@ function BenchmarkView({ data, loading, error, trustScores, trustResolution, com
   // say which: take it from the supplier's cost models. Mixed currencies get no
   // symbol, since the sum is not converted.
   const currenciesOf = Object.fromEntries(priced.map(s => [s.supplier_id, [...new Set(models
-    .filter(m => m.supplier_name === s.supplier_name).map(m => m.currency).filter(Boolean))]]));
+    .filter(m => suppliedBy(m, s.supplier_id, s.supplier_name)).map(m => m.currency).filter(Boolean))]]));
   const gapColor = (g) => (g > 1 ? 'var(--accent2)' : g < -1 ? 'var(--accent)' : 'var(--muted)');
   const trendArrow = (t) => {
     if (!t || t.length < 2) return null;
