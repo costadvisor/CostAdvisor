@@ -1,5 +1,8 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import api from '../../../api';
 import EmptyState from '../EmptyState';
+import { productHref } from '../vocab';
 import { asOfLabel, sectionDomId, wrapTables } from './reportUtil';
 import '../../../styles/report.css';
 
@@ -15,6 +18,9 @@ import '../../../styles/report.css';
  * toc:    sticky table of contents on the left (default on). The entry for
  *         the section in view is highlighted and lists that section's <h3>s.
  * only:   optional list of section ids to show (e.g. ['strategic']).
+ *
+ * Product codes in the text that are catalogue PIDs of the report's lines
+ * (`report.lines`) link to their product pages.
  *
  * The document keeps the report template's own light palette in every app
  * theme (styles/report.css); the frame around it uses the theme tokens. */
@@ -55,12 +61,72 @@ function splitHeading(heading = '') {
   return m ? { num: m[1], text: m[2] } : { num: null, text: heading };
 }
 
+/* The catalogue PIDs of the lines the report serves, so the product codes it
+   names can link to their product pages. A failed lookup links nothing. */
+function useReportPids(lines) {
+  const ids = (lines || []).map((l) => l.id).filter((id) => id != null).join(',');
+  const [pids, setPids] = useState(null);
+  useEffect(() => {
+    setPids(null);
+    if (!ids) return undefined;
+    let alive = true;
+    Promise.all(ids.split(',').map((id) => api.get('/api/intel/products', { params: { line_id: id } })
+      .then((r) => (r.data?.items || []).map((p) => p.pid))
+      .catch(() => [])))
+      .then((lists) => { if (alive) setPids(new Set(lists.flat())); });
+    return () => { alive = false; };
+  }, [ids]);
+  return pids;
+}
+
+// A code like BCI-PAC-10, not inside a longer token (group 1 is the lead-in).
+const PID_RE = /(^|[^A-Za-z0-9-])([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)(?![A-Za-z0-9-])/g;
+
+/* Wrap each known PID in the rendered text under `root` in a link to its
+   product page. Text in a link, heading or table header is left as is, so a
+   second pass changes nothing. */
+function linkPids(root, pids) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (/[A-Z0-9]-[A-Z0-9]/.test(n.nodeValue) && !n.parentElement?.closest('a, th, h1, h2, h3, h4, h5, h6')) {
+      nodes.push(n);
+    }
+  }
+  nodes.forEach((node) => {
+    const text = node.nodeValue;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (const m of text.matchAll(PID_RE)) {
+      const pid = m[2];
+      if (!pids.has(pid)) continue;
+      const at = m.index + m[1].length;
+      frag.append(text.slice(last, at));
+      const a = document.createElement('a');
+      a.href = productHref(pid);
+      a.dataset.pid = pid;
+      a.title = 'Open the product page';
+      a.style.color = 'var(--accent)';
+      a.style.textDecoration = 'underline dotted';
+      a.style.textUnderlineOffset = '2px';
+      a.textContent = pid;
+      frag.append(a);
+      last = at + pid.length;
+    }
+    if (last === 0) return;
+    frag.append(text.slice(last));
+    node.replaceWith(frag);
+  });
+}
+
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 export default function ReportView({ report, lead, toc = true, only, header = true, footer = true, className = '' }) {
   const docRef = useRef(null);
   const dhH = useDetailHeaderHeight();
+  const navigate = useNavigate();
+  const pids = useReportPids(report?.lines);
   const [active, setActive] = useState(null);
   const [subs, setSubs] = useState({});
 
@@ -90,6 +156,27 @@ export default function ReportView({ report, lead, toc = true, only, header = tr
     setSubs(next);
     setActive(sections[0]?.section_id ?? null);
   }, [sections, slug]);
+
+  // Product codes in the text link to their product pages once the PIDs are
+  // known (a pass of its own, so it does not reset the contents highlight).
+  useLayoutEffect(() => {
+    const root = docRef.current;
+    if (!root || !pids?.size) return;
+    sections.forEach((s) => {
+      const el = root.querySelector(`#${sectionDomId(slug, s.section_id)}`);
+      if (el) linkPids(el, pids);
+    });
+  }, [pids, sections, slug]);
+
+  // Those links are plain <a>s in stored html: route a plain click in-app;
+  // a modified or middle click opens the href as usual.
+  const onDocClick = useCallback((e) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const a = e.target.closest?.('a[data-pid]');
+    if (!a) return;
+    e.preventDefault();
+    navigate(a.getAttribute('href'));
+  }, [navigate]);
 
   // Which section is in view: the last one whose top has passed under the
   // sticky header.
@@ -134,7 +221,8 @@ export default function ReportView({ report, lead, toc = true, only, header = tr
   const style = { '--ixr-dh-h': `${dhH}px` };
 
   return (
-    <div className={`ixr-viewer${toc ? '' : ' no-toc'} ${className}`} style={style} ref={docRef}>
+    <div className={`ixr-viewer${toc ? '' : ' no-toc'} ${className}`} style={style} ref={docRef}
+      onClick={onDocClick}>
       {toc && (
         <nav className="ixr-toc" aria-label="Report contents">
           <div className="ixr-toc-title">Contents</div>
