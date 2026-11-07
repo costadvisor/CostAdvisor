@@ -175,6 +175,26 @@ def test_brief_generation_is_audited(client_as, tenant_a, brief_model, db):
     assert evt.user_id == tenant_a["user_id"]
 
 
+def test_reopening_a_brief_or_prep_is_audited_once(client_as, tenant_a, brief_model, db):
+    """The pages build the brief and the negotiation prep on every load (twice
+    under React StrictMode), and every view wrote a row that buried real edits
+    in Team > Activity. The access is still recorded, once per user, model and
+    window (costing.DELIVERABLE_VIEW_WINDOW)."""
+    from collections import Counter
+    from app.models.audit_log import AuditLog
+    c = client_as(tenant_a)
+    for _ in range(3):
+        r = c.post("/api/costing/brief", json={"cost_model_id": str(brief_model.id)})
+        assert r.status_code == 200, r.text
+        r = c.get(f"/api/negotiation-prep/{brief_model.id}/prep")
+        assert r.status_code == 200, r.text
+    db.expire_all()
+    events = Counter(e for (e,) in db.query(AuditLog.event_type).filter(
+        AuditLog.team_id == tenant_a["team_id"], AuditLog.entity_id == str(brief_model.id)))
+    assert events["brief_generated"] == 1
+    assert events["negotiation_prep_generated"] == 1
+
+
 def test_brief_is_deterministic(client_as, tenant_a, brief_model):
     """Scrum 11 — the costing engine must produce identical output for identical
     input on repeated runs (no nondeterminism in the calc path). Compare two
