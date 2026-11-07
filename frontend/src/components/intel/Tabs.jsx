@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 /* URL-synced tabs (?tab=…), WAI-ARIA tablist with automatic activation.
@@ -34,6 +34,30 @@ export function Tabs({
   const controlled = value !== undefined;
   const active = controlled ? value : urlActive;
   const refs = useRef({});
+  const listRef = useRef(null);
+
+  // A strip wider than the screen scrolls sideways: bring the selected tab
+  // into it (a deep link to the last tab showed 'OPPOR' at 390px). Only the
+  // strip scrolls; scrollIntoView would move the page too. Counts and web
+  // fonts widen the tabs after the first paint, so it runs again on resize.
+  useEffect(() => {
+    const list = listRef.current;
+    const el = refs.current[active];
+    if (!list || !el) return undefined;
+    const reveal = () => {
+      if (list.scrollWidth <= list.clientWidth) return;
+      const l = list.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      if (r.left < l.left) list.scrollLeft += r.left - l.left;
+      else if (r.right > l.right) list.scrollLeft += r.right - l.right;
+    };
+    reveal();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(reveal);
+    ro.observe(list);
+    Array.from(list.children).forEach((c) => ro.observe(c));
+    return () => ro.disconnect();
+  }, [active, tabs.length]);
 
   const select = (id) => {
     if (!controlled) setUrlActive(id);
@@ -65,7 +89,7 @@ export function Tabs({
   };
 
   return (
-    <div role="tablist" aria-label={ariaLabel} className={`ix-tabs ${className}`}>
+    <div ref={listRef} role="tablist" aria-label={ariaLabel} className={`ix-tabs ${className}`}>
       {tabs.map((t) => {
         const selected = t.id === active;
         return (
