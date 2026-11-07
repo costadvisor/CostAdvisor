@@ -37,6 +37,7 @@ export default function CostModelBuilder() {
   const [loaded, setLoaded] = useState(!costModelId);
   const [editing, setEditing] = useState(!costModelId);
   const [loadError, setLoadError] = useState(null);
+  const [modelLoadError, setModelLoadError] = useState(null);
   const [justCreated, setJustCreated] = useState(false);
 
   const [products, setProducts] = useState([]);
@@ -181,6 +182,7 @@ export default function CostModelBuilder() {
   // Load existing cost model
   useEffect(() => {
     if (!costModelId) return;
+    setModelLoadError(null);
     api.get(`/api/cost-models/${costModelId}`)
       .then(({ data }) => {
         setProductId(data.product_id);
@@ -233,7 +235,11 @@ export default function CostModelBuilder() {
         }
         setLoaded(true);
       })
-      .catch(err => { console.error(err); setLoaded(true); });
+      // An unknown id used to fall through to the new-model defaults and look
+      // like a real cost model.
+      .catch(err => setModelLoadError([404, 422].includes(err?.response?.status)
+        ? 'This cost model was not found. It may have been deleted, or the link is wrong.'
+        : `Couldn't load this cost model: ${formatApiError(err)}`));
   }, [costModelId]);
 
   // Computed
@@ -549,6 +555,12 @@ export default function CostModelBuilder() {
     }
   };
 
+  if (modelLoadError) return (
+    <div className="ca-page ca-fade-in">
+      <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => navigate('/portfolio')}>← Portfolio</button>
+      <div className="ca-card" style={{ color: 'var(--accent2)', marginTop: 12 }}>{modelLoadError}</div>
+    </div>
+  );
   if (!loaded) return <div className="ca-page" style={{ color: 'var(--muted)' }}>Loading...</div>;
 
   const sym = curSym(currency);
