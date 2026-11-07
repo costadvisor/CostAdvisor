@@ -4,20 +4,28 @@ import {
 import {
   Link, useNavigationType, useSearchParams,
 } from 'react-router-dom';
-import { EmptyState, ErrorState, LoadingPanel, useApi } from '../../../components/intel';
+import {
+  EmptyState, ErrorState, LoadingPanel, useApi, useTabParam,
+} from '../../../components/intel';
 import ReportView from '../../../components/intel/report/ReportView';
 import ReportCaveat from '../../../components/intel/report/ReportCaveat';
 import { playbookHref } from './lineUtil';
 
-/* Coming back to the Report tab (from another tab, or Back) lands where the
- * reader was: the tab unmounts when it is left, so the window offset would be
- * lost. Kept per line and report for the session; opening the line afresh
+/* Coming back to a line's report (Back, a reload) lands where the reader
+ * was. Kept per line and report for the session; opening the line afresh
  * starts at the top. Saved from the last scroll event, and only after a real
- * one, so StrictMode's rehearsal unmount saves nothing. */
-function useReadingPlace(storeKey, ready) {
+ * one, so StrictMode's rehearsal unmount saves nothing. The line page keeps
+ * this tab mounted behind the others and restores a tab switch itself
+ * (B-04), so both halves here wait for `active`: a scroll on Products is not
+ * the report's place, and a Back that lands on Products must not scroll it
+ * to the report's. */
+function useReadingPlace(storeKey, ready, active) {
   const navType = useNavigationType();
   const lastY = useRef(0);
   const restored = useRef(false);
+  const shown = useRef(active);
+
+  useLayoutEffect(() => { shown.current = active; }, [active]);
 
   useEffect(() => {
     if (navType !== 'PUSH') return;
@@ -28,7 +36,11 @@ function useReadingPlace(storeKey, ready) {
 
   useLayoutEffect(() => {
     let scrolled = false;
-    const onScroll = () => { scrolled = true; lastY.current = window.scrollY; };
+    const onScroll = () => {
+      if (!shown.current) return;
+      scrolled = true;
+      lastY.current = window.scrollY;
+    };
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       window.removeEventListener('scroll', onScroll);
@@ -38,13 +50,13 @@ function useReadingPlace(storeKey, ready) {
   }, [storeKey]);
 
   useEffect(() => {
-    if (!ready || restored.current) return;
+    if (!ready || !active || restored.current) return;
     restored.current = true;
     if (navType === 'PUSH') return;
     let y = 0;
     try { y = Number(sessionStorage.getItem(storeKey)) || 0; } catch { y = 0; }
     if (y > 0) requestAnimationFrame(() => window.scrollTo(0, y));
-  }, [ready, navType, storeKey]);
+  }, [ready, active, navType, storeKey]);
 }
 
 /* Line detail › Report: the delivered market report(s) serving this line.
@@ -60,7 +72,9 @@ export default function ReportTab({ line }) {
   const { data: report, error, loading, reload } = useApi(
     current ? `/api/intel/reports/${encodeURIComponent(current.slug)}` : null,
   );
-  useReadingPlace(`ixl-report-y:${line.id}:${current?.slug || ''}`, !!report && !loading);
+  // The line page's own tab rule (LineDetailPage): is this tab the one shown?
+  const [shownTab] = useTabParam(['report', 'products', 'demand'], reports.length ? 'report' : 'products');
+  useReadingPlace(`ixl-report-y:${line.id}:${current?.slug || ''}`, !!report && !loading, shownTab === 'report');
 
   const pick = useCallback((slug) => {
     setParams((prev) => {
