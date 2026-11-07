@@ -346,10 +346,13 @@ export default function NegotiateDetailArea() {
               // are read as shares of the should-cost the total bar represents.
               const scaleMax = Math.max(Math.abs(current_should_cost) || 0, ...drivers.map(d => Math.abs(d.component_cost)), 0.001);
               const barPx = (v) => Math.max(2, Math.round((Math.abs(v) / scaleMax) * PLOT_H));
+              // Wide enough for 10 px labels, but a long formula (8+ lines) still
+              // fits a printed A4 page (~660 px), where the row cannot scroll.
+              const colMin = Math.min(76, Math.floor(600 / (drivers.length + 1)));
               const column = (key, { value, color, opacity, label, bold, divider }) => (
                 <div key={key} style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end',
-                  flex: 1, minWidth: 76, height: '100%',
+                  flex: 1, minWidth: colMin, height: '100%',
                   ...(divider ? { borderLeft: '1px solid var(--border)', paddingLeft: 6, marginLeft: 2 } : {}),
                 }}>
                   <div style={{ fontSize: 10, color: bold ? color : 'var(--muted)', fontWeight: bold ? 700 : 400, marginBottom: 3, whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace" }}>
