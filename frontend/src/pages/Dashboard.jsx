@@ -191,7 +191,8 @@ export default function Dashboard() {
         <>
           {view === 'table' ? (
             <div className="ca-card">
-              <div className="ca-scroll-x">
+              {/* --full: the 440px cap boxed the table into an inner scroll. */}
+              <div className="ca-scroll-x ca-scroll-x--full">
                 <table className="ca-table">
                   <thead>
                     <tr>
