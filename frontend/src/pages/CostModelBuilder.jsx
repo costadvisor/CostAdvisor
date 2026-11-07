@@ -13,7 +13,7 @@ import NumberInput from '../components/NumberInput';
 import { normalizeVarMap } from '../components/VariableMapEditor';
 import IndexCombo from '../components/IndexCombo';
 import { SearchList } from '../components/ProductFormModal';
-import { curSym, fmtPerUnit } from '../utils/currency';
+import { curSym, fmtMoney, fmtPerUnit } from '../utils/currency';
 import { qLabel, currentQuarter } from '../utils/quarters';
 
 // Catalog recipes list their regions as drop codes (`catalog_meta.regions`);
@@ -552,6 +552,9 @@ export default function CostModelBuilder() {
   if (!loaded) return <div className="ca-page" style={{ color: 'var(--muted)' }}>Loading...</div>;
 
   const sym = curSym(currency);
+  // Every part at the base price's scale, so the split reads like the total
+  // ("€300", not "€300.000").
+  const money = (v) => fmtMoney(v, currency, { scale: basePrice });
 
   return (
     <>
@@ -896,7 +899,7 @@ export default function CostModelBuilder() {
                           {(compWeight(c) * 100).toFixed(1)}%
                         </span>
                         <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right' }}>
-                          {sym}{compCost(c).toFixed(3)}
+                          {money(compCost(c))}
                         </span>
                         <button className="ca-btn-danger" onClick={() => removeComp(i)}>x</button>
                       </div>
@@ -1006,7 +1009,7 @@ export default function CostModelBuilder() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
                   <div>
                     <label className="ca-label">Total Price ({sym}/unit)</label>
-                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, padding: '7px 0' }}>{sym}{basePrice.toFixed(3)}</div>
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, padding: '7px 0' }}>{money(basePrice)}</div>
                   </div>
                   <div>
                     <label className="ca-label">Base Period</label>
@@ -1070,7 +1073,7 @@ export default function CostModelBuilder() {
                           {(compWeight(c) * 100).toFixed(1)}%
                         </span>
                         <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right' }}>
-                          {sym}{compCost(c).toFixed(3)}
+                          {money(compCost(c))}
                         </span>
                       </div>
                     ))}
@@ -1106,7 +1109,7 @@ export default function CostModelBuilder() {
                     <div>
                       <label className="ca-label" style={{ fontSize: 9 }}>Est. Cost</label>
                       <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, textAlign: 'right', padding: '7px 0' }}>
-                        {sym}{marginCost.toFixed(3)}
+                        {money(marginCost)}
                       </div>
                     </div>
                   </div>
@@ -1131,7 +1134,7 @@ export default function CostModelBuilder() {
                     <div>
                       <label className="ca-label" style={{ fontSize: 9 }}>Est. Cost</label>
                       <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, textAlign: 'right', padding: '7px 0' }}>
-                        {sym}{marginCost.toFixed(3)}
+                        {money(marginCost)}
                       </div>
                     </div>
                   </div>
@@ -1147,14 +1150,14 @@ export default function CostModelBuilder() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: 'var(--bg)', borderRadius: 8, marginTop: 8 }}>
               <span style={{ fontSize: 11, color: 'var(--muted)' }}>
                 {formulaMode === 'advanced'
-                  ? `Base price anchor: ${sym}${basePrice.toFixed(3)} - should-cost from expression`
-                  : `Components: ${sym}${componentPool >= 0 ? componentPool.toFixed(3) : '—'} + Margin: ${sym}${marginCost.toFixed(3)}`}
+                  ? `Base price anchor: ${money(basePrice)} - should-cost from expression`
+                  : `Components: ${componentPool >= 0 ? money(componentPool) : '—'} + Margin: ${money(marginCost)}`}
               </span>
               <span style={{
                 fontFamily: "'Syne', sans-serif", fontSize: 16, fontWeight: 700,
                 color: isValid ? 'var(--accent)' : 'var(--accent2)'
               }}>
-                {sym}{basePrice.toFixed(3)}
+                {money(basePrice)}
               </span>
             </div>
           </div>
@@ -1217,7 +1220,7 @@ export default function CostModelBuilder() {
           {/* Should-Cost result */}
           <div className="ca-result" style={{ marginBottom: 16 }}>
             <div className="ca-result-label">{costModelId ? `Base price · ${qLabel(baseYear, baseQuarter)}` : 'Starting price'}</div>
-            <div className="ca-result-big">{sym}{basePrice.toFixed(3)}</div>
+            <div className="ca-result-big">{money(basePrice)}</div>
             <div style={{ marginTop: 4, fontSize: 11, color: 'var(--muted)' }}>
               per {unit} · {region}
             </div>
@@ -1232,13 +1235,13 @@ export default function CostModelBuilder() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 20, fontWeight: 700, color: 'var(--accent3)' }}>
-                      {sym}{componentPool >= 0 ? componentPool.toFixed(3) : '\u2014'}
+                      {componentPool >= 0 ? money(componentPool) : '\u2014'}
                     </div>
                     <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Indexed Cost</div>
                   </div>
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 20, fontWeight: 700, color: 'var(--accent2)' }}>
-                      {sym}{marginCost.toFixed(3)}
+                      {money(marginCost)}
                     </div>
                     <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Margin</div>
                   </div>
@@ -1287,7 +1290,7 @@ export default function CostModelBuilder() {
           )}
 
           {costModelId && (
-            <VersionHistory costModelId={costModelId} editing={editing} sym={sym} onLoadVersion={(v) => {
+            <VersionHistory costModelId={costModelId} editing={editing} currency={currency} onLoadVersion={(v) => {
               setBasePrice(v.base_price);
               setBaseYear(v.base_year);
               setBaseQuarter(v.base_quarter);
@@ -1463,7 +1466,8 @@ function SaveTemplateModal({ expression, variables, activeTeamId, canEditPlatfor
   );
 }
 
-function VersionHistory({ costModelId, editing, sym, onLoadVersion }) {
+function VersionHistory({ costModelId, editing, currency, onLoadVersion }) {
+  const sym = curSym(currency);
   const [versions, setVersions] = useState([]);
   const [open, setOpen] = useState(false);
   const confirm = useConfirm();
@@ -1517,9 +1521,9 @@ function VersionHistory({ costModelId, editing, sym, onLoadVersion }) {
               {versions.map(v => (
                 <tr key={v.id}>
                   <td>Q{v.base_quarter}-{v.base_year}</td>
-                  <td>{sym}{v.base_price.toFixed(2)}</td>
+                  <td>{fmtMoney(v.base_price, currency)}</td>
                   <td>{v.margin_type === 'pct' ? `${v.margin_value}%` : v.margin_type === 'fixed' ? `${sym}${v.margin_value}` : 'Unknown'}</td>
-                  <td style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(v.updated_at || v.created_at).toLocaleDateString()}</td>
+                  <td style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(v.updated_at || v.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
                   {editing && (
                     <td className="center">
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
