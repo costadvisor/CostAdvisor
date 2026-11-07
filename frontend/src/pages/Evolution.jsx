@@ -4,7 +4,7 @@ import EvoChart from '../components/EvoChart';
 import { PIE_COLORS, INCOTERMS } from '../utils/constants';
 import api, { formatApiError } from '../api';
 import exportCsv from '../utils/exportCsv';
-import { curSym } from '../utils/currency';
+import { curSym, fmtMoney, fmtSignedMoney } from '../utils/currency';
 
 function qLabel(y, q) { return `Q${q}-${String(y).slice(-2)}`; }
 
@@ -194,7 +194,7 @@ export default function Evolution() {
         </div>
       )}
       <p className="ca-subtitle">
-        {product_name}{supplier_name ? ` · ${supplier_name}` : ''} · {region}{incoterm ? ` · ${incoterm}${named_place ? ' ' + named_place : ''}` : ''} · Ref: {sym}{reference_cost?.toFixed(2)}
+        {product_name}{supplier_name ? ` · ${supplier_name}` : ''} · {region}{incoterm ? ` · ${incoterm}${named_place ? ' ' + named_place : ''}` : ''} · Ref: {fmtMoney(reference_cost, currency)}
         {normalized_to_incoterm && (
           <span style={{ marginLeft: 8, padding: '2px 8px', background: 'var(--accent3)', color: '#fff', borderRadius: 4, fontSize: 10, textTransform: 'uppercase' }}>
             normalized to {normalized_to_incoterm}
@@ -205,15 +205,15 @@ export default function Evolution() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
         <div className="ca-metric">
           <div className="ca-metric-lbl">Latest Should-Cost</div>
-          <div className="ca-metric-val" style={{ color: 'var(--accent)' }}>{sym}{theoretical[theoretical.length - 1]?.toFixed(3)}</div>
+          <div className="ca-metric-val" style={{ color: 'var(--accent)' }}>{fmtMoney(theoretical[theoretical.length - 1], currency)}</div>
         </div>
         <div className="ca-metric">
           <div className="ca-metric-lbl">Gap (Actual - Should-Cost)</div>
           <div className="ca-metric-val" style={{ color: lastActualPeriod?.gap > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
-            {lastActualPeriod ? `${lastActualPeriod.gap > 0 ? '+' : ''}${sym}${lastActualPeriod.gap.toFixed(3)}` : '\u2014'}
+            {lastActualPeriod ? fmtSignedMoney(lastActualPeriod.gap, currency, { scale: lastActualPeriod.theoretical }) : '\u2014'}
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-            {lastActualPeriod ? `${lastActualPeriod.gap_pct?.toFixed(1)}% at ${lastActualPeriod.period}` : ''}
+            {lastActualPeriod?.gap_pct != null ? `${lastActualPeriod.gap_pct > 0 ? '+' : ''}${lastActualPeriod.gap_pct.toFixed(1)}% at ${lastActualPeriod.period}` : ''}
           </div>
         </div>
       </div>
@@ -342,15 +342,15 @@ export default function Evolution() {
             <tbody>
               <tr style={{ background: 'var(--success-bg-soft)' }}>
                 <td>Actual</td>
-                {periods.map((p, i) => <td key={i} className="center" style={{ color: 'var(--accent4)', fontWeight: 500 }}>{p.actual !== null ? `${sym}${p.actual.toFixed(3)}` : '\u2014'}</td>)}
+                {periods.map((p, i) => <td key={i} className="center" style={{ color: 'var(--accent4)', fontWeight: 500 }}>{p.actual !== null ? fmtMoney(p.actual, currency) : '\u2014'}</td>)}
               </tr>
               <tr>
                 <td>Should-Cost</td>
-                {periods.map((p, i) => <td key={i} className="center" style={{ color: 'var(--accent)' }}>{sym}{p.theoretical.toFixed(3)}</td>)}
+                {periods.map((p, i) => <td key={i} className="center" style={{ color: 'var(--accent)' }}>{fmtMoney(p.theoretical, currency)}</td>)}
               </tr>
               <tr>
                 <td>Gap ({sym.trim() || '$'})</td>
-                {periods.map((p, i) => <td key={i} className="center" style={{ color: p.gap > 0 ? 'var(--accent2)' : p.gap < 0 ? 'var(--accent)' : 'var(--muted)' }}>{p.gap !== null ? `${p.gap > 0 ? '+' : ''}${sym}${p.gap.toFixed(3)}` : '\u2014'}</td>)}
+                {periods.map((p, i) => <td key={i} className="center" style={{ color: p.gap > 0 ? 'var(--accent2)' : p.gap < 0 ? 'var(--accent)' : 'var(--muted)' }}>{p.gap !== null ? fmtSignedMoney(p.gap, currency, { scale: p.theoretical }) : '\u2014'}</td>)}
               </tr>
               <tr>
                 <td>Gap (%)</td>
@@ -361,7 +361,7 @@ export default function Evolution() {
                   <td style={{ color: cs.color }}>{cs.label}</td>
                   {cs.values.map((v, j) => (
                     <td key={j} className="center" style={{ fontSize: 11, color: cs.color }}>
-                      {sym}{v.toFixed(3)}
+                      {fmtMoney(v, currency, { scale: periods[j].theoretical })}
                     </td>
                   ))}
                 </tr>
