@@ -5,6 +5,7 @@ import { qLabel, QUARTER_OPTS, currentQuarter, quarterStartDate, quarterKey } fr
 import { useConfirm } from '../components/ConfirmDialog';
 import FileUpload from '../components/FileUpload';
 import PriceChart from '../components/PriceChart';
+import { fmtMoney } from '../utils/currency';
 
 export default function Pricing() {
   const { costModelId } = useParams();
@@ -202,7 +203,6 @@ export default function Pricing() {
       .finally(() => setLoadingAnalysis(false));
   };
 
-  const sym = model?.currency === 'EUR' ? '€' : '$';
   const unitLabel = model?.product_unit || '';  // product unit for price/quantity labels (no hardcoded 'kg')
   const priceUnit = unitLabel ? `${model?.currency || ''}/${unitLabel}`.replace(/^\//, '') : model?.currency || '';
 
@@ -213,7 +213,10 @@ export default function Pricing() {
     if (!vals.length) return 2;
     return Math.max(...vals) < 2 ? 4 : 2;
   }, [mergedRows]);
-  const fmtPrice = v => `${sym}${v.toLocaleString(undefined, { minimumFractionDigits: priceDecimals, maximumFractionDigits: priceDecimals })}`;
+  // Recorded prices keep their cents, on the shared fixed-locale formatter: the
+  // browser locale printed "€2.907,84" in a German browser.
+  const fmtPrice = v => fmtMoney(v, model?.currency, { decimals: priceDecimals });
+  const fmtQty = v => Number(v).toLocaleString('en-US');
 
   const pricedRows = mergedRows.filter(r => r.price != null);
   // What the supplier's price actually did over the analysed span, beside what
@@ -244,7 +247,7 @@ export default function Pricing() {
   const stats = mergedRows.length ? [
     { lbl: 'Periods on record', val: mergedRows.length, sub: `${pricedRows.length} priced · ${mergedRows.length - pricedRows.length} quantity only` },
     { lbl: 'Latest price', val: latest ? fmtPrice(latest.price) : '—', sub: latest ? `${qLabel(latest.year, latest.quarter)}${priceUnit ? ` · per ${unitLabel}` : ''}` : 'no price recorded yet' },
-    { lbl: 'Latest quantity', val: latestVol ? Number(latestVol.volume).toLocaleString() : '—', sub: latestVol ? `${qLabel(latestVol.year, latestVol.quarter)}${latestVol.unit || unitLabel ? ` · ${latestVol.unit || unitLabel}` : ''}` : 'needed for total impact' },
+    { lbl: 'Latest quantity', val: latestVol ? fmtQty(latestVol.volume) : '—', sub: latestVol ? `${qLabel(latestVol.year, latestVol.quarter)}${latestVol.unit || unitLabel ? ` · ${latestVol.unit || unitLabel}` : ''}` : 'needed for total impact' },
     { lbl: 'Complete periods', val: `${bothCount} / ${mergedRows.length}`, sub: bothCount === mergedRows.length ? 'price and quantity on every period' : 'both price and quantity recorded' },
   ] : [];
 
@@ -388,7 +391,7 @@ export default function Pricing() {
                             />
                           ) : (
                             <span style={{ fontWeight: 500 }}>
-                              {row.volume != null ? `${Number(row.volume).toLocaleString()}${(row.unit || unitLabel) ? ` ${row.unit || unitLabel}` : ''}` : '—'}
+                              {row.volume != null ? `${fmtQty(row.volume)}${(row.unit || unitLabel) ? ` ${row.unit || unitLabel}` : ''}` : '—'}
                             </span>
                           )}
                         </td>
