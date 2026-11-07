@@ -815,6 +815,12 @@ button.ix-hbar-row:focus-visible { outline: 2px solid var(--accent); outline-off
   .ix-dh { position: static; }
   .ix-page, .ix-detail-body, .ix-dh-inner, .ix-catalogue-main { padding-left: 16px; padding-right: 16px; }
 }
+/* Phones: header actions drop under the title instead of squeezing it to a
+   column one word (or one letter) wide. */
+@media (max-width: 700px) {
+  .ix-dh-row { flex-wrap: wrap; }
+  .ix-dh-actions { width: 100%; flex-wrap: wrap; padding-top: 0; }
+}
 @media (prefers-reduced-motion: reduce) {
   .ix-card, .ix-hbar-fill, .ix-nav-caret { transition: none; }
   .ix-card:hover { transform: none; }
