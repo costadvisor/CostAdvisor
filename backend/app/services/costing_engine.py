@@ -332,6 +332,19 @@ def _apply_unit(value: float, from_unit: str, to_unit: str | None) -> float:
         return value
 
 
+def quantity_in_product_unit(qty: float, unit: str | None, product_unit: str | None) -> float:
+    """A stored quantity in the unit the product is priced in. Rows written
+    before volumes were stored in the product unit can carry another one (a
+    default "kg" on a EUR/t product: 600,000 kg is 600 t, not 600,000 t). A
+    unit that cannot be converted is read as it is."""
+    if unit and product_unit and unit != product_unit:
+        try:
+            return convert_unit(qty, unit, product_unit)
+        except ValueError:
+            pass
+    return qty
+
+
 def _output_ccy(model_ccy: str, display_ccy: str | None) -> str:
     return display_ccy if display_ccy else model_ccy
 
@@ -712,7 +725,7 @@ def calculate_squeeze(
 
     raw_volumes = {}
     for av in db.query(ActualVolume).filter(ActualVolume.cost_model_id == cost_model.id).all():
-        raw_volumes[(av.year, av.quarter)] = float(av.volume)
+        raw_volumes[(av.year, av.quarter)] = quantity_in_product_unit(float(av.volume), av.unit, model_unit)
 
     period_keys = [(y, q) for y, q, _, _ in periods]
     volume_data = project_volumes(raw_volumes, request.volume_projection, period_keys)
@@ -840,7 +853,7 @@ def calculate_brief(
 
     raw_volumes = {}
     for av in db.query(ActualVolume).filter(ActualVolume.cost_model_id == cost_model.id).all():
-        raw_volumes[(av.year, av.quarter)] = float(av.volume)
+        raw_volumes[(av.year, av.quarter)] = quantity_in_product_unit(float(av.volume), av.unit, model_unit)
 
     evo_periods = []
     last_indexed_cost_raw = None  # pre-margin cost of the final period, for the floor below

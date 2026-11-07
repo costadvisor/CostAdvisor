@@ -376,6 +376,35 @@ def test_brief_names_its_as_of_and_base_quarters(client_as, tenant_a, brief_mode
     assert sum(d["contribution_to_gap"] for d in b["drivers"]) == pytest.approx(11.0)
 
 
+def test_a_legacy_kg_quantity_on_a_tonne_product_counts_in_tonnes(client_as, tenant_a, brief_model, db):
+    """Audit C-01: a row stored in kg before quantities were kept in the
+    product's unit (10,000 kg on a per-tonne product) was read as 10,000 t, a
+    1000x impact. The brief, the squeeze, the summary and the priority matrix
+    read it as 10 t. Summary rows also name the supplier's id (audit C-35)."""
+    product = db.query(Product).filter(Product.id == brief_model.product_id).one()
+    product.unit = "t"
+    av = db.query(ActualVolume).filter(ActualVolume.cost_model_id == brief_model.id).one()
+    av.volume, av.unit = 10000, "kg"
+    db.commit()
+
+    c = client_as(tenant_a)
+    params = {"team_id": str(tenant_a["team_id"])}
+    brief = c.post("/api/costing/brief", json={"cost_model_id": str(brief_model.id)}).json()
+    assert brief["total_impact"] == pytest.approx(390.0)            # 39 x 10 t
+    squeeze = c.post("/api/costing/squeeze", json={"cost_model_id": str(brief_model.id)}).json()
+    cur = next(p for p in squeeze["periods"] if (p["year"], p["quarter"]) == (CUR_Y, CUR_Q))
+    assert cur["volume"] == pytest.approx(10.0)
+    assert cur["impact"] == pytest.approx(390.0)
+
+    row = next(m for m in c.get("/api/portfolio/summary", params=params).json()["models"]
+               if m["cost_model_id"] == str(brief_model.id))
+    assert row["cumulative_impact"] == pytest.approx(390.0)
+    assert row["supplier_id"] == brief_model.supplier_id
+    item = next(i for i in c.get("/api/portfolio/priority-matrix", params=params).json()["items"]
+                if i["cost_model_id"] == str(brief_model.id))
+    assert item["spend_exposure"] == pytest.approx(111.0 * 10)
+
+
 def test_rule_based_narrative_uses_since_and_app_money():
     from app.services.narrative import fmt_money, generate_narrative
 

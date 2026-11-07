@@ -14,7 +14,7 @@ from app.routers.auth import get_current_user
 from app.schemas.costing import EvolutionRequest, DataGap
 from app.services.costing_engine import (
     calculate_should_cost, calculate_evolution, calculate_forward_should_cost,
-    _default_period_range, latest_data_quarter,
+    _default_period_range, latest_data_quarter, quantity_in_product_unit,
 )
 from app.services.data_resolver import get_single_index_value, index_lookup_cache
 from app.services.fx_converter import convert_price
@@ -59,6 +59,8 @@ class PortfolioModelSummary(BaseModel):
     cost_model_id: uuid.UUID
     product_name: str
     product_reference: str | None
+    # The supplier's id, so a page matches rows to suppliers by id, not name.
+    supplier_id: int | None = None
     supplier_name: str | None
     destination_country: str | None
     region: str
@@ -117,17 +119,19 @@ def _portfolio_summary(db: Session, team_id: uuid.UUID, reporting_currency: str)
     latest_price_by_cm: dict[uuid.UUID, tuple[float, int, int]] = {}
     total_volume_by_cm: dict[uuid.UUID, float] = {}
     if cm_ids:
+        product_unit = {cm.id: cm.product.unit for cm in cost_models}
         for cm_id, price, year, quarter in (
             db.query(ActualPrice.cost_model_id, ActualPrice.price, ActualPrice.year, ActualPrice.quarter)
             .filter(ActualPrice.cost_model_id.in_(cm_ids))
             .order_by(ActualPrice.cost_model_id, ActualPrice.year.desc(), ActualPrice.quarter.desc())
         ):
             latest_price_by_cm.setdefault(cm_id, (float(price), year, quarter))
-        for cm_id, volume in (
-            db.query(ActualVolume.cost_model_id, ActualVolume.volume)
+        for cm_id, volume, unit in (
+            db.query(ActualVolume.cost_model_id, ActualVolume.volume, ActualVolume.unit)
             .filter(ActualVolume.cost_model_id.in_(cm_ids))
         ):
-            total_volume_by_cm[cm_id] = total_volume_by_cm.get(cm_id, 0.0) + float(volume)
+            qty = quantity_in_product_unit(float(volume), unit, product_unit[cm_id])
+            total_volume_by_cm[cm_id] = total_volume_by_cm.get(cm_id, 0.0) + qty
 
     summaries = []
     total_exposure = 0.0
@@ -214,6 +218,7 @@ def _portfolio_summary(db: Session, team_id: uuid.UUID, reporting_currency: str)
             cost_model_id=cm.id,
             product_name=cm.product.name,
             product_reference=cm.product.formula,
+            supplier_id=cm.supplier_id,
             supplier_name=cm.supplier.name if cm.supplier else None,
             destination_country=cm.destination_country,
             region=cm.region,
@@ -326,7 +331,8 @@ def _priority_matrix(db: Session, team_id: uuid.UUID, reporting_currency: str) -
             .limit(4)
             .all()
         )
-        trailing_vol = sum(float(v.volume) for v in vols)
+        trailing_vol = sum(quantity_in_product_unit(float(v.volume), v.unit, cm.product.unit)
+                           for v in vols)
         has_volume = trailing_vol > 0
         sc_reporting = current_sc
         if cm.currency != reporting_currency:
