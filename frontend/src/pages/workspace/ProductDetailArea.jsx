@@ -7,6 +7,7 @@ import { PIE_COLORS } from '../../utils/constants';
 import { StackedBar } from './wsCharts';
 import { BuySignalBadge, LockHoldBadge } from '../../components/BuyWindows';
 import NotesPanel from '../../components/NotesPanel';
+import { decimalsFor, fmtMoney, fmtNumber } from '../../utils/currency';
 
 // Scrum 25 — negotiation flag states
 const NEG_STATES = [
@@ -26,9 +27,6 @@ const NEG_STATES = [
 const NOW = new Date();
 const CUR_Y = NOW.getFullYear();
 const CUR_Q = Math.ceil((NOW.getMonth() + 1) / 3);
-
-const curSym = (c) => (c === 'EUR' ? '€' : c === 'USD' ? '$' : c === 'GBP' ? '£' : c ? `${c} ` : '');
-const fmtMoney = (v) => (v == null ? '—' : v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(3));
 
 export default function ProductDetailArea() {
   const { costModelId } = useParams();
@@ -192,10 +190,10 @@ export default function ProductDetailArea() {
     );
   }
 
-  const sym = curSym(cm.currency);
   const unit = cm.product_unit || (sc.status === 'ok' ? sc.unit : '');
   const basePrice = Number(fv.base_price);
   const liveVal = sc.status === 'ok' ? sc.should_cost : null;
+  const money = (v) => fmtMoney(v, cm.currency, { scale: liveVal });
   const deltaPct = liveVal != null && basePrice ? ((liveVal - basePrice) / basePrice) * 100 : null;
 
   // Weight breakdown for the simple-mode formula (component weights + margin remainder).
@@ -254,7 +252,7 @@ export default function ProductDetailArea() {
             <div style={{ color: 'var(--accent2)', fontSize: 13, marginTop: 8 }}>{sc.msg || 'Could not compute should-cost.'}</div>
           ) : (
             <>
-              <div className="ca-result-big">{sym}{fmtMoney(liveVal)}<span style={{ fontSize: 14, color: 'var(--muted)', fontWeight: 400 }}> /{unit}</span></div>
+              <div className="ca-result-big">{fmtMoney(liveVal, cm.currency)}<span style={{ fontSize: 14, color: 'var(--muted)', fontWeight: 400 }}> /{unit}</span></div>
               {deltaPct != null && (
                 <div style={{ marginTop: 4, fontSize: 12, color: deltaPct > 0 ? 'var(--accent2)' : deltaPct < 0 ? 'var(--accent)' : 'var(--muted)' }}>
                   {deltaPct > 0 ? '+' : ''}{deltaPct.toFixed(1)}% since starting point
@@ -274,9 +272,10 @@ export default function ProductDetailArea() {
               ) : null}
               <hr className="ca-sep" />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                <Metric label="Indexed cost" value={`${sym}${fmtMoney(sc.cost_before_margin)}`} color="var(--accent3)" />
-                <Metric label="Margin" value={`${sym}${fmtMoney(sc.margin_amount)}`} color="var(--accent2)" />
-                <Metric label={`Per active ${unit}`} value={sc.per_active_unit != null ? `${sym}${fmtMoney(sc.per_active_unit)}` : '—'} color="var(--accent4)" />
+                {/* At the should-cost's scale, so the split reads like the total. */}
+                <Metric label="Indexed cost" value={money(sc.cost_before_margin)} color="var(--accent3)" />
+                <Metric label="Margin" value={money(sc.margin_amount)} color="var(--accent2)" />
+                <Metric label={`Per active ${unit}`} value={money(sc.per_active_unit)} color="var(--accent4)" />
               </div>
               <button className="ca-btn-link" style={{ fontSize: 11, marginTop: 10 }} onClick={toggleBreakdown}>
                 {showBreakdown ? '▾ Hide breakdown' : '▸ Show breakdown'}
@@ -315,7 +314,7 @@ export default function ProductDetailArea() {
           ) : (
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap' }}>
               <div>
-                <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 26, fontWeight: 700 }}>{sym}{fmtMoney(basePrice)}</div>
+                <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 26, fontWeight: 700 }}>{fmtMoney(basePrice, cm.currency)}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase' }}>Base price{unit ? ` / ${unit}` : ''}</div>
               </div>
               <div>
@@ -331,7 +330,7 @@ export default function ProductDetailArea() {
           card wrapped every component name over four or five lines. */}
       {showBreakdown && sc.status === 'ok' && (
         <div style={{ marginBottom: 16 }}>
-          <ShouldCostBreakdownTable breakdown={breakdown} error={breakdownErr} sym={sym} asOf={`Q${asOf(cm).q} ${asOf(cm).y}`} />
+          <ShouldCostBreakdownTable breakdown={breakdown} error={breakdownErr} currency={cm.currency} asOf={`Q${asOf(cm).q} ${asOf(cm).y}`} />
         </div>
       )}
 
@@ -421,12 +420,15 @@ const SOURCE_LABEL = {
 // Scrum 17 — itemized should-cost: index name, weight, base/current value, ratio,
 // contribution, and source, with a footer that sums to exactly the should-cost shown
 // above (mirrors FormulaDetailModal's resolved-recipe table pattern).
-function ShouldCostBreakdownTable({ breakdown, error, sym, asOf }) {
+function ShouldCostBreakdownTable({ breakdown, error, currency, asOf }) {
   if (error) return <div className="ca-card" style={{ marginTop: 10, color: 'var(--accent2)', fontSize: 12 }}>Error: {error}</div>;
   if (!breakdown) return <div style={{ marginTop: 10, color: 'var(--muted)', fontSize: 12 }}>Loading…</div>;
 
   const mono = { fontFamily: "'JetBrains Mono', monospace" };
-  const fmt = (v) => (v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 3 }));
+  // One fixed-locale money scale for the whole column (the should-cost's), so
+  // the lines visibly add up to the footer. Index levels are plain numbers.
+  const dp = decimalsFor(breakdown.should_cost);
+  const money = (v) => fmtMoney(v, currency, { decimals: dp });
   // The "live" figure is often the latest index month carried to this quarter;
   // say so rather than let "as of Q4 2026" imply fresh data.
   const indexed = breakdown.components.filter(c => c.has_data && c.source);
@@ -474,8 +476,8 @@ function ShouldCostBreakdownTable({ breakdown, error, sym, asOf }) {
                   )}
                 </td>
                 <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{c.weight_pct.toFixed(1)}%</td>
-                <td style={{ ...mono, fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>{fmt(c.base_value)}</td>
-                <td style={{ ...mono, fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>{fmt(c.current_value)}</td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>{fmtNumber(c.base_value)}</td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>{fmtNumber(c.current_value)}</td>
                 <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>
                   {c.has_data ? (
                     <span style={{ color: c.ratio > 1 ? 'var(--accent2)' : c.ratio < 1 ? 'var(--accent)' : 'var(--text-secondary)' }}>
@@ -485,18 +487,18 @@ function ShouldCostBreakdownTable({ breakdown, error, sym, asOf }) {
                     <span title="No index data — line rides flat" style={{ color: 'var(--accent3)' }}>flat</span>
                   )}
                 </td>
-                <td style={{ ...mono, fontSize: 11, textAlign: 'right', fontWeight: 600 }}>{fmt(c.contribution)}</td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right', fontWeight: 600 }}>{money(c.contribution)}</td>
                 <td style={{ fontSize: 10, color: 'var(--muted)' }}>{c.source ? (SOURCE_LABEL[c.source] || c.source) : '—'}</td>
               </tr>
             ))}
             <tr>
               <td colSpan={5} style={{ fontSize: 11, fontWeight: 600, textAlign: 'right', color: 'var(--text-secondary)' }}>Indexed cost (Σ components)</td>
-              <td style={{ ...mono, fontSize: 12, fontWeight: 700, textAlign: 'right' }}>{sym}{fmt(breakdown.cost_before_margin)}</td>
+              <td style={{ ...mono, fontSize: 12, fontWeight: 700, textAlign: 'right' }}>{money(breakdown.cost_before_margin)}</td>
               <td />
             </tr>
             <tr>
               <td colSpan={5} style={{ fontSize: 11, textAlign: 'right', color: 'var(--text-secondary)' }}>+ Margin ({breakdown.margin_type})</td>
-              <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{sym}{fmt(breakdown.margin_amount)}</td>
+              <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{money(breakdown.margin_amount)}</td>
               <td />
             </tr>
             {breakdown.incoterm_adjustment != null && (
@@ -504,13 +506,13 @@ function ShouldCostBreakdownTable({ breakdown, error, sym, asOf }) {
                 <td colSpan={5} style={{ fontSize: 11, textAlign: 'right', color: 'var(--text-secondary)' }}>
                   + Incoterm adjustment{breakdown.normalized_to_incoterm ? ` (→ ${breakdown.normalized_to_incoterm})` : ''}
                 </td>
-                <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{sym}{fmt(breakdown.incoterm_adjustment)}</td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{money(breakdown.incoterm_adjustment)}</td>
                 <td />
               </tr>
             )}
             <tr>
               <td colSpan={5} style={{ fontSize: 12, fontWeight: 700, textAlign: 'right' }}>= Should-cost</td>
-              <td style={{ ...mono, fontSize: 13, fontWeight: 700, textAlign: 'right', color: 'var(--accent)' }}>{sym}{fmt(breakdown.should_cost)}</td>
+              <td style={{ ...mono, fontSize: 13, fontWeight: 700, textAlign: 'right', color: 'var(--accent)' }}>{money(breakdown.should_cost)}</td>
               <td />
             </tr>
           </tbody>
