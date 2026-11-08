@@ -111,6 +111,20 @@ class Settings(BaseSettings):
     # empty = nobody, so the feature is off unless an environment switches it on.
     # Lets the code ride on dev/staging, visible only to the people testing it.
     news_preview_emails: str = ""
+    # Monthly news sweep (SCRUM-214). Off unless an environment switches it on,
+    # so the schedule never spends money somewhere nobody asked it to.
+    news_sweep_enabled: bool = False
+    # A run stops cleanly once it has spent this much (USD). The epic budgets
+    # about $50 a month for news out of $500, so one run gets headroom, not more.
+    news_run_spend_cap_usd: float = 75.0
+    # Web searches Claude may run per profile in a sweep (the test run uses fewer).
+    news_sweep_searches_per_profile: int = 8
+    # Sent with every feed request. SEC EDGAR asks for a contact email in it:
+    # set e.g. "CostAdvisor news (ops@yourdomain)" before adding SEC feeds.
+    news_http_user_agent: str = "CostAdvisor news sweep"
+    # "Run now" normally hands the run to the Celery worker. Where no worker
+    # runs (a laptop, the local demo kit), set this to run it in the API process.
+    news_runs_inline: bool = False
 
     class Config:
         env_file = ".env"

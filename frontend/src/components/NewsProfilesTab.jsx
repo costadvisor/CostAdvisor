@@ -3,6 +3,7 @@ import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { useToast } from './Toast';
 import { useConfirm } from './ConfirmDialog';
+import { RunsView, SourcesView } from './NewsSweepViews';
 
 /**
  * News search profiles (Wave 4, SCRUM-213 / NEWS-1) — a Curation tab.
@@ -604,7 +605,30 @@ function ProfileEditor({ familyId, onBack }) {
 
 /* ── The tab: list of families, or one family's editor ────────────────────── */
 
+const VIEWS = [
+  ['profiles', 'Profiles'],
+  ['runs', 'Runs'],
+  ['sources', 'Sources'],
+];
+
 export default function NewsProfilesTab() {
+  const [view, setView] = useState('profiles');
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+        {VIEWS.map(([k, l]) => (
+          <button key={k} className={`ca-btn ca-btn-sm ${view === k ? 'ca-btn-primary' : 'ca-btn-ghost'}`}
+            onClick={() => setView(k)}>{l}</button>
+        ))}
+      </div>
+      {view === 'profiles' && <ProfilesView />}
+      {view === 'runs' && <RunsView />}
+      {view === 'sources' && <SourcesView />}
+    </>
+  );
+}
+
+function ProfilesView() {
   const [rows, setRows] = useState(null);
   const [err, setErr] = useState(null);
   const [open, setOpen] = useState(null);

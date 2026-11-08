@@ -67,6 +67,7 @@ from app.models.index_refresh import (
 )
 from app.models.live_conversion import ReportLiveConversion
 from app.models.search_profile import SearchProfile
+from app.models.news import NewsFeed, NewsItem, NewsRun
 
 __all__ = [
     "ReportLiveConversion",
@@ -179,4 +180,7 @@ __all__ = [
     "StrategyAction",
     "ContentLoad",
     "SearchProfile",
+    "NewsRun",
+    "NewsItem",
+    "NewsFeed",
 ]

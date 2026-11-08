@@ -27,6 +27,7 @@ imports = (
     "app.tasks.seasonality",
     "app.tasks.refresh_check",
     "app.tasks.staleness_check",
+    "app.tasks.news",
 )
 
 # Beat schedule
@@ -81,5 +82,11 @@ beat_schedule = {
     "check-staleness-daily": {
         "task": "app.tasks.staleness_check.check_staleness",
         "schedule": crontab(hour=7, minute=50),  # Daily 07:50 UTC
+    },
+    # SCRUM-214 — the monthly news sweep. The task itself does nothing unless
+    # NEWS_SWEEP_ENABLED is on, so this entry is safe in every environment.
+    "news-sweep-monthly": {
+        "task": "app.tasks.news.monthly_news_sweep",
+        "schedule": crontab(hour=4, minute=0, day_of_month=1),  # 1st of the month, 04:00 UTC
     },
 }
