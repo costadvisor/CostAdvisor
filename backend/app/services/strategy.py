@@ -86,6 +86,7 @@ from app.services.effective_lines import NONE as NO_LINE
 from app.services.effective_lines import effective_lines
 from app.services.fx_converter import get_fx_rate
 from app.services.intelligence import combo_for_cost_model, derive
+from app.services.live_values import LiveText
 from app.services.unit_converter import convert_unit
 
 # A team's own lifecycle for a category. "Active" is the column default.
@@ -487,7 +488,11 @@ def _pick(override, default):
 
 
 def _authored_row(lever: PlaybookLever, score: LeverScore | None, objectives: list[str],
-                  actions_count: int) -> dict:
+                  actions_count: int, live: LiveText | None = None) -> dict:
+    # Live numbers (Jira 210) in the platform's own text only. A team's notes
+    # are its own writing and stay as typed: filling them here would put the
+    # number, not the token, into the edit box and save it frozen.
+    fill = live.text if live is not None else (lambda t: t)
     s = score
     applies = _pick(s.applies if s else None, lever.default_applies)
     ease = _pick(s.ease if s else None, lever.default_ease)
@@ -500,18 +505,18 @@ def _authored_row(lever: PlaybookLever, score: LeverScore | None, objectives: li
         "gemstone": lever.gemstone_code, "gemstone_name": GEM_NAME.get(lever.gemstone_code,
                                                                         lever.gemstone_code),
         "gemstone_colour": GEM_COLOUR.get(lever.gemstone_code),
-        "title": lever.title, "guidance": lever.guidance,
+        "title": fill(lever.title), "guidance": fill(lever.guidance),
         "applies": applies, "ease": ease, "savings_score": savings,
         "savings_value": float(s.savings_value) if s and s.savings_value is not None else None,
         "status": _pick(s.status if s else None, lever.default_status),
-        "notes": _pick(s.notes if s else None, lever.default_notes),
+        "notes": _pick(s.notes if s else None, fill(lever.default_notes)),
         "objectives": _objective_refs(objectives), "scales": lever.scales,
         "custom": False, "overridden": overridden,
         "plotted": bool(applies and ease and savings),
         "actions_count": actions_count,
         "defaults": {"applies": lever.default_applies, "ease": lever.default_ease,
                      "savings_score": lever.savings_score, "status": lever.default_status,
-                     "notes": lever.default_notes},
+                     "notes": fill(lever.default_notes)},
         "_sort": (GEM_ORDER.get(lever.gemstone_code, 99), 0, lever.sort_order, ""),
     }
 
@@ -564,10 +569,12 @@ def merged_levers(db: Session, team_id: uuid.UUID, slugs) -> dict[str, list[dict
         if cid:
             counts[("c", cid)] += 1
 
+    live = LiveText(db)
+    live.prepare([(lv.title, lv.guidance, lv.default_notes) for lv in levers])
     rows: dict[str, list[dict]] = {slug: [] for slug in slugs}
     for lv in levers:
         rows[lv.playbook_slug].append(_authored_row(
-            lv, scores.get(lv.id), objectives.get(lv.id, []), counts[("a", lv.id)]))
+            lv, scores.get(lv.id), objectives.get(lv.id, []), counts[("a", lv.id)], live))
     for c in customs:
         rows[c.playbook_slug].append(_custom_row(c, counts[("c", c.id)]))
     for slug, items in rows.items():
@@ -938,9 +945,13 @@ def analysis(db: Session, playbook: Playbook) -> dict:
         return out
     panels = db.query(MarketReportPanel).filter(MarketReportPanel.slug == report.slug).order_by(
         MarketReportPanel.ordinal).all()
+    # Live numbers (Jira 210): the same panels the report page serves, filled
+    # the same way — html and the text inside `data` — before they are shaped.
+    live = LiveText(db)
+    live.prepare([(p.html, p.data) for p in panels])
     for p in panels:
-        data = p.data or {}
-        body = {"heading": p.heading, "html": p.html}
+        data = live.json(p.data, doc_as_of=report.as_of) or {}
+        body = {"heading": p.heading, "html": live.html(p.html, doc_as_of=report.as_of)}
         if p.panel == "pestel":
             body.update(columns=data.get("columns") or [], cards=data.get("rows") or [])
         elif p.panel == "porter":

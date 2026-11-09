@@ -77,6 +77,7 @@ from app.services.catalog_visibility import (
     status_badge,
 )
 from app.services.content_drop.reader import DROP_REGION_BY_APP, REGION_MAP
+from app.services.live_values import LiveText
 
 # What a row says where its line key is not a current line (design §2.2).
 UNPUBLISHED_LINE = "Product line not yet published"
@@ -1115,6 +1116,15 @@ def get_report(db: Session, slug: str) -> dict | None:
         MarketReportPanel.html, MarketReportPanel.data,
     ).where(MarketReportPanel.slug == slug).order_by(MarketReportPanel.ordinal)).all()
 
+    # Live numbers (Jira 210): tokens in the stored text are filled in now, at
+    # read time, dated against the report's own month when they fall back.
+    live = LiveText(db)
+    live.prepare([s.html for s in sections], [(p.html, p.data) for p in panels])
+    sections = [{**s._mapping, "html": live.html(s.html, doc_as_of=rep["as_of"])}
+                for s in sections]
+    panels = [{**p._mapping, "html": live.html(p.html, doc_as_of=rep["as_of"]),
+               "data": live.json(p.data, doc_as_of=rep["as_of"])} for p in panels]
+
     lines = []
     for r in snap.report_lines.get(slug, []):
         ln = snap.lines.get(r["product_line_id"]) if r["product_line_id"] is not None else None
@@ -1133,8 +1143,8 @@ def get_report(db: Session, slug: str) -> dict | None:
         "word_count": rep["word_count"],
         "lines": lines,
         "caveat": caveat_for(snap, slug),
-        "sections": [dict(s._mapping) for s in sections],
-        "panels": [dict(p._mapping) for p in panels],
+        "sections": sections,
+        "panels": panels,
         "kraljic": report.kraljic if report else None,
         "playbook": ({"slug": slug, "name": snap.playbooks[slug]}
                      if slug in snap.playbooks else None),

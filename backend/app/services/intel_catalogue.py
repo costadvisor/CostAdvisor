@@ -83,6 +83,7 @@ from app.services.content_drop.sanitize import (
     strip_private,
 )
 from app.services.drop.common import REGION_MAP
+from app.services.live_values import LiveText
 
 # The templates the content loader writes (`content_drop.catalogue.SOURCES`;
 # not imported from there, so the API does not load the loader and its
@@ -806,17 +807,25 @@ def _blocks(db: Session, subject_type: str, codes: list[str],
     q = (db.query(EditorialBlock.subject_code, EditorialBlock.block_type, EditorialBlock.region,
                   EditorialBlock.provenance, EditorialBlock.expires_at, EditorialBlock.is_stale,
                   EditorialBlockVersion.body_format, EditorialBlockVersion.body_text,
-                  EditorialBlockVersion.body_json)
+                  EditorialBlockVersion.body_json, EditorialBlockVersion.created_at)
          .join(EditorialBlockVersion, EditorialBlockVersion.id == EditorialBlock.current_version_id)
          .filter(EditorialBlock.team_id.is_(None), EditorialBlock.subject_type == subject_type,
                  EditorialBlock.subject_code.in_(codes),
                  EditorialBlock.block_type.in_(block_types)))
+    rows = q.all()
+    # Live numbers (Jira 210): the served form fills its tokens; the editorial
+    # API keeps serving the raw text, so an editor still sees the tokens. A
+    # fallback is dated with the version it was written in.
+    live = LiveText(db)
+    live.prepare([(r.body_json, r.body_text) for r in rows])
     out: dict[str, dict[str, dict]] = defaultdict(dict)
-    for code, btype, region, prov, expires, stale, fmt, body_text, body_json in q:
+    for code, btype, region, prov, expires, stale, fmt, body_text, body_json, written in rows:
         if region is not None and btype in out[code]:
             continue  # the wildcard (region NULL) row wins
+        written_on = written.date() if written else None
         out[code][btype] = {
-            "body": body_json if fmt == "json" else body_text,
+            "body": (live.json(body_json, doc_as_of=written_on) if fmt == "json"
+                     else live.text(body_text, doc_as_of=written_on)),
             "provenance": prov, "expires_at": expires, "is_stale": bool(stale),
         }
     return out
