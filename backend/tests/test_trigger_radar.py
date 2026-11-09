@@ -288,6 +288,33 @@ def test_one_series_move_opens_exactly_one_window_across_many_products(db, tenan
                  code_ids=[c.id for c in codes], series_ids=[series.id])
 
 
+def test_two_lines_on_one_moving_series_attach_the_product_once(db, tenant_a):
+    """A product with two lines on the same series is one exposed product.
+
+    Found by hand (6 Nov 2026): a test product with lines of 12% and 3% on one
+    index made `POST /api/radar/run` fail with a 500 — the product was attached
+    to the window twice and hit `uq_window_cost_model`.
+    """
+    series = _series(db, "twolines", levels=[
+        (PREV_Y, PREV_Q, 100), (CUR_Y, CUR_Q, 130),      # +30%
+    ])
+    code = _code(db, series)
+    cm = _cost_model(db, tenant_a, series_weights=[(series, 0.12), (series, 0.03)])
+    try:
+        run_radar(db, tenant_a["team_id"], today=TODAY)       # used to raise
+        win = (
+            db.query(NegotiationWindow)
+            .filter(NegotiationWindow.team_id == tenant_a["team_id"],
+                    NegotiationWindow.driver == "index_move",
+                    NegotiationWindow.scope_commodity_id == series.id)
+            .one()
+        )
+        [link] = [p for p in win.products if p.cost_model_id == cm.id]
+        assert float(link.exposure_pct) == pytest.approx(15.0)
+    finally:
+        _cleanup(db, cost_model_ids=[cm.id], code_ids=[code.id], series_ids=[series.id])
+
+
 def test_a_move_below_the_threshold_opens_nothing(db, tenant_a):
     series = _series(db, "calm", levels=[
         (PREV_Y, PREV_Q, 100), (CUR_Y, CUR_Q, 102),      # +2%, under the 10% default

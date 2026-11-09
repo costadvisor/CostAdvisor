@@ -384,7 +384,21 @@ def _upsert_window(
             NegotiationWindowCostModel.window_id == win.id
         ).delete(synchronize_session=False)
 
+    # A product can reach one driver through several lines (two lines on the
+    # same index, or two type codes resolving to one series). It is still one
+    # exposed product: one row, its exposures added. Two rows broke the
+    # (window, cost model) unique constraint and failed the whole run.
+    merged: dict[uuid.UUID, list] = {}
     for cm_id, exposure, via_proxy in cost_models:
+        if cm_id not in merged:
+            merged[cm_id] = [exposure, via_proxy]
+            continue
+        prev = merged[cm_id]
+        if exposure is not None:
+            prev[0] = exposure if prev[0] is None else round(prev[0] + exposure, 2)
+        if prev[1] != via_proxy:
+            prev[1] = None      # the lines disagree, so it is unknown
+    for cm_id, (exposure, via_proxy) in merged.items():
         db.add(NegotiationWindowCostModel(
             team_id=run.team_id, window_id=win.id, cost_model_id=cm_id,
             exposure_pct=exposure, via_proxy=via_proxy,
