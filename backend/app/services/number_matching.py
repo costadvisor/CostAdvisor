@@ -41,11 +41,8 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from app.models.formula_template import FormulaTemplate, FormulaTemplateComponent
 from app.models.index_data import CommodityIndex
-from app.models.index_layer import TypeCode
-from app.models.market_report import MarketReportLine
-from app.services.live_resolver import resolve
+from app.services.live_resolver import report_recipe_weights, resolve
 from app.services.live_tokens import MISSING, parse_token
 from app.services.number_inventory import (
     COST_BAR, DATE, PCT_MOVE, PERCENT, PRICE, NumberItem,
@@ -107,22 +104,8 @@ def _typed_month(text: str) -> tuple[int, int] | None:
 
 
 def _recipe_weights(db: Session) -> tuple[dict, dict]:
-    """Per report: {type code: [weights]} and {line name: [weights]} over the
-    platform recipes of the report's own product lines."""
-    by_code: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    by_name: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    rows = (db.query(MarketReportLine.slug, TypeCode.code, FormulaTemplateComponent.name,
-                     FormulaTemplateComponent.weight_pct)
-            .join(FormulaTemplate, (FormulaTemplate.product_line_id == MarketReportLine.product_line_id)
-                  & FormulaTemplate.team_id.is_(None))
-            .join(FormulaTemplateComponent, FormulaTemplateComponent.template_id == FormulaTemplate.id)
-            .outerjoin(TypeCode, TypeCode.id == FormulaTemplateComponent.type_code_id)
-            .distinct())
-    for slug, code, name, weight in rows:
-        if code:
-            by_code[slug][code].append(float(weight))
-        by_name[slug][name.lower()].append(float(weight))
-    return by_code, by_name
+    """The same per-report recipe weights the live bar reads (one rule)."""
+    return report_recipe_weights(db)
 
 
 def _range_text(lo: float, hi: float) -> str:

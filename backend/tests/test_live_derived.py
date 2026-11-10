@@ -52,6 +52,7 @@ def test_the_record_lists_series_recipe_lines_and_tokens():
     assert derived_from(tokens) == {
         "series": ["brent", "ttf-eu"],
         "recipe_lines": [{"code": "ABR-X", "region": "Europe", "line": "Grain"}],
+        "bars": [],
         "tokens": sorted(["{{index:ttf-eu|last}}", "{{index:brent|asof}}", "{{index:brent|last}}",
                           "{{recipe:ABR-X|Europe|Grain|weight}}"]),
     }
@@ -77,7 +78,7 @@ def test_a_block_version_records_what_it_reads(db):
                          body_text="Gas at {{index:ttf-eu|last}}.", body_json=None,
                          body_format="text", provenance="imported", author=None)
     try:
-        assert block.derived_from == {"series": ["ttf-eu"], "recipe_lines": [],
+        assert block.derived_from == {"series": ["ttf-eu"], "recipe_lines": [], "bars": [],
                                       "tokens": ["{{index:ttf-eu|last}}"]}
     finally:
         db.rollback()

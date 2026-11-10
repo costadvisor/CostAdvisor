@@ -3,7 +3,7 @@
 // built from API data never meets one. This is the last line of defence: an
 // export must hold plain values, never a token — so a raw one becomes its
 // fallback (or "n/a"), and the console says which export let it through.
-const LIVE_TOKEN = /\{\{(?:index|recipe):([^{}]*)\}\}/g;
+const LIVE_TOKEN = /\{\{(?:index|recipe|bar):([^{}]*)\}\}/g;
 
 export function plainValue(s) {
   if (!s.includes('{{')) return s;

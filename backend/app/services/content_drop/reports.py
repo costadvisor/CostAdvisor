@@ -98,6 +98,7 @@ from sqlalchemy.orm import Session
 from app.models.market_report import (
     SECTION_IDS, MarketReport, MarketReportLine, MarketReportPanel, MarketReportSection,
 )
+from app.services.live_conversions import apply_parsed
 from app.services.live_values import derived_from, scan_html, scan_text
 from app.models.product_line import ProductLine
 from app.services.drop.reader import DropNotAvailable
@@ -499,6 +500,10 @@ def _load_reports(db: Session, report: LoadReport) -> set[str]:
         except rs.ReportRejected as exc:
             diff.skipped.append((slug, f"REJECTED, not loaded — {exc}"))
             continue
+        # LIVE-4: approved conversions of typed numbers into live tokens are
+        # kept apart and applied on every load — a reload would undo them
+        # otherwise. What no longer fits the text is reported, not forced.
+        check.skipped += [(slug, note) for note in apply_parsed(db, slug, p.sections, p.panels)]
         parsed[slug] = p
         _upsert(db, diff, current, slug, p.fields, lambda f, s=slug: MarketReport(slug=s, **f))
         if p.notes:

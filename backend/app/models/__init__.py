@@ -65,8 +65,10 @@ from app.models.content_load import ContentLoad
 from app.models.index_refresh import (
     IndexRefreshAttempt, IndexRefreshRun, IndexRefreshState,
 )
+from app.models.live_conversion import ReportLiveConversion
 
 __all__ = [
+    "ReportLiveConversion",
     "IndexRefreshAttempt",
     "IndexRefreshRun",
     "IndexRefreshState",

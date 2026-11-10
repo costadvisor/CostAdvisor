@@ -16,7 +16,9 @@ the text never calls a value current that the rest of the app calls late.
 A series with only forecast values shows a forecast point, marked as one.
 
 Recipe tokens read a platform recipe line's weight (`weight_pct`). A weight
-is a fact of the recipe, not of a month, so it carries no date.
+is a fact of the recipe, not of a month, so it carries no date. Bar tokens
+(LIVE-4) read the min–max weight of one input across the recipes of the
+report's product lines (`report_recipe_weights`).
 
 Anything that cannot be answered — unknown series, removed series, no value a
 year back, unknown recipe line — is `missing` with a reason, and the display
@@ -24,6 +26,7 @@ falls back to the token's own fallback text.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date
 from typing import Iterable
 
@@ -31,9 +34,10 @@ from sqlalchemy.orm import Session
 
 from app.models.formula_template import FormulaTemplate, FormulaTemplateComponent
 from app.models.index_data import CommodityIndex
-from app.models.index_layer import IndexMonthlyValue
+from app.models.index_layer import IndexMonthlyValue, TypeCode
+from app.models.market_report import MarketReportLine
 from app.services.live_tokens import (
-    ASOF, CHANGE_12M, CURRENT, FORECAST, INDEX, LATE, MISSING, RECIPE, Resolved, Token,
+    ASOF, BAR, CHANGE_12M, CURRENT, FORECAST, INDEX, LATE, MISSING, RECIPE, Resolved, Token,
 )
 from app.services.series_health import CURRENT as HEALTH_CURRENT
 from app.services.series_health import FORECAST_ONLY, STALE, series_health_bulk
@@ -130,6 +134,44 @@ def _resolve_recipe(db: Session, tokens: list[Token]) -> dict[Token, Resolved]:
     return out
 
 
+def report_recipe_weights(db: Session, slugs: Iterable[str] | None = None) -> tuple[dict, dict]:
+    """Per report: {type code: [weights]} and {line name (lower case): [weights]}
+    over the platform recipes of the report's own product lines.
+
+    PROPOSED (LIVE-4, decision 2 — Laurent to confirm): a cost-structure
+    bar's range is the min–max weight of its input across these recipes."""
+    by_code: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    by_name: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    q = (db.query(MarketReportLine.slug, TypeCode.code, FormulaTemplateComponent.name,
+                  FormulaTemplateComponent.weight_pct, FormulaTemplateComponent.id)
+         .join(FormulaTemplate, (FormulaTemplate.product_line_id == MarketReportLine.product_line_id)
+               & FormulaTemplate.team_id.is_(None))
+         .join(FormulaTemplateComponent, FormulaTemplateComponent.template_id == FormulaTemplate.id)
+         .outerjoin(TypeCode, TypeCode.id == FormulaTemplateComponent.type_code_id)
+         .distinct())
+    if slugs is not None:
+        q = q.filter(MarketReportLine.slug.in_(list(slugs)))
+    for slug, code, name, weight, _id in q:
+        if code:
+            by_code[slug][code].append(float(weight))
+        by_name[slug][name.lower()].append(float(weight))
+    return by_code, by_name
+
+
+def _resolve_bar(db: Session, tokens: list[Token]) -> dict[Token, Resolved]:
+    by_code, by_name = report_recipe_weights(db, {t.report for t in tokens})
+    out: dict[Token, Resolved] = {}
+    for t in tokens:
+        weights = (by_code.get(t.report, {}).get(t.code) if t.code
+                   else by_name.get(t.report, {}).get(t.line.lower()))
+        if not weights:
+            what = f"code {t.code}" if t.code else f"line {t.line!r}"
+            out[t] = Resolved(MISSING, reason=f"no recipe line with {what} for report {t.report}")
+        else:
+            out[t] = Resolved(CURRENT, value=max(weights), low=min(weights))
+    return out
+
+
 def resolve(db: Session, tokens: Iterable[Token], *, as_of: date | None = None) -> dict[Token, Resolved]:
     """Every token answered: a value with its month and state, or `missing`."""
     as_of = as_of or date.today()
@@ -137,9 +179,12 @@ def resolve(db: Session, tokens: Iterable[Token], *, as_of: date | None = None) 
     out: dict[Token, Resolved] = {}
     index = [t for t in tokens if t.kind == INDEX]
     recipe = [t for t in tokens if t.kind == RECIPE]
+    bars = [t for t in tokens if t.kind == BAR]
     if index:
         out.update(_resolve_index(db, index, as_of))
     if recipe:
         out.update(_resolve_recipe(db, recipe))
+    if bars:
+        out.update(_resolve_bar(db, bars))
     return out
 

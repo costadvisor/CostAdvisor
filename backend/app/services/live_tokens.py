@@ -10,6 +10,9 @@ resolved value into the words a reader sees.
     {{index:KEY|change12m}}                 % change of the latest actual vs 12 months before
     {{index:KEY|asof}}                      month of the latest actual
     {{recipe:CODE|REGION|LINE|weight}}      weight of one line of a platform recipe
+    {{bar:REPORT|code=TYPECODE}}            a cost-structure bar (LIVE-4): the min–max
+    {{bar:REPORT|line=LINE NAME}}           weight of that input across the platform
+                                            recipes of the report's product lines
     ...|fallback=TEXT                       optional, last: shown when there is no data
 
 `KEY` is the series key (`commodity_index.commodity_key`, e.g. `brent`).
@@ -37,11 +40,13 @@ from datetime import date
 
 INDEX = "index"
 RECIPE = "recipe"
+BAR = "bar"
 
 LAST = "last"
 CHANGE_12M = "change12m"
 ASOF = "asof"
 WEIGHT = "weight"
+RANGE = "range"
 
 INDEX_MEASURES = (LAST, CHANGE_12M, ASOF)
 RECIPE_MEASURES = (WEIGHT,)
@@ -56,13 +61,14 @@ NOT_AVAILABLE = "n/a (no current data)"
 
 # A complete token. The body cannot hold braces, so a token never spans
 # another one and a fallback cannot smuggle a token in.
-TOKEN_RE = re.compile(r"\{\{(index|recipe):([^{}]*)\}\}")
+TOKEN_RE = re.compile(r"\{\{(index|recipe|bar):([^{}]*)\}\}")
 # The start of a token — what is left in text after every complete token is
 # replaced means a broken one (unclosed, or split by markup).
-OPENER_RE = re.compile(r"\{\{\s*(?:index|recipe)\s*:")
+OPENER_RE = re.compile(r"\{\{\s*(?:index|recipe|bar)\s*:")
 
 _KEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _CODE_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _FALLBACK = "fallback="
 
 
@@ -83,7 +89,8 @@ class Token:
     key: str | None = None          # index: the series key
     code: str | None = None         # recipe: the template code
     region: str | None = None       # recipe: the line's region
-    line: str | None = None         # recipe: the line's name
+    line: str | None = None         # recipe / bar: the line's name
+    report: str | None = None       # bar: the report slug
     fallback: str | None = None
 
 
@@ -94,6 +101,7 @@ class Resolved:
     year: int | None = None         # the month the value is from
     month: int | None = None
     reason: str | None = None       # why missing (for logs and tests)
+    low: float | None = None        # bar: the low end of the range (`value` is the high end)
     index_level: bool = False       # a rebased index (e.g. Jan 2023 = 100), not a price
 
 
@@ -137,6 +145,20 @@ def parse_token(raw: str) -> Token:
             raise TokenError(raw, f"unknown measure {measure!r}; one of {', '.join(INDEX_MEASURES)}")
         return Token(raw=raw, kind=kind, measure=measure, key=key, fallback=fallback)
 
+    if kind == BAR:
+        if len(parts) != 2:
+            raise TokenError(raw, "a bar token is {{bar:REPORT|code=TYPECODE}} or {{bar:REPORT|line=NAME}}")
+        report, selector = parts
+        if not _SLUG_RE.match(report):
+            raise TokenError(raw, f"bad report slug {report!r}")
+        name, _, value = selector.partition("=")
+        value = value.strip()
+        if name.strip() == "code" and _CODE_RE.match(value):
+            return Token(raw=raw, kind=kind, measure=RANGE, report=report, code=value, fallback=fallback)
+        if name.strip() == "line" and value:
+            return Token(raw=raw, kind=kind, measure=RANGE, report=report, line=value, fallback=fallback)
+        raise TokenError(raw, "a bar names its input as code=TYPECODE or line=NAME")
+
     if len(parts) != 4:
         raise TokenError(raw, "a recipe token is {{recipe:CODE|REGION|LINE|weight}}")
     code, region, line, measure = parts
@@ -170,6 +192,13 @@ def _percent(value: float) -> str:
     return f"{text}%"
 
 
+def range_text(low: float, high: float) -> str:
+    """A cost bar's weight as the reports write it: "30–49%", or "12%"."""
+    if round(low) == round(high):
+        return f"{round(high):g}%"
+    return f"{round(low):g}–{round(high):g}%"
+
+
 def missing_text(fallback: str | None, doc_as_of: date | None) -> str:
     """What a reader sees when there is no data: the author's fallback, dated
     with the text's own date (the fallback is as old as the text), or n/a."""
@@ -187,6 +216,8 @@ def format_display(token: Token, resolved: Resolved, *, doc_as_of: date | None =
 
     if token.measure == WEIGHT:
         return _percent(resolved.value)
+    if token.measure == RANGE:
+        return range_text(resolved.low if resolved.low is not None else resolved.value, resolved.value)
 
     if resolved.year is None or resolved.month is None:
         return missing_text(token.fallback, doc_as_of)

@@ -47,8 +47,8 @@ from app.services.content_drop.report_sanitize import (
 )
 from app.services.live_resolver import resolve
 from app.services.live_tokens import (
-    ASOF, CURRENT, MISSING, NOT_AVAILABLE, OPENER_RE, TOKEN_RE, Resolved, Token, TokenError,
-    fallback_of, format_display, missing_text, parse_token,
+    ASOF, BAR, CURRENT, MISSING, NOT_AVAILABLE, OPENER_RE, RECIPE, TOKEN_RE, Resolved, Token,
+    TokenError, fallback_of, format_display, missing_text, parse_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -121,8 +121,11 @@ def derived_from(tokens: Iterable[Token]) -> dict | None:
     return {
         "series": sorted({t.key for t in tokens if t.key}),
         "recipe_lines": sorted(
-            ({"code": t.code, "region": t.region, "line": t.line} for t in tokens if t.code),
+            ({"code": t.code, "region": t.region, "line": t.line} for t in tokens if t.kind == RECIPE),
             key=lambda r: (r["code"], r["region"], r["line"])),
+        "bars": sorted(
+            ({"report": t.report, "code": t.code, "line": t.line} for t in tokens if t.kind == BAR),
+            key=lambda r: (r["report"], r["code"] or "", r["line"] or "")),
         "tokens": sorted({t.raw for t in tokens}),
     }
 
@@ -187,26 +190,55 @@ class LiveText:
     def _display(self, raw: str, doc_as_of: date | None) -> str:
         return self._render(raw, doc_as_of)[0]
 
-    def _pieces(self, soup, s: str, doc_as_of: date | None) -> tuple[list, bool]:
+    def _pieces(self, soup, s: str, doc_as_of: date | None) -> tuple[list, bool, Resolved | None]:
         """One text node's replacement in HTML: its text with every token as a
         chip (S6) — `<span class="live-value">`, plus `live-late`,
-        `live-forecast` or `live-missing` — and whether a token is left open."""
+        `live-forecast` or `live-missing` — whether a token is left open, and
+        the range of a cost-bar token in it (LIVE-4), so its bar can be redrawn.
+        A bar's own weight is already styled: a current one stays plain text."""
         out: list = []
         pos = 0
+        bar_range: Resolved | None = None
         for m in TOKEN_RE.finditer(s):
             before, _ = self._fill(s[pos:m.start()], doc_as_of)
             if before:
                 out.append(NavigableString(before))
-            display, state = self._render(m.group(0), doc_as_of)
-            chip = soup.new_tag("span")
-            chip["class"] = ["live-value"] + ([f"live-{state}"] if state != CURRENT else [])
-            chip.string = display
-            out.append(chip)
+            raw = m.group(0)
+            display, state = self._render(raw, doc_as_of)
+            token = self._tokens.get(raw)
+            if isinstance(token, Token) and token.kind == BAR and state == CURRENT:
+                out.append(NavigableString(display))
+                bar_range = self._resolved.get(token)
+            else:
+                chip = soup.new_tag("span")
+                chip["class"] = ["live-value"] + ([f"live-{state}"] if state != CURRENT else [])
+                chip.string = display
+                out.append(chip)
             pos = m.end()
         after, open_ = self._fill(s[pos:], doc_as_of)
         if after:
             out.append(NavigableString(after))
-        return out or [NavigableString("")], open_
+        return out or [NavigableString("")], open_, bar_range
+
+    @staticmethod
+    def _redraw_bar(soup, bar, low: float, high: float) -> None:
+        """A cost bar's fills drawn from its range, as the reports draw them:
+        `lo` is as wide as the low end, `hi` stacks the gap up to the high end
+        (and is left out when the range is one number)."""
+        lo = bar.find(class_="lo")
+        if lo is None:
+            return
+        lo["style"] = f"width:{round(low):g}%"
+        hi = bar.find(class_="hi")
+        gap = round(high) - round(low)
+        if gap > 0:
+            if hi is None:
+                hi = soup.new_tag("div")
+                hi["class"] = ["fill", "hi"]
+                lo.insert_after(hi)
+            hi["style"] = f"width:{gap:g}%"
+        elif hi is not None:
+            hi.decompose()
 
     def _fill(self, s: str, doc_as_of: date | None) -> tuple[str, bool]:
         """`s` with complete tokens filled in; and whether a token opener is
@@ -259,8 +291,11 @@ class LiveText:
                     continue
                 new, in_broken = new[end + 2:], False
             if "{{" in new:
-                pieces, in_broken = self._pieces(soup, new, doc_as_of)
+                bar = node.find_parent(class_="cost-bar")
+                pieces, in_broken, bar_range = self._pieces(soup, new, doc_as_of)
                 node.replace_with(*pieces)
+                if bar is not None and bar_range is not None:
+                    self._redraw_bar(soup, bar, bar_range.low, bar_range.value)
             elif new != s:
                 node.replace_with(NavigableString(new))
         out = serialize(soup.contents)
