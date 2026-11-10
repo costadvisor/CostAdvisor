@@ -79,6 +79,7 @@ from app.services.content_drop.reader import (
     make_line_key, playbook_files, read_json, report_manifest,
 )
 from app.services.content_drop.taxonomy import _diff, _rest, _sync_children, _upsert
+from app.services.live_values import derived_from, scan_text
 
 # The category keys that have a column (or are deliberately not loaded).
 # Anything else a file's category carries goes into `playbooks.meta`.
@@ -146,6 +147,12 @@ def lever_fields(slug: str, pos: int, opp: dict, diff: TableDiff) -> dict | None
         diff.skipped.append((code, f"savings_value {opp['savings_value']!r} is team data "
                                    "(lever_scores); the platform lever has no column"))
 
+    # Jira 210: live-number tokens in the lever's text; a broken one is
+    # reported and shows its fallback.
+    tokens, problems = scan_text(opp["title"], opp.get("guidance"), opp.get("notes"))
+    for problem in problems:
+        diff.skipped.append((code, f"live token {problem}; its fallback is shown"))
+
     return {
         "playbook_slug": slug,
         "gemstone_code": gemstone,
@@ -158,6 +165,7 @@ def lever_fields(slug: str, pos: int, opp: dict, diff: TableDiff) -> dict | None
         "default_notes": opp.get("notes"),
         "scales": scales,
         "sort_order": pos,
+        "derived_from": derived_from(tokens),
     }
 
 

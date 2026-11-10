@@ -88,6 +88,8 @@ class MarketReportSection(Base):
     html: Mapped[str] = mapped_column(Text, nullable=False)
     word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     src_block_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Jira 210: the series / recipe lines its live-number tokens read (NULL: none).
+    derived_from: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     report = relationship("MarketReport", back_populates="sections")
 
@@ -125,5 +127,7 @@ class MarketReportPanel(Base):
     html: Mapped[str] = mapped_column(Text, nullable=False)
     # Structured reading where one exists (e.g. the Kraljic position).
     data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Jira 210: the series / recipe lines its live-number tokens read (NULL: none).
+    derived_from: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     report = relationship("MarketReport", back_populates="panels")

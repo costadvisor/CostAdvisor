@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../components/Toast';
 import SheetRoundTripPanel from '../components/SheetRoundTripPanel';
+import LiveNumberPicker from '../components/LiveNumberPicker';
 import exportCsv from '../utils/exportCsv';
 
 /**
@@ -338,6 +339,17 @@ function EditorialQueue({ teamId }) {
   const [open, setOpen] = useState(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const draftRef = useRef(null);
+
+  // Jira 210: put a live-number token where the cursor is (or replace the
+  // selection). The text keeps the token; readers see it filled in.
+  const insertToken = (token) => {
+    const ta = draftRef.current;
+    const start = ta ? ta.selectionStart : draft.length;
+    const end = ta ? ta.selectionEnd : start;
+    setDraft(d => d.slice(0, start) + token + d.slice(end));
+  };
 
   const load = useCallback(() => {
     if (!teamId) return;
@@ -500,8 +512,18 @@ function EditorialQueue({ teamId }) {
               background: 'var(--surface2)', padding: 10, borderRadius: 6,
             }}>{JSON.stringify(open.body_json, null, 2)}</pre>
           ) : (
-            <textarea className="ca-input" rows={6} style={{ marginTop: 10, fontSize: 12 }}
-              value={draft} onChange={e => setDraft(e.target.value)} />
+            <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                <button className="ca-btn ca-btn-sm ca-btn-ghost" onClick={() => setPicking(true)}
+                  title="Insert a number from our data that updates by itself, e.g. the latest gas price">
+                  Insert live number
+                </button>
+              </div>
+              <textarea ref={draftRef} className="ca-input" rows={6} style={{ marginTop: 6, fontSize: 12 }}
+                value={draft} onChange={e => setDraft(e.target.value)} />
+              <LiveNumberPicker isOpen={picking} onClose={() => setPicking(false)}
+                onInsert={insertToken} teamId={teamId} />
+            </>
           )}
 
           {open.internal_note && (

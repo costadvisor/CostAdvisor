@@ -22,7 +22,7 @@ lives here only: changing it later means changing this module.
 
 Display (`format_display`):
 
-    current    129.9 · Jun 2026
+    current    129.9 · Jun 2026      (`last` on a rebased index: 129.9 (index) · Jun 2026)
     late       129.9 · Jun 2026 (late)
     forecast   131.2 · Dec 2026 (forecast)
     missing    the fallback + " (as of Aug 2026)" (the text's own date), or
@@ -94,6 +94,7 @@ class Resolved:
     year: int | None = None         # the month the value is from
     month: int | None = None
     reason: str | None = None       # why missing (for logs and tests)
+    index_level: bool = False       # a rebased index (e.g. Jan 2023 = 100), not a price
 
 
 def find_tokens(text: str) -> list[str]:
@@ -196,4 +197,7 @@ def format_display(token: Token, resolved: Resolved, *, doc_as_of: date | None =
         return f"{when}{mark}"
     if token.measure == CHANGE_12M:
         return f"{resolved.value:+.1f}% · {when}{mark}"
-    return f"{_number(resolved.value)} · {when}{mark}"
+    # A rebased index level is not a price: say so, so "129.9" is never read
+    # as $/t. (97 of the 99 content series are levels, Jan 2023 = 100.)
+    level = " (index)" if resolved.index_level else ""
+    return f"{_number(resolved.value)}{level} · {when}{mark}"

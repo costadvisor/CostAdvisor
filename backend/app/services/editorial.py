@@ -38,6 +38,7 @@ from app.models.formula_template import FormulaTemplate
 from app.models.index_data import CommodityIndex
 from app.models.product_line import ProductLine
 from app.models.user import User
+from app.services.live_values import derived_from, scan_text
 
 
 # ── Subject resolution ───────────────────────────────────────────────────────
@@ -227,6 +228,10 @@ def add_version(
     block.current_version_id = version.id
     block.body_format = body_format
     block.provenance = provenance
+    # Jira 210: which series / recipe lines the new text's live numbers read,
+    # recorded with every version (editor save and content load alike).
+    block.derived_from = derived_from(
+        scan_text(body_json if body_format == "json" else body_text)[0])
     if provenance != PROVENANCE_HUMAN_APPROVED:
         block.approved_by = None
         block.approved_at = None

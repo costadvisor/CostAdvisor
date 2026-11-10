@@ -23,6 +23,12 @@ AS_OF = date(2026, 8, 3)
 DOC = date(2026, 8, 1)
 
 
+def chip(text, state=None):
+    """A live value as it appears in report HTML (S6)."""
+    cls = "live-value" + (f" live-{state}" if state else "")
+    return f'<span class="{cls}">{text}</span>'
+
+
 def _two(db, made):
     a = _series(db, made, [(2025, 6, 100, "actual"), (2026, 6, 129.9, "actual")])
     b = _series(db, made, [(2026, 6, 41.25, "actual")])
@@ -45,10 +51,10 @@ def test_every_token_in_a_section_is_filled_and_markup_is_kept(db, made):
     out = live.html(html, doc_as_of=DOC)
     assert out == (
         "<h2>Cost drivers</h2>"
-        "<p>Crude stood at <strong>129.9 · Jun 2026</strong>, up "
-        "<em>+29.9% · Jun 2026</em> on the year.</p>"
-        "<ul><li>Gas: 41.25 · Jun 2026</li><li>Data as of Jun 2026</li></ul>"
-        '<table><tbody><tr><td colspan="2">41.25 · Jun 2026</td></tr></tbody></table>'
+        f"<p>Crude stood at <strong>{chip('129.9 · Jun 2026')}</strong>, up "
+        f"<em>{chip('+29.9% · Jun 2026')}</em> on the year.</p>"
+        f"<ul><li>Gas: {chip('41.25 · Jun 2026')}</li><li>Data as of {chip('Jun 2026')}</li></ul>"
+        f'<table><tbody><tr><td colspan="2">{chip("41.25 · Jun 2026")}</td></tr></tbody></table>'
     )
     assert "{{" not in out
     assert len(live.used) == 4 and live.problems == []
@@ -67,14 +73,14 @@ def test_a_token_split_by_markup_never_reaches_the_reader(db, made):
 def test_an_unreadable_token_shows_its_fallback_with_the_text_date(db, made):
     live = LiveText(db, as_of=AS_OF)
     out = live.html("<p>{{index:Bad Key|last|fallback=about 130}}</p>", doc_as_of=DOC)
-    assert out == "<p>about 130 (as of Aug 2026)</p>"
+    assert out == f"<p>{chip('about 130 (as of Aug 2026)', 'missing')}</p>"
     assert live.problems and "bad series key" in live.problems[0]
 
 
 def test_a_missing_series_shows_the_fallback_dated_with_the_text(db, made):
     live = LiveText(db, as_of=AS_OF)
     out = live.html("<p>{{index:no-such-series|last|fallback=~€400/t}}</p>", doc_as_of=DOC)
-    assert out == "<p>~€400/t (as of Aug 2026)</p>"
+    assert out == f"<p>{chip('~€400/t (as of Aug 2026)', 'missing')}</p>"
     assert live.used == set()
 
 
@@ -84,7 +90,7 @@ def test_what_the_resolver_writes_is_escaped(db, made):
     live = LiveText(db, as_of=AS_OF)
     out = live.html('<p>{{index:no-such-series|last|fallback=&lt;b onclick="x"&gt;40&lt;/b&gt;}}</p>',
                     doc_as_of=None)
-    assert out == '<p>&lt;b onclick="x"&gt;40&lt;/b&gt;</p>'
+    assert out == f"<p>{chip('&lt;b onclick=\"x\"&gt;40&lt;/b&gt;', 'missing')}</p>"
     assert sanitize_html(out) == out
 
 

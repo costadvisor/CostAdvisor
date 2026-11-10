@@ -248,3 +248,14 @@
 @media (max-width: 700px) {
   .ixr-paper { border-radius: 0; }
 }
+
+/* ── Live numbers (Jira 210) ──────────────────────────────────────────────
+ * Not from the template: the server writes these chips into a section at read
+ * time, in place of a `{{index:…}}` token (backend/app/services/live_values.py;
+ * the sanitiser allows them as LIVE_CLASSES). A value from our data reads as a
+ * quiet teal chip; late is amber, a forecast is muted and italic, and a missing
+ * value (the author's fallback) is dashed so it never passes for live data. */
+.report-wrap .live-value{display:inline-block;padding:0 .35em;border-radius:3px;background:var(--teal-light);color:var(--navy);font-weight:600;font-variant-numeric:tabular-nums;line-height:1.5;white-space:nowrap}
+.report-wrap .live-value.live-late{background:var(--amber-light);color:#8a4b0f}
+.report-wrap .live-value.live-forecast{background:var(--bg);color:#4a5568;font-style:italic}
+.report-wrap .live-value.live-missing{background:transparent;color:#4a5568;font-weight:500;border:1px dashed var(--border);white-space:normal}

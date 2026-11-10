@@ -181,6 +181,8 @@ class PlaybookLever(Base):
     savings_score: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     default_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     default_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Jira 210: the series / recipe lines its live-number tokens read (NULL: none).
+    derived_from: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Buyer scales the lever suits: ["large", "mid", "small"].
     scales: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

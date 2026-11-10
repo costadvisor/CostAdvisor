@@ -94,6 +94,7 @@ def test_lever_fields_store_what_is_authored_and_refuse_what_the_checks_would():
         "default_applies": opp["applies"], "default_ease": opp["ease"],
         "savings_score": opp["savings_score"], "default_status": opp["status"],
         "default_notes": opp["notes"], "scales": opp["scales"], "sort_order": 0,
+        "derived_from": None,       # Jira 210: no live-number token in this lever
     }
     assert diff.skipped == []
 

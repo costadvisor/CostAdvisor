@@ -49,10 +49,10 @@ def _year_month(index: int) -> tuple[int, int]:
 
 def _resolve_index(db: Session, tokens: list[Token], as_of: date) -> dict[Token, Resolved]:
     keys = {t.key for t in tokens}
-    ids = dict(
-        db.query(CommodityIndex.commodity_key, CommodityIndex.id)
-        .filter(CommodityIndex.commodity_key.in_(keys)).all()
-    )
+    series = (db.query(CommodityIndex.commodity_key, CommodityIndex.id, CommodityIndex.value_kind)
+              .filter(CommodityIndex.commodity_key.in_(keys)).all())
+    ids = {key: cid for key, cid, _ in series}
+    levels = {cid for _, cid, kind in series if kind == "index_level"}
     health = {h.commodity_id: h for h in series_health_bulk(
         db, as_of=as_of, commodity_ids=list(ids.values()))} if ids else {}
 
@@ -79,14 +79,14 @@ def _resolve_index(db: Session, tokens: list[Token], as_of: date) -> dict[Token,
         if h is not None and h.state in (HEALTH_CURRENT, STALE) and actuals:
             status = CURRENT if h.state == HEALTH_CURRENT else LATE
             latest = max(actuals)
-            series = actuals
+            values = actuals
         elif forecasts and (h is None or h.state == FORECAST_ONLY):
             # Only forecasts: the forecast for this month, else the nearest one.
             status = FORECAST
             now = _month_index(as_of.year, as_of.month)
             earlier = [m for m in forecasts if m <= now]
             latest = max(earlier) if earlier else min(forecasts)
-            series = forecasts
+            values = forecasts
         else:
             out[t] = Resolved(MISSING, reason=f"series {t.key!r} has no values")
             continue
@@ -95,14 +95,15 @@ def _resolve_index(db: Session, tokens: list[Token], as_of: date) -> dict[Token,
         if t.measure == ASOF:
             out[t] = Resolved(status, year=year, month=month)
         elif t.measure == CHANGE_12M:
-            before = series.get(latest - 12)
+            before = values.get(latest - 12)
             if not before:
                 out[t] = Resolved(MISSING, reason=f"series {t.key!r} has no value 12 months earlier")
             else:
-                out[t] = Resolved(status, value=(series[latest] / before - 1) * 100,
+                out[t] = Resolved(status, value=(values[latest] / before - 1) * 100,
                                   year=year, month=month)
         else:
-            out[t] = Resolved(status, value=series[latest], year=year, month=month)
+            out[t] = Resolved(status, value=values[latest], year=year, month=month,
+                              index_level=cid in levels)
     return out
 
 

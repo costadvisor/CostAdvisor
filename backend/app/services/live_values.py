@@ -13,7 +13,10 @@ string back with its tokens filled in:
 **HTML is changed only in its text.** The stored HTML is parsed with the
 report sanitiser's own parser, tokens are replaced inside text nodes only, and
 the tree is written back with the sanitiser's serialiser, which escapes the
-new text. Markup — paragraphs, bold, lists, tables, the Kraljic SVG — is never
+new text. In HTML each value is a chip (S6): `<span class="live-value">`,
+with `live-late`, `live-forecast` or `live-missing` added when it is not
+current — classes the sanitiser allows as server-written (`LIVE_CLASSES`).
+Plain text and JSON get the bare text ("(late)", "(forecast)" included). Markup — paragraphs, bold, lists, tables, the Kraljic SVG — is never
 touched, and a fallback containing `<` arrives as text, not markup. The result
 goes through `sanitize_html` again: cheap insurance that nothing the resolver
 wrote can reach the page as markup.
@@ -44,8 +47,8 @@ from app.services.content_drop.report_sanitize import (
 )
 from app.services.live_resolver import resolve
 from app.services.live_tokens import (
-    NOT_AVAILABLE, OPENER_RE, TOKEN_RE, Resolved, Token, TokenError, fallback_of,
-    format_display, missing_text, parse_token,
+    ASOF, CURRENT, MISSING, NOT_AVAILABLE, OPENER_RE, TOKEN_RE, Resolved, Token, TokenError,
+    fallback_of, format_display, missing_text, parse_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,6 +64,67 @@ def _strings(value: Any) -> Iterable[str]:
     elif isinstance(value, (list, tuple)):
         for v in value:
             yield from _strings(v)
+
+
+# ── What a text depends on (S5) ──────────────────────────────────────────────
+#
+# Read when text is written (content load, block save), with no database: a
+# text depends on the tokens it carries, whether or not they resolve today.
+
+def _scan_string(s: str, tokens: list[Token], problems: list[str]) -> None:
+    if "{{" not in s:
+        return
+    for m in TOKEN_RE.finditer(s):
+        try:
+            tokens.append(parse_token(m.group(0)))
+        except TokenError as e:
+            problems.append(f"{e.raw} ({e.why})")
+    rest = TOKEN_RE.sub("", s)
+    m = OPENER_RE.search(rest)
+    if m:
+        problems.append(f"broken token (unclosed or split by markup): {rest[m.start():m.start() + 60]!r}")
+
+
+def scan_text(*values: Any) -> tuple[list[Token], list[str]]:
+    """Tokens and broken tokens in plain text, or in every string of JSON."""
+    tokens: list[Token] = []
+    problems: list[str] = []
+    for s in (s for v in values for s in _strings(v)):
+        _scan_string(s, tokens, problems)
+    return tokens, problems
+
+
+def scan_html(*htmls: str | None) -> tuple[list[Token], list[str]]:
+    """Tokens and broken tokens in HTML, read text node by text node — the
+    same way they are filled in, so a token split by markup is broken here too."""
+    tokens: list[Token] = []
+    problems: list[str] = []
+    for html in htmls:
+        if not html or "{{" not in html:
+            continue
+        for node in parse(html).find_all(string=True):
+            if not isinstance(node, Comment) and type(node) is NavigableString:
+                _scan_string(str(node), tokens, problems)
+    return tokens, problems
+
+
+def derived_from(tokens: Iterable[Token]) -> dict | None:
+    """The `derived_from` record of a text: the series and recipe lines it
+    reads, and its tokens as written. None for a text with no token.
+
+    Same JSONB home as CON-5's staleness descriptor and the trust review's
+    `review_derived_from`; LIVE-5 reads `series` to flag text whose data moved.
+    """
+    tokens = list(tokens)
+    if not tokens:
+        return None
+    return {
+        "series": sorted({t.key for t in tokens if t.key}),
+        "recipe_lines": sorted(
+            ({"code": t.code, "region": t.region, "line": t.line} for t in tokens if t.code),
+            key=lambda r: (r["code"], r["region"], r["line"])),
+        "tokens": sorted({t.raw for t in tokens}),
+    }
 
 
 class LiveText:
@@ -93,17 +157,56 @@ class LiveText:
         if fresh:
             self._resolved.update(resolve(self.db, fresh, as_of=self.as_of))
 
-    def _display(self, raw: str, doc_as_of: date | None) -> str:
+    def _render(self, raw: str, doc_as_of: date | None) -> tuple[str, str]:
+        """(display text, state) for one complete token."""
         if raw not in self._tokens:
             self.prepare(raw)
         token = self._tokens[raw]
         if isinstance(token, TokenError):
             self.problems.append(f"{raw} ({token.why})")
-            return missing_text(fallback_of(raw), doc_as_of)
-        resolved = self._resolved.get(token) or Resolved("missing", reason="not resolved")
-        if resolved.status != "missing":
+            return missing_text(fallback_of(raw), doc_as_of), MISSING
+        resolved = self._resolved.get(token) or Resolved(MISSING, reason="not resolved")
+        if resolved.status != MISSING:
             self.used.add(raw)
-        return format_display(token, resolved, doc_as_of=doc_as_of)
+        state = resolved.status if resolved.value is not None or token.measure == ASOF else MISSING
+        return format_display(token, resolved, doc_as_of=doc_as_of), state
+
+    def preview(self, raw: str, *, doc_as_of: date | None = None) -> dict:
+        """What one token would show, for the editor's picker (S7): the text,
+        its state, and why it cannot be read when it cannot."""
+        raw = raw.strip()
+        try:
+            token = parse_token(raw)
+        except TokenError as e:
+            return {"token": raw, "valid": False, "error": e.why, "state": MISSING,
+                    "display": missing_text(fallback_of(raw), doc_as_of), "derived_from": None}
+        display, state = self._render(raw, doc_as_of)
+        return {"token": raw, "valid": True, "error": None, "state": state, "display": display,
+                "derived_from": derived_from([token])}
+
+    def _display(self, raw: str, doc_as_of: date | None) -> str:
+        return self._render(raw, doc_as_of)[0]
+
+    def _pieces(self, soup, s: str, doc_as_of: date | None) -> tuple[list, bool]:
+        """One text node's replacement in HTML: its text with every token as a
+        chip (S6) — `<span class="live-value">`, plus `live-late`,
+        `live-forecast` or `live-missing` — and whether a token is left open."""
+        out: list = []
+        pos = 0
+        for m in TOKEN_RE.finditer(s):
+            before, _ = self._fill(s[pos:m.start()], doc_as_of)
+            if before:
+                out.append(NavigableString(before))
+            display, state = self._render(m.group(0), doc_as_of)
+            chip = soup.new_tag("span")
+            chip["class"] = ["live-value"] + ([f"live-{state}"] if state != CURRENT else [])
+            chip.string = display
+            out.append(chip)
+            pos = m.end()
+        after, open_ = self._fill(s[pos:], doc_as_of)
+        if after:
+            out.append(NavigableString(after))
+        return out or [NavigableString("")], open_
 
     def _fill(self, s: str, doc_as_of: date | None) -> tuple[str, bool]:
         """`s` with complete tokens filled in; and whether a token opener is
@@ -156,8 +259,9 @@ class LiveText:
                     continue
                 new, in_broken = new[end + 2:], False
             if "{{" in new:
-                new, in_broken = self._fill(new, doc_as_of)
-            if new != s:
+                pieces, in_broken = self._pieces(soup, new, doc_as_of)
+                node.replace_with(*pieces)
+            elif new != s:
                 node.replace_with(NavigableString(new))
         out = serialize(soup.contents)
         try:

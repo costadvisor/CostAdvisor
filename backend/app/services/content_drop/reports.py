@@ -98,6 +98,7 @@ from sqlalchemy.orm import Session
 from app.models.market_report import (
     SECTION_IDS, MarketReport, MarketReportLine, MarketReportPanel, MarketReportSection,
 )
+from app.services.live_values import derived_from, scan_html, scan_text
 from app.models.product_line import ProductLine
 from app.services.drop.reader import DropNotAvailable
 from app.services.drop.report import LoadReport
@@ -366,6 +367,17 @@ def parse_report(entry: dict, source: str, *, in_v1_scope: bool,
                 kraljic = {k: v for k, v in data.items() if k != "narrative"}
         panels[panel] = {"ordinal": PANEL_ORDINAL[panel], "heading": heading,
                          "html": rs.serialize(nodes).strip(), "data": data}
+
+    # Jira 210: which series / recipe lines each part's live-number tokens
+    # read. A broken token is a note, not a rejection: the reader shows its
+    # fallback, and one bad number should not withdraw a whole report.
+    for kind, parts in (("section", sections), ("panel", panels)):
+        for name, f in parts.items():
+            tokens, problems = scan_html(f["html"])
+            data_tokens, data_problems = scan_text(f.get("data"))
+            f["derived_from"] = derived_from(tokens + data_tokens)
+            notes += [f"{kind} {name}: live token {p}; its fallback is shown"
+                      for p in problems + data_problems]
 
     as_of = _as_of(soup)
     if as_of is None:

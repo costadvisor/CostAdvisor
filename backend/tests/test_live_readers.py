@@ -75,8 +75,9 @@ def _get(client, slug):
 def test_acceptance_1_a_live_number_shows_the_value_and_its_month(report, tenant_a, client_as):
     body = _get(client_as(tenant_a), report["slug"])
     summary = body["sections"][0]["html"]
-    assert summary == ("<h2>Summary</h2><p>Crude stood at <strong>129.9 · Jun 2026</strong>, "
-                       "+29.9% · Jun 2026 on the year.</p>")
+    assert summary == ("<h2>Summary</h2><p>Crude stood at <strong>"
+                       '<span class="live-value">129.9 · Jun 2026</span></strong>, '
+                       '<span class="live-value">+29.9% · Jun 2026</span> on the year.</p>')
     assert "{{" not in str(body)
 
 
@@ -98,7 +99,7 @@ def test_acceptance_3_a_removed_series_shows_the_fallback_with_as_of(db, made, r
     db.commit()
     summary = _get(client_as(tenant_a), report["slug"])["sections"][0]["html"]
     assert "about 130 (as of Aug 2026)" in summary
-    assert "n/a (no current data) on the year" in summary      # no fallback given there
+    assert '<span class="live-value live-missing">n/a (no current data)</span> on the year' in summary
     assert "{{" not in summary
 
 
@@ -109,7 +110,7 @@ def test_a_section_without_tokens_is_served_exactly_as_stored(report, tenant_a, 
 
 def test_panel_html_and_data_are_filled_on_the_report_page(report, tenant_a, client_as):
     panel = _get(client_as(tenant_a), report["slug"])["panels"][0]
-    assert panel["html"] == "<p>Energy 129.9 · Jun 2026</p>"
+    assert panel["html"] == '<p>Energy <span class="live-value">129.9 · Jun 2026</span></p>'
     assert panel["data"]["cards"][0]["text"] == "up +29.9% · Jun 2026"
 
 
@@ -119,7 +120,7 @@ def test_the_strategy_tab_serves_the_same_filled_panels(db, report):
     playbook = Playbook(slug=report["slug"], name="Live test", report_slug=report["slug"])
     out = analysis(db, playbook)
     drivers = out["panels"]["market_drivers"]
-    assert drivers["html"] == "<p>Energy 129.9 · Jun 2026</p>"
+    assert drivers["html"] == '<p>Energy <span class="live-value">129.9 · Jun 2026</span></p>'
     assert drivers["cards"][0]["text"] == "up +29.9% · Jun 2026"
 
 

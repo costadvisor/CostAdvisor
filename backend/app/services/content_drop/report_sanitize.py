@@ -88,6 +88,11 @@ ALLOWED_CLASSES = frozenset({
     "tag-integrated", "tag-producer", "track", "value", "warning", "weight",
 })
 
+# Not measured: the classes the server itself writes into a report at read
+# time — the live-number chip (Jira 210, `live_values`). Kept apart so the
+# measured list above stays exactly what the delivered reports use.
+LIVE_CLASSES = frozenset({"live-value", "live-late", "live-forecast", "live-missing"})
+
 ALLOWED_CSS_PROPERTIES = frozenset({
     "background", "border", "color", "font-family", "font-size", "font-style",
     "font-weight", "grid-template-columns", "letter-spacing", "margin",
@@ -176,7 +181,7 @@ def _check_attribute(tag: Tag, name: str, value, out: list[str]) -> None:
         return
     if name == "class":
         for cls in classes_of(tag):
-            if cls not in ALLOWED_CLASSES:
+            if cls not in ALLOWED_CLASSES and cls not in LIVE_CLASSES:
                 out.append(f"class {cls!r} on {where}")
         return
     if name == "style":
