@@ -90,6 +90,11 @@ class MarketReportSection(Base):
     src_block_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Jira 210: the series / recipe lines its live-number tokens read (NULL: none).
     derived_from: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # LIVE-5: the data this text was written against, and why it is out of date.
+    baseline: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    stale_reasons: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    stale_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     report = relationship("MarketReport", back_populates="sections")
 
@@ -129,5 +134,10 @@ class MarketReportPanel(Base):
     data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Jira 210: the series / recipe lines its live-number tokens read (NULL: none).
     derived_from: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # LIVE-5: the data this text was written against, and why it is out of date.
+    baseline: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    stale_reasons: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    stale_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     report = relationship("MarketReport", back_populates="panels")

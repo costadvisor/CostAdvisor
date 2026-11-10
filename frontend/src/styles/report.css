@@ -259,3 +259,8 @@
 .report-wrap .live-value.live-late{background:var(--amber-light);color:#8a4b0f}
 .report-wrap .live-value.live-forecast{background:var(--bg);color:#4a5568;font-style:italic}
 .report-wrap .live-value.live-missing{background:transparent;color:#4a5568;font-weight:500;border:1px dashed var(--border);white-space:normal}
+
+/* ── Stale note (LIVE-5) ──────────────────────────────────────────────────
+ * One calm line above a section whose text may be out of date (the server
+ * decides; backend/app/services/staleness.py). Amber like the late chip. */
+.report-wrap .live-stale-note{margin:1.5rem 0 -1rem;padding:.5rem .8rem;border-left:3px solid var(--amber);background:var(--amber-light);color:#8a4b0f;font-size:.82rem;border-radius:0 4px 4px 0}

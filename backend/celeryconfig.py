@@ -26,6 +26,7 @@ imports = (
     "app.tasks.radar",
     "app.tasks.seasonality",
     "app.tasks.refresh_check",
+    "app.tasks.staleness_check",
 )
 
 # Beat schedule
@@ -74,5 +75,11 @@ beat_schedule = {
     "check-refresh-health-daily": {
         "task": "app.tasks.refresh_check.check_refresh_health",
         "schedule": crontab(hour=8, minute=15),  # Daily 08:15 UTC
+    },
+    # LIVE-5 — mark text that is out of date. After the radar, which reads the
+    # same series.
+    "check-staleness-daily": {
+        "task": "app.tasks.staleness_check.check_staleness",
+        "schedule": crontab(hour=7, minute=50),  # Daily 07:50 UTC
     },
 }

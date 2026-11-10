@@ -84,6 +84,7 @@ from app.services.content_drop.sanitize import (
 )
 from app.services.drop.common import REGION_MAP
 from app.services.live_values import LiveText
+from app.services.staleness import reader_note
 
 # The templates the content loader writes (`content_drop.catalogue.SOURCES`;
 # not imported from there, so the API does not load the loader and its
@@ -807,7 +808,8 @@ def _blocks(db: Session, subject_type: str, codes: list[str],
     q = (db.query(EditorialBlock.subject_code, EditorialBlock.block_type, EditorialBlock.region,
                   EditorialBlock.provenance, EditorialBlock.expires_at, EditorialBlock.is_stale,
                   EditorialBlockVersion.body_format, EditorialBlockVersion.body_text,
-                  EditorialBlockVersion.body_json, EditorialBlockVersion.created_at)
+                  EditorialBlockVersion.body_json, EditorialBlockVersion.created_at,
+                  EditorialBlock.stale_reasons)
          .join(EditorialBlockVersion, EditorialBlockVersion.id == EditorialBlock.current_version_id)
          .filter(EditorialBlock.team_id.is_(None), EditorialBlock.subject_type == subject_type,
                  EditorialBlock.subject_code.in_(codes),
@@ -819,7 +821,7 @@ def _blocks(db: Session, subject_type: str, codes: list[str],
     live = LiveText(db)
     live.prepare([(r.body_json, r.body_text) for r in rows])
     out: dict[str, dict[str, dict]] = defaultdict(dict)
-    for code, btype, region, prov, expires, stale, fmt, body_text, body_json, written in rows:
+    for code, btype, region, prov, expires, stale, fmt, body_text, body_json, written, reasons in rows:
         if region is not None and btype in out[code]:
             continue  # the wildcard (region NULL) row wins
         written_on = written.date() if written else None
@@ -827,6 +829,7 @@ def _blocks(db: Session, subject_type: str, codes: list[str],
             "body": (live.json(body_json, doc_as_of=written_on) if fmt == "json"
                      else live.text(body_text, doc_as_of=written_on)),
             "provenance": prov, "expires_at": expires, "is_stale": bool(stale),
+            "stale_note": reader_note(reasons),          # LIVE-5
         }
     return out
 
@@ -1316,7 +1319,7 @@ def product_market(db: Session, cat: Catalogue, code: str, region: str | None = 
     if ce and isinstance(ce.get("body"), str) and ce["body"].strip():
         outlook = {"text": clean_current_events(ce["body"]), "format": "markdown", "region": None,
                    "expires_at": ce["expires_at"], "is_stale": ce["is_stale"],
-                   "provenance": ce["provenance"]}
+                   "stale_note": ce["stale_note"], "provenance": ce["provenance"]}
     drivers = (blocks.get("macro_drivers") or {}).get("body")
 
     status, label = _review(combo)

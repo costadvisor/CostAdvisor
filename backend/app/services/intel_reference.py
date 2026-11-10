@@ -78,6 +78,7 @@ from app.services.catalog_visibility import (
 )
 from app.services.content_drop.reader import DROP_REGION_BY_APP, REGION_MAP
 from app.services.live_values import LiveText
+from app.services.staleness import reader_note
 
 # What a row says where its line key is not a current line (design §2.2).
 UNPUBLISHED_LINE = "Product line not yet published"
@@ -1109,21 +1110,23 @@ def get_report(db: Session, slug: str) -> dict | None:
     report = db.get(MarketReport, slug)
     sections = db.execute(select(
         MarketReportSection.section_id, MarketReportSection.ordinal, MarketReportSection.heading,
-        MarketReportSection.html, MarketReportSection.word_count,
+        MarketReportSection.html, MarketReportSection.word_count, MarketReportSection.stale_reasons,
     ).where(MarketReportSection.slug == slug).order_by(MarketReportSection.ordinal)).all()
     panels = db.execute(select(
         MarketReportPanel.panel, MarketReportPanel.ordinal, MarketReportPanel.heading,
-        MarketReportPanel.html, MarketReportPanel.data,
+        MarketReportPanel.html, MarketReportPanel.data, MarketReportPanel.stale_reasons,
     ).where(MarketReportPanel.slug == slug).order_by(MarketReportPanel.ordinal)).all()
 
     # Live numbers (Jira 210): tokens in the stored text are filled in now, at
     # read time, dated against the report's own month when they fall back.
     live = LiveText(db)
     live.prepare([s.html for s in sections], [(p.html, p.data) for p in panels])
-    sections = [{**s._mapping, "html": live.html(s.html, doc_as_of=rep["as_of"])}
-                for s in sections]
+    # Stale flags (LIVE-5): readers get one calm sentence, never the reasons.
+    sections = [{**s._mapping, "html": live.html(s.html, doc_as_of=rep["as_of"]),
+                 "stale_note": reader_note(s.stale_reasons)} for s in sections]
     panels = [{**p._mapping, "html": live.html(p.html, doc_as_of=rep["as_of"]),
-               "data": live.json(p.data, doc_as_of=rep["as_of"])} for p in panels]
+               "data": live.json(p.data, doc_as_of=rep["as_of"]),
+               "stale_note": reader_note(p.stale_reasons)} for p in panels]
 
     lines = []
     for r in snap.report_lines.get(slug, []):

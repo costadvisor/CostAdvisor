@@ -162,11 +162,15 @@ export function MarketOutlook({ data }) {
       title="Outlook"
       actions={(
         <>
-          {o.is_stale && <StatusBadge status="Stale" tone="warn" />}
+          {o.is_stale && (
+            // LIVE-5: the badge now says why, for whoever hovers it.
+            <span title={o.stale_note || undefined}><StatusBadge status="Stale" tone="warn" /></span>
+          )}
           <span className="ix-panel-caption">{caption}</span>
         </>
       )}
     >
+      {o.stale_note && <div className="ix-callout warn" role="note" style={{ marginBottom: 10 }}>{o.stale_note}</div>}
       <div className="ix-prose ixd-outlook">
         {paras.map((p, i) => <p key={i}>{renderInline(p)}</p>)}
       </div>

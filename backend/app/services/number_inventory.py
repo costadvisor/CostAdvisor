@@ -73,6 +73,7 @@ class NumberItem:
     context: str                    # its sentence (for a cost bar: "label · weight")
     series_ids: frozenset[int] = frozenset()   # content series the sentence names
     extra: dict = field(default_factory=dict)  # cost bar: label, code, lo, hi; date: as_of_cue
+    ref: str | None = None          # block: its id (regional variants share doc)
 
 
 def _bar_range(weight: str) -> tuple[float | None, float | None]:
@@ -163,14 +164,14 @@ def inventory(db: Session, *, include_blocks: bool = True) -> list[NumberItem]:
     ):
         items += scan_report_section(slug, section_id, html, matcher, vocab)
     if include_blocks:
-        for code, btype, fmt, body_text, body_json in (
-            db.query(EditorialBlock.subject_code, EditorialBlock.block_type,
+        for block_id, code, btype, fmt, body_text, body_json in (
+            db.query(EditorialBlock.id, EditorialBlock.subject_code, EditorialBlock.block_type,
                      EditorialBlockVersion.body_format, EditorialBlockVersion.body_text,
                      EditorialBlockVersion.body_json)
             .join(EditorialBlockVersion, EditorialBlockVersion.id == EditorialBlock.current_version_id)
             .filter(EditorialBlock.team_id.is_(None))
         ):
-            base = {"source": "block", "doc": f"{code}/{btype}", "part": "body"}
+            base = {"source": "block", "doc": f"{code}/{btype}", "part": "body", "ref": str(block_id)}
             for s in _strings(body_json if fmt == "json" else body_text):
                 for sentence in _sentences(s):
                     items += _classify(sentence, base, matcher, vocab)

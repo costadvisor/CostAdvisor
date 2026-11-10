@@ -244,6 +244,7 @@ class ReportSection(BaseModel):
     heading: str | None = None
     html: str
     word_count: int | None = None
+    stale_note: str | None = None   # LIVE-5: why this may be out of date, for readers
 
 
 class ReportPanel(BaseModel):
@@ -252,6 +253,7 @@ class ReportPanel(BaseModel):
     heading: str | None = None
     html: str
     data: dict[str, Any] | None = None
+    stale_note: str | None = None   # LIVE-5
 
 
 class ReportOut(BaseModel):

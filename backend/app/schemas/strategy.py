@@ -416,6 +416,7 @@ class LeverOut(BaseModel):
     gemstone_colour: str | None = None
     title: str
     guidance: str | None = None
+    stale_note: str | None = None   # LIVE-5: why this lever's text may be out of date
     applies: bool | None = None
     ease: int | None = None
     savings_score: int | None = None

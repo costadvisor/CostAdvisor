@@ -5,6 +5,7 @@ import { useAuth } from '../AuthContext';
 import { useToast } from '../components/Toast';
 import SheetRoundTripPanel from '../components/SheetRoundTripPanel';
 import LiveNumberPicker from '../components/LiveNumberPicker';
+import StaleQueue from '../components/StaleQueue';
 import exportCsv from '../utils/exportCsv';
 
 /**
@@ -59,6 +60,7 @@ const TABS = [
   { key: 'trust', label: 'Trust review' },
   { key: 'editorial', label: 'Editorial approvals' },
   { key: 'dimensions', label: 'Dimension decisions' },
+  { key: 'stale', label: 'Stale content' },
 ];
 
 function Badge({ map, value, badge }) {
@@ -700,6 +702,7 @@ export default function Curation() {
       {tab === 'trust' && <TrustQueue teamId={activeTeamId} />}
       {tab === 'editorial' && <EditorialQueue teamId={activeTeamId} />}
       {tab === 'dimensions' && <DimensionQueue teamId={activeTeamId} />}
+      {tab === 'stale' && <StaleQueue />}
     </div>
   );
 }

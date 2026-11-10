@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react';
 import EmptyState from '../EmptyState';
 import { asOfLabel, sectionDomId } from './reportUtil';
 import '../../../styles/report.css';
@@ -188,8 +188,12 @@ export default function ReportView({ report, lead, toc = true, only, header = tr
             )}
             <div className="container">
               {sections.map((s) => (
-                <section key={s.section_id} id={sectionDomId(slug, s.section_id)}
-                  dangerouslySetInnerHTML={{ __html: s.html }} />
+                // Key on the Fragment: the stale note (LIVE-5) sits above its section.
+                <Fragment key={s.section_id}>
+                  {s.stale_note && <p className="live-stale-note" role="note">{s.stale_note}</p>}
+                  <section id={sectionDomId(slug, s.section_id)}
+                    dangerouslySetInnerHTML={{ __html: s.html }} />
+                </Fragment>
               ))}
             </div>
             {footer && (

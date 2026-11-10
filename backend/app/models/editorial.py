@@ -188,6 +188,11 @@ class EditorialBlock(Base):
     # CON-5's staleness recompute job reads these; nothing writes them yet.
     derived_from: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     is_stale: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # LIVE-5: the data this block was written against, and why it is out of date
+    # (`is_stale` above is the quick filter; the daily check writes all three).
+    baseline: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    stale_reasons: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    stale_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Several `supplierNote` values are author-to-self backlog text that would
     # render verbatim to a customer (13 of 423 carry a marker like "not publicly
     # disclosed" / "check" / "revisit"). This is where that goes instead.

@@ -87,6 +87,7 @@ from app.services.effective_lines import effective_lines
 from app.services.fx_converter import get_fx_rate
 from app.services.intelligence import combo_for_cost_model, derive
 from app.services.live_values import LiveText
+from app.services.staleness import reader_note
 from app.services.unit_converter import convert_unit
 
 # A team's own lifecycle for a category. "Active" is the column default.
@@ -506,6 +507,7 @@ def _authored_row(lever: PlaybookLever, score: LeverScore | None, objectives: li
                                                                         lever.gemstone_code),
         "gemstone_colour": GEM_COLOUR.get(lever.gemstone_code),
         "title": fill(lever.title), "guidance": fill(lever.guidance),
+        "stale_note": reader_note(lever.stale_reasons),
         "applies": applies, "ease": ease, "savings_score": savings,
         "savings_value": float(s.savings_value) if s and s.savings_value is not None else None,
         "status": _pick(s.status if s else None, lever.default_status),
@@ -951,7 +953,8 @@ def analysis(db: Session, playbook: Playbook) -> dict:
     live.prepare([(p.html, p.data) for p in panels])
     for p in panels:
         data = live.json(p.data, doc_as_of=report.as_of) or {}
-        body = {"heading": p.heading, "html": live.html(p.html, doc_as_of=report.as_of)}
+        body = {"heading": p.heading, "html": live.html(p.html, doc_as_of=report.as_of),
+                "stale_note": reader_note(p.stale_reasons)}
         if p.panel == "pestel":
             body.update(columns=data.get("columns") or [], cards=data.get("rows") or [])
         elif p.panel == "porter":

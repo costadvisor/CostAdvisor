@@ -242,6 +242,10 @@ function AnalysisPanel({ name, panel, kraljic }) {
     <div id={anchorId(name)} className="st-anchor">
       <Panel title={meta.title} caption={caption} flush={flush} className="st-sheet"
         collapsible={!!meta.collapsed} defaultOpen={!meta.collapsed}>
+        {panel.stale_note && (
+          // LIVE-5: this panel's text may be out of date; one calm line, the reasons are for staff.
+          <div className="ix-callout warn" role="note" style={{ margin: '12px 16px' }}>{panel.stale_note}</div>
+        )}
         {body}
         {footer}
       </Panel>
