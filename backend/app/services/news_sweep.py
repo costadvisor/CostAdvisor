@@ -225,7 +225,8 @@ def execute_run(db: Session, run: NewsRun, *, today: date | None = None,
                 run.input_tokens += u.input_tokens
                 run.output_tokens += u.output_tokens
                 run.cost_usd = round(run.cost_usd + u.cost_usd, 6)
-                detail.update(searches=u.web_searches, cost_usd=round(u.cost_usd, 6))
+                detail.update(searches=u.web_searches, cost_usd=round(u.cost_usd, 6),
+                              pages_seen=outcome.pages_seen, note=outcome.claude_note)
                 if outcome.error:
                     run.errors = [*run.errors, {"label": t.label, "message": outcome.error[:500]}]
                 candidates += _search_candidates(outcome)

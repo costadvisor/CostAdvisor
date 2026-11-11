@@ -294,6 +294,7 @@ def test_run(request: Request, family_id: int, data: TestRunRequest, db: Session
         searches=outcome.usage.web_searches, input_tokens=outcome.usage.input_tokens,
         output_tokens=outcome.usage.output_tokens, cost_usd=outcome.usage.cost_usd,
         error=outcome.error, saved=False,
+        pages_seen=outcome.pages_seen, claude_note=outcome.claude_note,
     )
 
 

@@ -53,7 +53,8 @@ EVENT_LABELS = {
 
 REPORT_TOOL_DEF = {
     "name": REPORT_TOOL,
-    "description": "Report the relevant news items found. Call exactly once, at the end.",
+    "description": ("Report every candidate news item found, each with an honest relevance score, "
+                    "plus a short note on what the searches turned up. Call exactly once, at the end."),
     "input_schema": {
         "type": "object",
         "properties": {
@@ -64,31 +65,54 @@ REPORT_TOOL_DEF = {
                     "properties": {
                         "headline": {"type": "string", "description": "The headline as published."},
                         "url": {"type": "string", "description": "Exactly as it appeared in the search results."},
-                        "published_date": {"type": ["string", "null"], "description": "YYYY-MM-DD, or null if unknown."},
+                        "published_date": {"type": ["string", "null"],
+                                           "description": "YYYY-MM-DD. null if the page does not show a date: "
+                                                          "report the item anyway."},
                         "source": {"type": "string", "description": "Publication or site name."},
                         "summary": {"type": "string", "description": "At most two sentences, in your own words. Never copy article text."},
                         "event_type": {"type": "string", "enum": [*EVENT_TYPES, "other"]},
-                        "relevance": {"type": "number", "minimum": 0, "maximum": 1},
+                        "relevance": {"type": "number", "minimum": 0, "maximum": 1,
+                                      "description": "Scored on the scale in your instructions; low scores are fine."},
                     },
                     "required": ["headline", "url", "source", "summary", "event_type", "relevance"],
                 },
             },
+            "notes": {"type": "string",
+                      "description": "One or two sentences for the editor: what the searches mostly returned, "
+                                     "and why there are few or no items if so (e.g. 'results were mostly from "
+                                     "2025', 'mostly consumer boat content')."},
         },
-        "required": ["items"],
+        "required": ["items", "notes"],
     },
 }
 
 SYSTEM_PROMPT = """You are a market-intelligence researcher for CostAdvisor, a platform that helps \
 industrial buyers understand what they should pay for chemicals and materials. You search the news \
-for events that move supply, demand or cost for one product family, and report only items a buyer \
-negotiating that product would want to know about.
+for events that move supply, demand or cost for one product family.
 
-Ignore: advertisements, product listings, retail and consumer content, how-to articles, stock tips \
-and share-price commentary, and anything outside the time window. Prefer primary and trade sources \
-over aggregators. Summaries must be in your own words, at most two sentences — never copy article text.
+Your job is to gather candidates, not to make the final call. Report every item that is plausibly \
+relevant, each with an honest relevance score; the editor's settings decide what reaches a person, \
+and low-scored items help them tune those settings. Leaving an item out hides it from that tuning, \
+so when in doubt, report it with a lower score.
 
-When you have finished searching, call the report_news tool exactly once with every relevant item \
-(an empty list is a valid answer). Use URLs exactly as they appeared in your search results."""
+Relevance scale (be consistent):
+- 0.85-1.0  a direct event for this family: a plant or line opening, closing, expanding or cutting; \
+a producer bought, sold or merged; a new regulation, tariff or trade measure on it; a price or \
+shortage event
+- 0.6-0.85  clearly about this family but less direct: producer results or strategy that affect \
+supply, demand shifts in its main end markets, new technology or process news
+- 0.3-0.6  related but indirect: adjacent products, upstream raw materials, general market commentary
+- below 0.3 only passing mentions; you may leave these out
+
+Dates: report an item even when its page shows no date (published_date null). Leave out only items \
+you can see are older than the time window.
+
+Always leave out: advertisements, product listings, retail and consumer content, how-to articles, \
+stock tips and share-price commentary. Prefer primary and trade sources over aggregators. Summaries \
+must be in your own words, at most two sentences — never copy article text.
+
+When you have finished searching, call the report_news tool exactly once with every candidate and a \
+short note. Use URLs exactly as they appeared in your search results."""
 
 
 @dataclass
@@ -113,6 +137,10 @@ class SearchOutcome:
     usage: claude.Usage = field(default_factory=claude.Usage)
     window_start: date | None = None
     error: str | None = None
+    # How many distinct pages the searches returned, and Claude's own note on
+    # them: so "0 items" always comes with a reason an editor can act on.
+    pages_seen: int = 0
+    claude_note: str | None = None
 
 
 # ── The brief ────────────────────────────────────────────────────────────────
@@ -174,6 +202,8 @@ def build_brief(profile: EffectiveProfile, ctx: BriefContext, today: date, max_s
     lines.append(f"Language of sources: {profile.language}")
     lines.append(f"\nYou may run up to {max_searches} web searches. Spread them across the "
                  "names, the main producers and the event types rather than repeating one query.")
+    lines.append("Report every plausible candidate with an honest relevance score, including items "
+                 "whose date you cannot see; the editor's settings decide what is kept.")
     return "\n".join(lines)
 
 
@@ -356,6 +386,8 @@ def search_news(profile: EffectiveProfile, ctx: BriefContext, *, max_searches: i
         reported_input = resp.tool_input(REPORT_TOOL)
         if reported_input is not None:
             reported = reported_input.get("items") or []
+            note = str(reported_input.get("notes") or "").strip()
+            outcome.claude_note = note[:600] or None
             break
         # pause_turn: a long server-side search turn; end_turn without a report:
         # ask for the report. Either way, continue the same conversation.
@@ -365,9 +397,15 @@ def search_news(profile: EffectiveProfile, ctx: BriefContext, *, max_searches: i
             must_report = True
 
     outcome.queries = search_queries(all_content)
+    pages = search_result_pages(all_content)
+    outcome.pages_seen = len(pages)
+    if outcome.claude_note is None:
+        # No report (or no note in it): Claude's last words are the best explanation.
+        text = "".join(b.get("text", "") for b in all_content if b.get("type") == "text").strip()
+        outcome.claude_note = text[-600:] or None
     if reported is None:
         outcome.error = outcome.error or "Claude did not report any results."
         return outcome
     outcome.kept, outcome.below_threshold, outcome.dropped = classify_items(
-        reported, profile, search_result_pages(all_content), today)
+        reported, profile, pages, today)
     return outcome

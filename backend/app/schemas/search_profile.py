@@ -264,3 +264,5 @@ class TestRunOut(BaseModel):
     cost_usd: float
     error: str | None
     saved: bool = False
+    pages_seen: int = 0              # distinct pages the searches returned
+    claude_note: str | None = None   # Claude's note on what it found (or why so little)

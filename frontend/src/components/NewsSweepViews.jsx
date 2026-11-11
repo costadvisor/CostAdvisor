@@ -125,7 +125,10 @@ function RunDetail({ runId, onBack }) {
           <tbody>
             {run.details.map((d, n) => (
               <tr key={n}>
-                <td>{d.label}</td>
+                <td>
+                  {d.label}
+                  {d.note && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{d.note}</div>}
+                </td>
                 <td style={{ ...mono, textAlign: 'right' }}>{d.searches}</td>
                 <td style={{ ...mono, textAlign: 'right' }}>{d.found}</td>
                 <td style={{ ...mono, textAlign: 'right' }}>{d.new}</td>

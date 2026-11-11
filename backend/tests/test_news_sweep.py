@@ -338,3 +338,14 @@ def test_run_now_inline_where_no_worker_runs(editor, world, fake, monkeypatch, d
     assert r.status_code == 202
     run = editor.get(f"/api/news/runs/{r.json()['id']}").json()
     assert run["status"] == "completed" and run["items_new"] == 3
+
+
+def test_run_log_keeps_pages_and_notes_per_profile(world, monkeypatch, db):
+    def noted(brief):
+        content, stop, usage = fiberglass_news(brief)
+        content[-1]["input"]["notes"] = "Mostly trade press from this month."
+        return content, stop, usage
+    monkeypatch.setattr(claude, "create_message", FakeClaude(noted))
+    run = news_sweep.run_sweep(db, trigger="manual", family_id=world["fg"])
+    first = run.details[0]
+    assert first["note"] == "Mostly trade press from this month." and first["pages_seen"] == 4

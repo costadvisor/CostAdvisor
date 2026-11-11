@@ -256,9 +256,14 @@ function TestResults({ result }) {
     <div style={{ marginTop: 18 }}>
       <div className="ca-h2" style={{ marginBottom: 6 }}>Test run — nothing was saved</div>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
-        News since {result.window_start} · {result.searches} searches · {result.input_tokens + result.output_tokens} tokens
-        · cost ${result.cost_usd.toFixed(3)}
+        News since {result.window_start} · {result.searches} searches · {result.pages_seen} pages looked at
+        · {result.input_tokens + result.output_tokens} tokens · cost ${result.cost_usd.toFixed(3)}
       </div>
+      {result.claude_note && (
+        <div className="ca-card" style={{ fontSize: 12, marginBottom: 10 }}>
+          <span style={{ color: 'var(--muted)' }}>Claude&apos;s note: </span>{result.claude_note}
+        </div>
+      )}
       {result.error && <div className="ca-card" style={{ color: 'var(--accent2)', marginBottom: 10 }}>{result.error}</div>}
       {result.queries.length > 0 && (
         <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 10 }}>

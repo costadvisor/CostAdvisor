@@ -526,3 +526,40 @@ def test_on_the_list_still_needs_the_editor_role(user_factory, client_as, monkey
     c = client_as(plain)
     assert c.get("/api/news/enabled").json() == {"enabled": False}
     assert c.get("/api/news/profiles").status_code == 403
+
+
+# ── Claude reports candidates, not verdicts (real-search tuning fix) ─────────
+
+def test_instructions_ask_for_every_candidate_with_an_honest_score():
+    from app.services import news_search
+    prompt = news_search.SYSTEM_PROMPT
+    assert "Report every item that is plausibly relevant" in prompt
+    assert "Relevance scale" in prompt and "0.85-1.0" in prompt
+    assert "report an item even when its page shows no date" in prompt
+    assert news_search.REPORT_TOOL_DEF["input_schema"]["required"] == ["items", "notes"]
+
+
+def test_test_run_explains_itself(editor, catalogue, fake_claude):
+    """Pages looked at and Claude's note come back, so an empty result has a reason."""
+    fid = catalogue["family"]
+    editor.put(f"/api/news/profiles/{fid}", json=_form(catalogue))
+    fake = fake_claude(([*_search_turn(["https://a.example/1", "https://b.example/2", "https://a.example/1/"]),
+                         {"type": "tool_use", "id": "r1", "name": "report_news",
+                          "input": {"items": [], "notes": "Results were mostly from 2025."}}],
+                        "tool_use", {"input_tokens": 10, "output_tokens": 5}))
+    out = editor.post(f"/api/news/profiles/{fid}/test", json={}).json()
+    assert out["pages_seen"] == 2                       # the same page twice counts once
+    assert out["claude_note"] == "Results were mostly from 2025."
+    brief = fake.calls[0]["messages"][0]["content"]
+    assert "including items whose date you cannot see" in brief
+
+
+def test_without_a_note_claudes_last_words_explain(editor, catalogue, fake_claude):
+    editor.put(f"/api/news/profiles/{catalogue['family']}", json=_form(catalogue))
+    fake_claude(
+        ([{"type": "text", "text": "Nothing recent turned up for these terms."}], "end_turn",
+         {"input_tokens": 10, "output_tokens": 5}),
+        ([_report([])], "tool_use", {"input_tokens": 10, "output_tokens": 5}),
+    )
+    out = editor.post(f"/api/news/profiles/{catalogue['family']}/test", json={}).json()
+    assert out["claude_note"] == "Nothing recent turned up for these terms."
