@@ -18,10 +18,15 @@ Texts: report sections and panels, platform levers, platform blocks.
     expired        past its `expires_at` (blocks that set one)
 
 **Baseline** (S2): the data a text was written against — for each series it
-reads, the latest actual month and value at the text's date. The text's
-date: a report's month, a playbook's `last_updated`, a block version's date —
-or, for a block loaded from the content drop (whose load date is not when it
-was written), the drop's data month.
+reads, the latest actual month and value at the text's date, among the points
+that already existed then (R2: since the 6 Nov export each series ends in its
+own month, so each gets its own baseline month). The text's date: a report's
+month, a playbook's `last_updated`, a block version's date — or, for a block
+loaded from the content drop, the date of Laurent's export.
+
+**Data moved** is measured within the series as it stands today (R2), so a
+replaced or revised history (a source switch) is not mistaken for a market
+move.
 
 **Review** (S5): a person who read the text again re-pins its baseline to
 today's data and acknowledges what was flagged — the drifted-number count and
@@ -43,6 +48,7 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.models.content_load import ContentLoad
 from app.models.editorial import EditorialBlock, EditorialBlockVersion
 from app.models.index_data import CommodityIndex
 from app.models.index_layer import IndexMonthlyValue
@@ -58,6 +64,9 @@ from app.services.series_health import series_health_bulk
 MOVE_PCT = 10.0
 # PROPOSED (LIVE-5): text older than this is flagged for a re-read.
 OLD_AFTER_MONTHS = 6
+# R2: a baseline value that differs from today's value for the same month by
+# more than this means the series' history was replaced or revised since.
+REVISED_PCT = 0.5
 
 DATA_MOVED = "data_moved"
 DATA_LATE = "data_late"
@@ -92,12 +101,13 @@ class Text:
     written: date | None             # the text's own date
     series: list[str]                # series keys from derived_from
     expires_at: date | None = None
+    known_by: datetime | None = None # data points created after this weren't there when it was written
 
 
 # ── Reading the texts and the data ───────────────────────────────────────────
 
 def drop_data_month(db: Session) -> date | None:
-    """The newest actual month in the content series: when drop text was written for."""
+    """The newest actual month in the content series (fallback for the drop's date)."""
     last = (db.query(IndexMonthlyValue.year * 12 + IndexMonthlyValue.month - 1)
             .join(CommodityIndex, CommodityIndex.id == IndexMonthlyValue.commodity_id)
             .filter(CommodityIndex.commodity_key.isnot(None), IndexMonthlyValue.kind == "actual")
@@ -106,31 +116,56 @@ def drop_data_month(db: Session) -> date | None:
     return date(last // 12, last % 12 + 1, 1) if last is not None else None
 
 
+def drop_written(db: Session) -> tuple[date | None, datetime | None]:
+    """(written, known_by) for text that came with the content drop (R2).
+
+    written   the date of Laurent's export (the last real load's `source_date`):
+              when that text was produced. Falls back to the newest data month.
+    known_by  when that load finished: the data the text was written against is
+              what existed then. Since the 6 Nov export every series ends in its
+              own month, and once the app fetches series itself newer points
+              arrive between drops; a baseline takes, per series, the newest
+              point that existed at the load — not one month for all.
+    """
+    load = (db.query(ContentLoad)
+            .filter(ContentLoad.dry_run.is_(False), ContentLoad.finished_at.isnot(None))
+            .order_by(ContentLoad.finished_at.desc()).first())
+    if load is None:
+        return drop_data_month(db), None
+    written = load.source_date.date() if load.source_date else drop_data_month(db)
+    return written, load.finished_at
+
+
 def _series_of(record: dict | None) -> list[str]:
     return list((record or {}).get("series") or [])
 
 
 def texts(db: Session) -> list[Text]:
-    """Every platform text that can go stale, with its date and the series it reads."""
-    drop_month = drop_data_month(db)
+    """Every platform text that can go stale, with its date, the series it reads,
+    and when the data it was written against stopped growing (`known_by`)."""
+    drop_date, drop_known = drop_written(db)
     as_of = dict(db.query(MarketReport.slug, MarketReport.as_of))
     out: list[Text] = []
+    # Reports and playbooks only come with the content drop.
     for r in db.query(MarketReportSection):
-        out.append(Text(SECTION, r, f"{r.slug}/{r.section_id}", as_of.get(r.slug) or drop_month,
-                        _series_of(r.derived_from)))
+        out.append(Text(SECTION, r, f"{r.slug}/{r.section_id}", as_of.get(r.slug) or drop_date,
+                        _series_of(r.derived_from), known_by=drop_known))
     for r in db.query(MarketReportPanel):
-        out.append(Text(PANEL, r, f"{r.slug}/panel {r.panel}", as_of.get(r.slug) or drop_month,
-                        _series_of(r.derived_from)))
+        out.append(Text(PANEL, r, f"{r.slug}/panel {r.panel}", as_of.get(r.slug) or drop_date,
+                        _series_of(r.derived_from), known_by=drop_known))
     updated = dict(db.query(Playbook.slug, Playbook.last_updated))
     for r in db.query(PlaybookLever):
-        out.append(Text(LEVER, r, r.lever_code, updated.get(r.playbook_slug) or drop_month,
-                        _series_of(r.derived_from)))
+        out.append(Text(LEVER, r, r.lever_code, updated.get(r.playbook_slug) or drop_date,
+                        _series_of(r.derived_from), known_by=drop_known))
     for b, v in (db.query(EditorialBlock, EditorialBlockVersion)
                  .join(EditorialBlockVersion, EditorialBlockVersion.id == EditorialBlock.current_version_id)
                  .filter(EditorialBlock.team_id.is_(None))):
-        written = drop_month if b.provenance == "imported" else (v.created_at.date() if v.created_at else None)
+        if b.provenance == "imported":
+            written, known = drop_date, drop_known
+        else:   # a person wrote it: the data that existed when they saved
+            written, known = (v.created_at.date() if v.created_at else None), v.created_at
         out.append(Text(BLOCK, b, f"{b.subject_code}/{b.block_type}", written,
-                        _series_of(b.derived_from), expires_at=b.expires_at))
+                        _series_of(b.derived_from), expires_at=b.expires_at, known_by=known))
     return out
 
 
@@ -147,13 +182,36 @@ def _actuals(db: Session, keys: set[str]) -> dict[str, dict[int, float]]:
     return out
 
 
-def _point_at(values: dict[int, float], when: date) -> dict | None:
-    """The latest actual at or before `when`'s month."""
-    upto = [m for m in values if m <= _mi(when.year, when.month)]
+def _history(db: Session, keys: set[str]) -> dict[str, dict[int, tuple[float, datetime | None]]]:
+    """series key -> {month index: (actual value, when that point was stored)}."""
+    out: dict[str, dict[int, tuple[float, datetime | None]]] = defaultdict(dict)
+    if not keys:
+        return out
+    for key, y, m, v, created in (
+            db.query(CommodityIndex.commodity_key, IndexMonthlyValue.year, IndexMonthlyValue.month,
+                     IndexMonthlyValue.value, IndexMonthlyValue.created_at)
+            .join(IndexMonthlyValue, IndexMonthlyValue.commodity_id == CommodityIndex.id)
+            .filter(CommodityIndex.commodity_key.in_(keys), IndexMonthlyValue.kind == "actual")):
+        out[key][_mi(y, m)] = (float(v), created)
+    return out
+
+
+def _point_at(values: dict, when: date, known_by: datetime | None = None) -> dict | None:
+    """The latest actual at or before `when`'s month — and, given `known_by`,
+    only among the points that already existed then (R2: each series its own
+    month). `values` is {month: value} or {month: (value, stored at)}."""
+    upto = {}
+    for m, v in values.items():
+        value, created = v if isinstance(v, tuple) else (v, None)
+        if m > _mi(when.year, when.month):
+            continue
+        if known_by is not None and created is not None and created > known_by:
+            continue
+        upto[m] = value
     if not upto:
         return None
     m = max(upto)
-    return {"month": _ym(m), "value": values[m]}
+    return {"month": _ym(m), "value": upto[m]}
 
 
 def _typed_drift(db: Session, as_of: date) -> tuple[dict, Counter]:
@@ -192,11 +250,12 @@ def fill_baselines(db: Session) -> int:
     """A baseline for every text that reads series and has none yet: the data
     at the text's own date. A reviewed baseline is never overwritten."""
     items = [t for t in texts(db) if t.series and t.row.baseline is None and t.written]
-    values = _actuals(db, {k for t in items for k in t.series})
+    values = _history(db, {k for t in items for k in t.series})
     for t in items:
         t.row.baseline = {
             "as_of": t.written.isoformat(),
-            "series": {k: p for k in t.series if (p := _point_at(values.get(k, {}), t.written))},
+            "series": {k: p for k in t.series
+                       if (p := _point_at(values.get(k, {}), t.written, t.known_by))},
         }
     db.flush()
     return len(items)
@@ -214,13 +273,27 @@ def reasons_for(t: Text, today: date, values: dict, health: dict, drift: int) ->
         now = values.get(key)
         if not now or not point or not point.get("value"):
             continue
+        # R2: measure the move within the series as it stands today. When its
+        # history was replaced (a source switch: a drawn curve becomes real
+        # data, IMF becomes World Bank) or revised, the stored value belongs to
+        # the old history, and comparing across the two would flag a "move" the
+        # market never made. If the baseline month is gone from today's
+        # history, there is nothing like-for-like to compare: no flag.
+        y, mo = (int(x) for x in point["month"].split("-"))
+        then = now.get(_mi(y, mo))
+        if not then:
+            continue
+        revised = abs(then / point["value"] - 1) * 100 > REVISED_PCT
         latest = max(now)
-        pct = (now[latest] / point["value"] - 1) * 100
+        pct = (now[latest] / then - 1) * 100
         if abs(pct) > MOVE_PCT:
-            moves.append({"series": key, "from": point["month"], "to": _ym(latest), "pct": round(pct, 1)})
+            moves.append({"series": key, "from": point["month"], "to": _ym(latest), "pct": round(pct, 1),
+                          "history_revised": revised})
     if moves:
         out.append({"code": DATA_MOVED, "moves": moves,
                     "detail": "; ".join(f"{m['series']} {m['pct']:+.1f}% since {_label(m['from'])}"
+                                        + (" (history revised since; measured on today's series)"
+                                           if m["history_revised"] else "")
                                         for m in moves)})
 
     acked = int(ack.get(TYPED_DRIFTED) or 0)

@@ -24,7 +24,7 @@ import pytest
 
 from app.services.series_health import (
     CONTENT_DROP_STALE_AFTER_MONTHS, CURRENT, STALE, STALE_AFTER_MONTHS,
-    frequency_interval_months, series_health,
+    frequency_interval_months, publication_lag, series_health,
 )
 from tests.test_series_health import _cleanup, _months, _quarters, _series
 
@@ -135,5 +135,75 @@ def test_the_api_reports_each_series_threshold(db, tenant_a, client_as):
         assert body["state"] == STALE
         assert body["stale_after_months"] == 2
         assert body["stale_rule"] == "monthly"
+    finally:
+        _cleanup(db, s)
+
+
+# ── R1: each source's publication delay ──────────────────────────────────────
+# Alexis's check of 10 Nov 2026: EU trade data, EIA and INEGI were at August,
+# BLS / Census / Destatis / Japan customs at September, the World Bank at
+# October. A slow source must not read as late when nothing failed.
+
+R1_AS_OF = date(2026, 11, 10)
+
+
+@pytest.mark.parametrize("provider,lag", [
+    ("EIA industrial electricity", 3),
+    ("Eurostat Comext (EU trade)", 3),
+    ("INEGI (Mexico)", 3),
+    ("US BLS PPI", 2),
+    ("US Census Bureau imports", 2),
+    ("Japan customs exports", 2),
+    ("World Bank Pink Sheet", 1),
+    ("Ceiba consulting", 1),        # whole words only: "ceiba" is not EIA
+    (None, 1),
+])
+def test_each_source_has_its_usual_publication_lag(db, provider, lag):
+    s = _series(db, frequency="Monthly", provider=provider)
+    try:
+        assert publication_lag(s)[0] == lag
+    finally:
+        _cleanup(db, s)
+
+
+def test_a_slow_source_is_not_late_when_it_is_on_its_usual_delay(db):
+    s = _series(db, frequency="Monthly", provider="EIA industrial electricity")
+    try:
+        _months(db, s, [(2026, 8, 100, "actual")])           # August on 10 Nov: EIA is on time
+        h = series_health(db, s.id, as_of=R1_AS_OF)
+        assert h.state == CURRENT and h.stale_after_months == 4 and h.publication_lag_months == 3
+        assert h.stale_rule == "monthly, EIA publishes 3 months behind"
+        assert series_health(db, s.id, as_of=date(2027, 1, 1)).state == STALE    # 5 old: missed releases
+    finally:
+        _cleanup(db, s)
+
+
+def test_a_one_month_source_keeps_the_two_month_rule(db):
+    s = _series(db, frequency="Monthly", provider="World Bank Pink Sheet")
+    try:
+        _months(db, s, [(2026, 8, 100, "actual")])           # the World Bank had October
+        h = series_health(db, s.id, as_of=R1_AS_OF)
+        assert (h.state, h.stale_after_months, h.stale_rule) == (STALE, 2, "monthly")
+    finally:
+        _cleanup(db, s)
+
+
+def test_a_drop_series_the_app_fetches_is_judged_by_its_source_not_the_drop(db, monkeypatch):
+    from app.services import scraper
+    from app.services.refresh_route import SCRAPER, refresh_routes
+    s = _drop_series(db, frequency="Monthly", provider="US BLS PPI")
+    try:
+        _months(db, s, [(2026, 6, 100, "actual")])           # 5 months old
+        assert series_health(db, s.id, as_of=R1_AS_OF).stale_rule == "content drop"
+        # The source switch: a scraper is registered and enabled for it.
+        monkeypatch.setitem(scraper.SCRAPER_REGISTRY, s.name, scraper.BaseScraper)
+        monkeypatch.setitem(scraper.SCRAPER_SOURCE_LABELS, s.name, "BLS")
+        s.scrape_enabled = True
+        db.commit()
+        h = series_health(db, s.id, as_of=R1_AS_OF)
+        assert (h.state, h.stale_after_months) == (STALE, 3)
+        assert h.stale_rule == "monthly, BLS publishes 2 months behind"
+        route = next(r for r in refresh_routes(db) if r.commodity_id == s.id)
+        assert route.route == SCRAPER
     finally:
         _cleanup(db, s)

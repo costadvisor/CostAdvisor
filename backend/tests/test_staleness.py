@@ -15,7 +15,7 @@ Made-up text and series.
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -25,14 +25,16 @@ from app.database import bypass_rls_var
 from app.models.index_layer import IndexMonthlyValue
 from app.models.market_report import MarketReport, MarketReportSection
 from app.models.index_refresh import IndexRefreshRun
+from app.models.content_load import ContentLoad
 from app.services.staleness import (
-    DATA_LATE, DATA_MOVED, EXPIRED, OLD_TEXT, TYPED_DRIFTED, Text, check, mark_reviewed,
+    DATA_LATE, DATA_MOVED, EXPIRED, OLD_TEXT, TYPED_DRIFTED, Text, _point_at, check, mark_reviewed,
     reader_note, reasons_for,
 )
 from app.tasks import staleness_check
 from tests.test_live_resolver import _series, made  # noqa: F401 — fixture
 
 TODAY = date(2026, 11, 10)
+JUN, JUL = 2026 * 12 + 5, 2026 * 12 + 6     # month indexes
 
 
 def _text(series=(), baseline=None, written=date(2026, 8, 1), expires=None):
@@ -49,9 +51,39 @@ def _codes(reasons):
 def test_a_move_over_ten_percent_since_the_baseline_is_stale():
     base = {"series": {"brent": {"month": "2026-06", "value": 100.0}}}
     t = _text(["brent"], base)
-    moved = reasons_for(t, TODAY, {"brent": {24318: 112.0}}, {}, 0)
+    moved = reasons_for(t, TODAY, {"brent": {JUN: 100.0, JUL: 112.0}}, {}, 0)
     assert _codes(moved) == [DATA_MOVED] and "brent +12.0% since Jun 2026" in moved[0]["detail"]
-    assert reasons_for(t, TODAY, {"brent": {24318: 109.0}}, {}, 0) == []
+    assert "revised" not in moved[0]["detail"]
+    assert reasons_for(t, TODAY, {"brent": {JUN: 100.0, JUL: 109.0}}, {}, 0) == []
+
+
+# ── R2: a replaced history is not a market move ──────────────────────────────
+
+def test_a_replaced_history_does_not_flag_a_move_the_market_never_made():
+    # Baseline Jun 100 on a drawn curve; the real series that replaced it has
+    # Jun 80 and Jul 84 (+5%). Against the stored 100 that is -16%: a false alarm.
+    t = _text(["power"], {"series": {"power": {"month": "2026-06", "value": 100.0}}})
+    assert reasons_for(t, TODAY, {"power": {JUN: 80.0, JUL: 84.0}}, {}, 0) == []
+
+
+def test_a_real_move_after_a_replaced_history_is_flagged_and_says_so():
+    t = _text(["power"], {"series": {"power": {"month": "2026-06", "value": 100.0}}})
+    r = reasons_for(t, TODAY, {"power": {JUN: 80.0, JUL: 92.0}}, {}, 0)      # +15% on today's series
+    assert _codes(r) == [DATA_MOVED] and r[0]["moves"][0]["history_revised"] is True
+    assert "history revised since" in r[0]["detail"]
+    assert reader_note(r).startswith("May be out of date: power has moved +15%")
+
+
+def test_no_flag_when_the_baseline_month_is_gone_from_todays_history():
+    t = _text(["power"], {"series": {"power": {"month": "2026-06", "value": 100.0}}})
+    assert reasons_for(t, TODAY, {"power": {JUL: 150.0}}, {}, 0) == []
+
+
+def test_a_baseline_takes_only_points_that_existed_when_the_text_was_written():
+    loaded = datetime(2026, 11, 6, 12, tzinfo=timezone.utc)
+    history = {JUN: (100.0, loaded - timedelta(days=1)), JUL: (110.0, loaded + timedelta(days=3))}
+    assert _point_at(history, date(2026, 8, 1), loaded) == {"month": "2026-06", "value": 100.0}
+    assert _point_at(history, date(2026, 8, 1)) == {"month": "2026-07", "value": 110.0}
 
 
 def test_drift_counts_only_beyond_what_a_review_acknowledged():
@@ -144,6 +176,29 @@ def test_a_typed_as_of_date_that_drifted_flags_its_section(db, report):
     assert sec.is_stale and _codes(sec.stale_reasons) == [TYPED_DRIFTED]
     assert reader_note(sec.stale_reasons).startswith("May be out of date")
     db.rollback()
+
+
+def test_a_drop_text_baseline_ignores_points_fetched_after_the_load(db, report):
+    # R2: Laurent's export is loaded; later the app fetches a newer month itself.
+    # The text was written against what the load brought, so its baseline is June.
+    now = datetime.now(timezone.utc)
+    load = ContentLoad(source_commit="test-r2", source_date=datetime(2026, 11, 6, tzinfo=timezone.utc),
+                       started_at=now, finished_at=now + timedelta(days=1), dry_run=False)
+    db.add(load)
+    db.add(IndexMonthlyValue(commodity_id=report["series"].id, year=2026, month=7, value=125,
+                             kind="actual", created_at=now + timedelta(days=2)))
+    db.commit()
+    try:
+        check(db, today=TODAY)
+        sec = _section(db, report["slug"])
+        assert sec.baseline["series"][report["series"].commodity_key] == {"month": "2026-06", "value": 100.0}
+        # ... and the July point it did not know about is a +25% move since.
+        assert sec.is_stale and _codes(sec.stale_reasons) == [DATA_MOVED]
+    finally:
+        db.rollback()
+        bypass_rls_var.set(True)
+        db.execute(text("DELETE FROM content_loads WHERE source_commit = 'test-r2'"))
+        db.commit()
 
 
 # ── API and task ─────────────────────────────────────────────────────────────

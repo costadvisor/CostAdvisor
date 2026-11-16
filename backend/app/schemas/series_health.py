@@ -23,6 +23,7 @@ class SeriesHealthOut(BaseModel):
     quarterly_points: int = 0
     stale_after_months: int = 6     # this series' own threshold (Jira 209 S4)
     stale_rule: str = "default"     # what set it: frequency, content drop or default
+    publication_lag_months: int = 1  # how far behind its source normally publishes (R1)
 
 
 class SeriesHealthListOut(BaseModel):

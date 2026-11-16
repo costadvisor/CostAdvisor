@@ -25,6 +25,7 @@ team's own numbers, not the health of the series.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 
@@ -63,6 +64,29 @@ _INTERVAL_NAME = {1: "monthly", 3: "quarterly", 6: "semi-annual", 12: "annual"}
 # frequency — unless its frequency allows longer (an annual series).
 CONTENT_DROP_STALE_AFTER_MONTHS = 6
 
+# PROPOSED (R1, from Alexis's check of 10 Nov 2026). Some sources publish later
+# than others: on 10 Nov the newest month was August for EU trade data, EIA and
+# INEGI; September for BLS, Census, Destatis and Japan customs; October for the
+# World Bank. The 2-month monthly rule assumes a 1-month lag, so a slower source
+# would read as late when nothing failed. The lag here is how many months
+# behind the current month a source's newest observation normally is; each
+# month beyond 1 is added to the series' threshold.
+#
+# Matched as whole words, first match wins, against the series' scraper family
+# (when the app fetches it) and its provider / free-source text. A source not
+# listed keeps the 1-month assumption.
+PUBLICATION_LAG_MONTHS: tuple[tuple[str, int, str], ...] = (
+    (r"comext|eu trade|eurostat trade", 3, "EU trade data"),
+    (r"eia|energy information administration", 3, "EIA"),
+    (r"inegi", 3, "INEGI"),
+    (r"bls|bureau of labor statistics", 2, "BLS"),
+    (r"census", 2, "US Census"),
+    (r"destatis|genesis", 2, "Destatis"),
+    (r"japan customs|e-stat", 2, "Japan customs"),
+    (r"world bank|pink sheet", 1, "World Bank"),
+)
+DEFAULT_PUBLICATION_LAG_MONTHS = 1
+
 STORE_MONTHLY = "monthly"
 STORE_QUARTERLY = "quarterly"
 STORE_BOTH = "both"
@@ -83,6 +107,7 @@ class SeriesHealth:
     quarterly_points: int = 0
     stale_after_months: int = STALE_AFTER_MONTHS
     stale_rule: str = "default"           # what set stale_after_months
+    publication_lag_months: int = DEFAULT_PUBLICATION_LAG_MONTHS   # R1: the source's usual delay
 
     @property
     def usable(self) -> bool:
@@ -108,16 +133,45 @@ def frequency_interval_months(frequency: str | None) -> int | None:
     return None
 
 
+def fetched_by_app(series: CommodityIndex) -> bool:
+    """The app fetches this series itself: a registered scraper that is enabled.
+    Such a series is judged by its own frequency and source, even when it also
+    came with the content drop (R1: once its source is switched, the drop no
+    longer decides how fresh it can be). Same test as the refresh route."""
+    from app.services.scraper import SCRAPER_REGISTRY   # lazy: keeps this module light
+    return bool(series.scrape_enabled) and series.name in SCRAPER_REGISTRY
+
+
+def _source_text(series: CommodityIndex) -> str:
+    from app.services.scraper import SCRAPER_SOURCE_LABELS
+    parts = [SCRAPER_SOURCE_LABELS.get(series.name) if fetched_by_app(series) else None,
+             series.provider, series.free_source_name]
+    return " ".join(p for p in parts if p).lower()
+
+
+def publication_lag(series: CommodityIndex) -> tuple[int, str | None]:
+    """(months, source label): how far behind its source normally publishes."""
+    text = _source_text(series)
+    for pattern, months, label in PUBLICATION_LAG_MONTHS:
+        if re.search(rf"\b(?:{pattern})\b", text):
+            return months, label
+    return DEFAULT_PUBLICATION_LAG_MONTHS, None
+
+
 def stale_after(series: CommodityIndex) -> tuple[int, str]:
     """(months, rule): how old the newest actual value may be before the
     series is late, and a short label for why."""
     interval = frequency_interval_months(series.frequency)
     by_frequency = STALE_AFTER_BY_INTERVAL.get(interval) if interval else None
-    if series.commodity_key:
+    if series.commodity_key and not fetched_by_app(series):
         if by_frequency and by_frequency > CONTENT_DROP_STALE_AFTER_MONTHS:
             return by_frequency, f"content drop, {_INTERVAL_NAME[interval]}"
         return CONTENT_DROP_STALE_AFTER_MONTHS, "content drop"
     if by_frequency:
+        lag, source = publication_lag(series)
+        extra = max(0, lag - DEFAULT_PUBLICATION_LAG_MONTHS)
+        if extra:
+            return by_frequency + extra, f"{_INTERVAL_NAME[interval]}, {source} publishes {lag} months behind"
         return by_frequency, _INTERVAL_NAME[interval]
     return STALE_AFTER_MONTHS, "default"
 
@@ -157,6 +211,7 @@ def _classify(series: CommodityIndex, monthly: tuple | None, quarterly: tuple | 
         quarterly_points=q_points,
     )
     health.stale_after_months, health.stale_rule = stale_after(series)
+    health.publication_lag_months = publication_lag(series)[0]
 
     if m_actual and q_points:
         health.store = STORE_BOTH

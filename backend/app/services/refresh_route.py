@@ -72,6 +72,14 @@ def _route_for(s: CommodityIndex, uploaded: set[int]) -> tuple[str, str | None, 
     """(route, source, detail, expected interval) for one index, most specific first."""
     if s.composite_expression:
         return COMPOSITE, None, "computed live from other indexes", None
+    if s.name in SCRAPER_REGISTRY and s.scrape_enabled:
+        # Before the content drop: once the app fetches a drop series itself
+        # (its source switched), the scraper is what refreshes it (R1).
+        label = SCRAPER_SOURCE_LABELS.get(s.name, "auto")
+        # Scrapers write the quarterly store, so a quarter is the most a missing
+        # frequency can mean for them.
+        return (SCRAPER, label, f"weekly scrape_all via {SCRAPER_REGISTRY[s.name].__name__}",
+                _interval(s.frequency) or 3)
     if s.commodity_key:
         return (CONTENT_DROP, "content repo",
                 "re-extract and re-load the content drop to refresh",
@@ -79,12 +87,6 @@ def _route_for(s: CommodityIndex, uploaded: set[int]) -> tuple[str, str | None, 
     spec, _why = derivation_spec(s)
     if spec is not None:
         return PROXY, str(spec.get("base_index")), f"derived: {spec.get('operation')}", _interval(s.frequency)
-    if s.name in SCRAPER_REGISTRY and s.scrape_enabled:
-        label = SCRAPER_SOURCE_LABELS.get(s.name, "auto")
-        # Scrapers write the quarterly store, so a quarter is the most a missing
-        # frequency can mean for them.
-        return (SCRAPER, label, f"weekly scrape_all via {SCRAPER_REGISTRY[s.name].__name__}",
-                _interval(s.frequency) or 3)
     if s.id in uploaded:
         return MANUAL_UPLOAD, "admin upload", "values come from the super-admin upload", _interval(s.frequency)
     why = ("a scraper is registered but scrape_enabled is off" if s.name in SCRAPER_REGISTRY
