@@ -209,6 +209,7 @@ def _available_index_range(db: Session, cost_model: CostModel):
     """Find the min/max (year, quarter) across both index data and pricing data
     for this cost model, so the date range reflects all available information."""
     from app.models.index_data import IndexValue
+    from app.models.index_layer import IndexMonthlyValue
     from sqlalchemy import func
 
     min_yq, max_yq = None, None
@@ -235,6 +236,20 @@ def _available_index_range(db: Session, cost_model: CostModel):
         ).filter(IndexValue.commodity_id.in_(commodity_ids)).first()
         if row and row[0] is not None:
             min_yq, max_yq = row
+
+        # Most recipe indices are monthly-only: their actual months count too
+        # (forecast months are not data), or a model with no invoice yet had no
+        # range and "the latest quarter with data" fell back to the calendar
+        # quarter, which only carries the last month forward.
+        mrow = db.query(
+            func.min(IndexMonthlyValue.year * 100 + IndexMonthlyValue.month),
+            func.max(IndexMonthlyValue.year * 100 + IndexMonthlyValue.month),
+        ).filter(IndexMonthlyValue.commodity_id.in_(commodity_ids),
+                 IndexMonthlyValue.kind == "actual").first()
+        if mrow and mrow[0] is not None:
+            m_min, m_max = ((ym // 100) * 10 + (ym % 100 + 2) // 3 for ym in mrow)
+            min_yq = m_min if min_yq is None else min(min_yq, m_min)
+            max_yq = m_max if max_yq is None else max(max_yq, m_max)
 
     # Check actual pricing data for this cost model
     price_row = db.query(
@@ -290,6 +305,15 @@ def _default_period_range(db: Session, cost_model: CostModel):
     return from_year, from_quarter, to_year, to_quarter
 
 
+def latest_data_quarter(db: Session, cost_model: CostModel) -> tuple[int, int]:
+    """The quarter "should-cost today" is priced at on every list, alert and
+    brief: the last quarter with data for this model, which is where a brief's
+    window ends. A calendar quarter past the data only carries the last monthly
+    value forward, so the lists and the brief disagreed (sometimes in sign)."""
+    _, _, y, q = _default_period_range(db, cost_model)
+    return y, q
+
+
 # ── Conversion helpers ────────────────────────────────────────
 
 def _apply_fx(db: Session, value: float, from_ccy: str, to_ccy: str | None, year: int, quarter: int, team_id=None) -> float:
@@ -306,6 +330,19 @@ def _apply_unit(value: float, from_unit: str, to_unit: str | None) -> float:
         return convert_price_per_unit(value, from_unit, to_unit)
     except ValueError:
         return value
+
+
+def quantity_in_product_unit(qty: float, unit: str | None, product_unit: str | None) -> float:
+    """A stored quantity in the unit the product is priced in. Rows written
+    before volumes were stored in the product unit can carry another one (a
+    default "kg" on a EUR/t product: 600,000 kg is 600 t, not 600,000 t). A
+    unit that cannot be converted is read as it is."""
+    if unit and product_unit and unit != product_unit:
+        try:
+            return convert_unit(qty, unit, product_unit)
+        except ValueError:
+            pass
+    return qty
 
 
 def _output_ccy(model_ccy: str, display_ccy: str | None) -> str:
@@ -608,8 +645,10 @@ def calculate_evolution(
             actual = _apply_unit(_apply_fx(db, actual, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
 
         gap = (actual - theoretical) if actual is not None else None
-        bp_display = _apply_unit(_apply_fx(db, period_base_price, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
-        gap_pct = (gap / bp_display * 100) if (gap is not None and bp_display) else None
+        # Gap % of the should-cost it is compared with, as the lists, alerts
+        # and supplier trust compute it. Over the base price, one gap read
+        # 15.9% here and 16.3% in an alert.
+        gap_pct = (gap / theoretical * 100) if (gap is not None and theoretical) else None
 
         periods_out.append(EvolutionPeriod(
             period=label,
@@ -686,7 +725,7 @@ def calculate_squeeze(
 
     raw_volumes = {}
     for av in db.query(ActualVolume).filter(ActualVolume.cost_model_id == cost_model.id).all():
-        raw_volumes[(av.year, av.quarter)] = float(av.volume)
+        raw_volumes[(av.year, av.quarter)] = quantity_in_product_unit(float(av.volume), av.unit, model_unit)
 
     period_keys = [(y, q) for y, q, _, _ in periods]
     volume_data = project_volumes(raw_volumes, request.volume_projection, period_keys)
@@ -724,8 +763,10 @@ def calculate_squeeze(
             actual = _apply_unit(_apply_fx(db, actual, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
 
         gap = (actual - theoretical) if actual is not None else None
-        bp_display = _apply_unit(_apply_fx(db, period_base_price, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
-        gap_pct = (gap / bp_display * 100) if (gap is not None and bp_display) else None
+        # Gap % of the should-cost it is compared with, as the lists, alerts
+        # and supplier trust compute it. Over the base price, one gap read
+        # 15.9% here and 16.3% in an alert.
+        gap_pct = (gap / theoretical * 100) if (gap is not None and theoretical) else None
 
         vol, vol_projected = volume_data.get((year, quarter), (0.0, True))
         # Convert volume units if needed
@@ -812,7 +853,7 @@ def calculate_brief(
 
     raw_volumes = {}
     for av in db.query(ActualVolume).filter(ActualVolume.cost_model_id == cost_model.id).all():
-        raw_volumes[(av.year, av.quarter)] = float(av.volume)
+        raw_volumes[(av.year, av.quarter)] = quantity_in_product_unit(float(av.volume), av.unit, model_unit)
 
     evo_periods = []
     last_indexed_cost_raw = None  # pre-margin cost of the final period, for the floor below
@@ -837,8 +878,10 @@ def calculate_brief(
             actual = _apply_unit(_apply_fx(db, actual, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
 
         gap = (actual - theoretical) if actual is not None else None
-        bp_display = _apply_unit(_apply_fx(db, period_base_price, model_ccy, out_ccy, year, quarter, team_id=cost_model.team_id), model_unit, out_unit)
-        gap_pct = (gap / bp_display * 100) if (gap is not None and bp_display) else None
+        # Gap % of the should-cost it is compared with, as the lists, alerts
+        # and supplier trust compute it. Over the base price, one gap read
+        # 15.9% here and 16.3% in an alert.
+        gap_pct = (gap / theoretical * 100) if (gap is not None and theoretical) else None
 
         evo_periods.append(EvolutionPeriod(
             period=label, year=year, quarter=quarter, month=month,
@@ -939,6 +982,7 @@ def calculate_brief(
     drivers.sort(key=lambda d: abs(d.component_cost), reverse=True)
 
     period_label = f"{periods[0][3]} to {periods[-1][3]}" if periods else ""
+    base_label = _period_label(ref_year, ref_quarter)
 
     narrative = generate_narrative(
         product_name=cost_model.product.name,
@@ -950,6 +994,9 @@ def calculate_brief(
         currency=out_ccy,
         period_label=period_label,
         num_periods=len(periods),
+        base_period_label=base_label,
+        unit=out_unit,
+        scale=current_sc,
     )
 
     return BriefResult(
@@ -966,6 +1013,10 @@ def calculate_brief(
         total_impact=round(total_impact, 2) if total_impact is not None else None,
         volumes_missing=volumes_missing,
         period_label=period_label,
+        as_of_label=last_label,
+        as_of_year=last_y,
+        as_of_quarter=last_q,
+        base_period_label=base_label,
         evolution=evo_periods,
         narrative=narrative,
         drivers=drivers,

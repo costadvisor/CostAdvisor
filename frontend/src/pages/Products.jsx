@@ -14,22 +14,23 @@ export default function Products() {
   const [products, setProducts] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
 
+  // A failed load must not fall through to "No products yet". The catalogue
+  // recipes (~2 MB) only feed the form, so they load on their own: their
+  // failure used to blank the product list too.
   const fetchData = () => {
     if (!activeTeamId) return;
     setLoading(true);
-    Promise.all([
-      api.get('/api/products', { params: { team_id: activeTeamId } }),
-      api.get('/api/formulas/', { params: { team_id: activeTeamId } }),
-    ])
-      .then(([pRes, tRes]) => {
-        setProducts(pRes.data);
-        setTemplates(tRes.data);
-      })
-      .catch(console.error)
+    api.get('/api/products', { params: { team_id: activeTeamId } })
+      .then(({ data }) => { setProducts(data); setLoadError(null); })
+      .catch(err => setLoadError(formatApiError(err)))
       .finally(() => setLoading(false));
+    api.get('/api/formulas/', { params: { team_id: activeTeamId } })
+      .then(({ data }) => setTemplates(data))
+      .catch(() => setTemplates([]));
   };
 
   useEffect(fetchData, [activeTeamId]);
@@ -107,6 +108,11 @@ export default function Products() {
 
       {loading ? (
         <div style={{ padding: 20, color: 'var(--muted)' }}>Loading...</div>
+      ) : loadError ? (
+        <div className="ca-card" style={{ textAlign: 'center', padding: 32 }}>
+          <div style={{ color: 'var(--accent2)', fontSize: 12, marginBottom: 14 }}>Couldn't load your products — {loadError}</div>
+          <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={fetchData}>Try again</button>
+        </div>
       ) : products.length === 0 ? (
         <div className="ca-card" style={{ textAlign: 'center', padding: 48, color: 'var(--text-secondary)' }}>
           No products yet. Create one above or via the Cost Model Builder.

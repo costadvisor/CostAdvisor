@@ -118,7 +118,12 @@ export default function ActionForm({
       </div>
       <div className="so-field">
         <label htmlFor={id('status')}>Status</label>
-        <select id={id('status')} className="ix-select so-wide" value={v.status} onChange={set('status')}>
+        <select id={id('status')} className="ix-select so-wide" value={v.status}
+          onChange={(e) => {
+            const status = e.target.value;
+            // Done means finished: take % complete to 100 with it.
+            setV((s) => ({ ...s, status, pct: status === 'Done' && Number(s.pct) < 100 ? 100 : s.pct }));
+          }}>
           {ACTION_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>

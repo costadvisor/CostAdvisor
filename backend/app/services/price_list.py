@@ -126,6 +126,8 @@ def match_row(extracted_name: str | None, candidates: list[CostModel]) -> tuple[
             "product_name": cm.product.name if cm.product else None,
             "product_reference": cm.product.formula if cm.product else None,
             "supplier_name": cm.supplier.name if cm.supplier else None,
+            # Two models of one product and supplier differ by ship-to.
+            "destination_country": cm.destination_country,
             "region": cm.region,
             "score": round(score, 3),
         }

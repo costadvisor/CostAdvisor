@@ -117,7 +117,7 @@ def test_brief_happy_path(client_as, tenant_a, brief_model):
     assert b["current_should_cost"] == pytest.approx(111.0)
     assert b["current_actual_price"] == pytest.approx(150.0)
     assert b["gap"] == pytest.approx(39.0)          # verdict signal
-    assert b["gap_pct"] == pytest.approx(39.0)
+    assert b["gap_pct"] == pytest.approx(39.0 / 111.0 * 100, abs=0.01)   # of the should-cost
     assert b["volumes_missing"] is False
     assert b["total_impact"] == pytest.approx(390.0)  # gap * volume
 
@@ -173,6 +173,26 @@ def test_brief_generation_is_audited(client_as, tenant_a, brief_model, db):
     )
     assert evt is not None
     assert evt.user_id == tenant_a["user_id"]
+
+
+def test_reopening_a_brief_or_prep_is_audited_once(client_as, tenant_a, brief_model, db):
+    """The pages build the brief and the negotiation prep on every load (twice
+    under React StrictMode), and every view wrote a row that buried real edits
+    in Team > Activity. The access is still recorded, once per user, model and
+    window (costing.DELIVERABLE_VIEW_WINDOW)."""
+    from collections import Counter
+    from app.models.audit_log import AuditLog
+    c = client_as(tenant_a)
+    for _ in range(3):
+        r = c.post("/api/costing/brief", json={"cost_model_id": str(brief_model.id)})
+        assert r.status_code == 200, r.text
+        r = c.get(f"/api/negotiation-prep/{brief_model.id}/prep")
+        assert r.status_code == 200, r.text
+    db.expire_all()
+    events = Counter(e for (e,) in db.query(AuditLog.event_type).filter(
+        AuditLog.team_id == tenant_a["team_id"], AuditLog.entity_id == str(brief_model.id)))
+    assert events["brief_generated"] == 1
+    assert events["negotiation_prep_generated"] == 1
 
 
 def test_brief_is_deterministic(client_as, tenant_a, brief_model):
@@ -263,3 +283,182 @@ def test_brief_requires_briefs_view_permission(client_as, user_factory, tenant_a
 
     r = client_as(member).post("/api/costing/brief", json={"cost_model_id": str(brief_model.id)})
     assert r.status_code == 403, r.text
+
+
+def test_summary_prices_today_where_the_brief_does(client_as, tenant_a, brief_model, db):
+    """Audit D-01: the Monitor / Negotiate lists (GET /api/portfolio/summary)
+    and the brief price "today" at one quarter — the latest with data — so a
+    row and the brief it opens show the same should-cost and gap. The summary
+    names that quarter, and the gap alert's message names it too."""
+    from app.services.alerts import _gap_trigger
+
+    c = client_as(tenant_a)
+    brief = c.post("/api/costing/brief", json={"cost_model_id": str(brief_model.id)}).json()
+    summary = c.get("/api/portfolio/summary", params={"team_id": str(tenant_a["team_id"])}).json()
+    row = next(m for m in summary["models"] if m["cost_model_id"] == str(brief_model.id))
+
+    assert (row["as_of_year"], row["as_of_quarter"]) == (CUR_Y, CUR_Q)
+    assert (row["latest_actual_year"], row["latest_actual_quarter"]) == (CUR_Y, CUR_Q)
+    assert row["current_should_cost"] == pytest.approx(brief["current_should_cost"])
+    assert row["gap"] == pytest.approx(brief["gap"])
+
+    cm = db.query(CostModel).filter(CostModel.id == brief_model.id).one()
+    trig = _gap_trigger(db, cm, 10)
+    assert f"as of Q{CUR_Q} {CUR_Y}" in trig["message"]
+
+
+def test_today_is_the_last_actual_month_of_a_monthly_only_recipe(tenant_a, db):
+    """Audit D-01 review. Most recipe indices are monthly-only. With no invoice
+    on the model, "today" was the calendar quarter (the last month carried
+    forward); it is the quarter of the last actual month, never a forecast one."""
+    from sqlalchemy import text
+    from app.models.index_layer import IndexMonthlyValue
+    from app.services.costing_engine import _current_quarter, latest_data_quarter
+
+    ci = CommodityIndex(name=f"MonthlyOnly-{uuid.uuid4().hex[:8]}", currency="USD", unit="t")
+    db.add(ci)
+    db.flush()
+    db.add_all([
+        IndexMonthlyValue(commodity_id=ci.id, year=2025, month=m, value=100 + m, kind="actual")
+        for m in (1, 2, 3, 4)
+    ] + [IndexMonthlyValue(commodity_id=ci.id, year=2025, month=9, value=120, kind="forecast")])
+    product = Product(id=uuid.uuid4(), team_id=tenant_a["team_id"], created_by=tenant_a["user_id"],
+                      name="Monthly-only product", unit="t")
+    db.add(product)
+    db.flush()
+    cm = CostModel(id=uuid.uuid4(), team_id=tenant_a["team_id"], product_id=product.id,
+                   created_by=tenant_a["user_id"], region=REGION, currency="USD")
+    db.add(cm)
+    db.flush()
+    fv = FormulaVersion(cost_model_id=cm.id, base_price=100, base_year=2025, base_quarter=1,
+                        formula_type="simple", margin_type="pct", margin_value=0)
+    db.add(fv)
+    db.flush()
+    db.add(FormulaComponent(formula_version_id=fv.id, label="Feed", commodity_id=ci.id, weight=1))
+    db.commit()
+    try:
+        db.refresh(cm)
+        # April is the last actual month: Q2-25. The September forecast is not data.
+        assert latest_data_quarter(db, cm) == (2025, 2)
+        assert latest_data_quarter(db, cm) != _current_quarter()
+    finally:
+        db.execute(text("DELETE FROM cost_models WHERE id = :id"), {"id": str(cm.id)})
+        db.query(IndexMonthlyValue).filter(IndexMonthlyValue.commodity_id == ci.id).delete(synchronize_session=False)
+        db.query(CommodityIndex).filter(CommodityIndex.id == ci.id).delete(synchronize_session=False)
+        db.commit()
+
+
+def test_summary_drift_is_sign_aware_and_savings_are_no_exposure(client_as, tenant_a, brief_model, db):
+    """Audit D-04 / D-05 / D-06. Above: actual 150 vs should-cost 111 is +35.1%
+    of the should-cost (not of the base price), drift-flagged, and 39 x 10 of
+    exposure. Below: at 90 the gap is -21, flagged below should-cost, never as
+    drift, and adds nothing to exposure. The threshold is the team's."""
+    from app.models.team import Team
+
+    c = client_as(tenant_a)
+    params = {"team_id": str(tenant_a["team_id"])}
+
+    def row_and_kpis():
+        s = c.get("/api/portfolio/summary", params=params).json()
+        return next(m for m in s["models"] if m["cost_model_id"] == str(brief_model.id)), s["kpis"]
+
+    row, kpis = row_and_kpis()
+    assert row["gap_pct"] == pytest.approx(39.0 / 111.0 * 100, abs=0.01)
+    assert row["flag_price_drift"] is True and row["flag_below_should_cost"] is False
+    assert kpis["total_exposure"] == pytest.approx(390.0)
+
+    team = db.query(Team).filter(Team.id == tenant_a["team_id"]).one()
+    team.default_threshold_pct = 40
+    db.commit()
+    row, _ = row_and_kpis()
+    assert row["flag_price_drift"] is False      # 35.1% is under the team's 40%
+
+    team.default_threshold_pct = 10
+    db.query(ActualPrice).filter(ActualPrice.cost_model_id == brief_model.id).update({"price": 90})
+    db.commit()
+    row, kpis = row_and_kpis()
+    assert row["gap"] == pytest.approx(-21.0)
+    assert row["flag_price_drift"] is False and row["flag_below_should_cost"] is True
+    assert kpis["total_exposure"] == pytest.approx(0.0)
+
+
+def test_brief_names_its_as_of_and_base_quarters(client_as, tenant_a, brief_model):
+    """Audit D-02 / D-19: a single figure is 'as of' the window's last quarter,
+    and the drivers' change is measured from the formula's base quarter — the
+    brief names both, and the narrative says "since" that quarter rather than
+    calling the movement a share of the gap "over the period"."""
+    b = client_as(tenant_a).post("/api/costing/brief", json={"cost_model_id": str(brief_model.id)}).json()
+    assert b["as_of_label"] == f"Q{CUR_Q}-{str(CUR_Y)[-2:]}"
+    assert (b["as_of_year"], b["as_of_quarter"]) == (CUR_Y, CUR_Q)
+    assert b["base_period_label"] == f"Q{BASE_Q}-{str(BASE_Y)[-2:]}"
+    # Contributions sum to the should-cost's move since the base (111 - 100),
+    # which is not the supplier gap (39): the label is what changed.
+    assert sum(d["contribution_to_gap"] for d in b["drivers"]) == pytest.approx(11.0)
+
+
+def test_a_legacy_kg_quantity_on_a_tonne_product_counts_in_tonnes(client_as, tenant_a, brief_model, db):
+    """Audit C-01: a row stored in kg before quantities were kept in the
+    product's unit (10,000 kg on a per-tonne product) was read as 10,000 t, a
+    1000x impact. The brief, the squeeze, the summary and the priority matrix
+    read it as 10 t. Summary rows also name the supplier's id (audit C-35)."""
+    product = db.query(Product).filter(Product.id == brief_model.product_id).one()
+    product.unit = "t"
+    av = db.query(ActualVolume).filter(ActualVolume.cost_model_id == brief_model.id).one()
+    av.volume, av.unit = 10000, "kg"
+    db.commit()
+
+    c = client_as(tenant_a)
+    params = {"team_id": str(tenant_a["team_id"])}
+    brief = c.post("/api/costing/brief", json={"cost_model_id": str(brief_model.id)}).json()
+    assert brief["total_impact"] == pytest.approx(390.0)            # 39 x 10 t
+    squeeze = c.post("/api/costing/squeeze", json={"cost_model_id": str(brief_model.id)}).json()
+    cur = next(p for p in squeeze["periods"] if (p["year"], p["quarter"]) == (CUR_Y, CUR_Q))
+    assert cur["volume"] == pytest.approx(10.0)
+    assert cur["impact"] == pytest.approx(390.0)
+
+    row = next(m for m in c.get("/api/portfolio/summary", params=params).json()["models"]
+               if m["cost_model_id"] == str(brief_model.id))
+    assert row["cumulative_impact"] == pytest.approx(390.0)
+    assert row["supplier_id"] == brief_model.supplier_id
+    item = next(i for i in c.get("/api/portfolio/priority-matrix", params=params).json()["items"]
+                if i["cost_model_id"] == str(brief_model.id))
+    assert item["spend_exposure"] == pytest.approx(111.0 * 10)
+
+
+def test_rule_based_narrative_uses_since_and_app_money():
+    from app.services.narrative import fmt_money, generate_narrative
+
+    assert fmt_money(-9.0152, "EUR", "t") == "-€9.02/t"
+    assert fmt_money(3517.41, "EUR") == "€3,517"
+    text = generate_narrative(
+        "PAC", "Kemira",
+        [{"component_label": "Energy", "index_name": "EU power", "index_change_pct": -8.6,
+          "contribution_to_gap": -9.0152, "direction": "down"}],
+        gap=47.77, gap_pct=16.4, total_impact=None, currency="EUR",
+        period_label="Q3-24 to Q2-26", num_periods=8, base_period_label="Q1-23", unit="t",
+    )
+    assert "fell 8.6% since Q1-23, taking €9.02/t off the should-cost" in text
+    assert "over the period" not in text and ".015" not in text
+
+    # With the should-cost as scale, a per-unit figure takes its decimals, so
+    # the narrative prints a gap or a driver the way the brief's table does.
+    assert fmt_money(34.85, "EUR", "t", scale=3517.41) == "€35/t"
+    scaled = generate_narrative(
+        "PAC", "Kemira",
+        [{"component_label": "Energy", "index_name": "EU power", "index_change_pct": -8.6,
+          "contribution_to_gap": -9.0152, "direction": "down"}],
+        gap=47.77, gap_pct=16.4, total_impact=None, currency="EUR",
+        period_label="Q3-24 to Q2-26", num_periods=8, base_period_label="Q1-23", unit="t",
+        scale=291.16,
+    )
+    assert "taking €9/t off the should-cost" in scaled
+    assert "exceeds should-cost by €48/t" in scaled
+
+
+def test_gap_alert_names_supplier_and_destination(tenant_a, brief_model, db):
+    """Audit D-09: two cost models for one product differ by supplier or
+    destination, so an alert / radar headline names both."""
+    from app.services.alerts import _gap_trigger
+
+    cm = db.query(CostModel).filter(CostModel.id == brief_model.id).one()
+    assert _gap_trigger(db, cm, 10)["message"].startswith("Sodium Hydroxide (Acme Chemicals → France) is ")

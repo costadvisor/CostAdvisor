@@ -51,7 +51,8 @@ export function num(v, dp = 0) {
 /** Money with its currency: €2,380,000 · $1.2M (compact). */
 export function money(v, currency = 'EUR', { dp = 0, compact = false } = {}) {
   if (!isNum(v)) return DASH;
-  const n = Number(v);
+  // A value that rounds to zero prints as €0, never "-€0" (−0.06 at dp 0).
+  const n = Number(Math.abs(Number(v)).toFixed(compact ? 1 : dp)) === 0 ? 0 : Number(v);
   try {
     return new Intl.NumberFormat('en-GB', {
       style: 'currency',

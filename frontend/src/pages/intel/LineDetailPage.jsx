@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import {
-  Link, useLocation, useNavigate, useParams, useSearchParams,
+  Link, useLocation, useNavigate, useNavigationType, useParams, useSearchParams,
 } from 'react-router-dom';
 import {
   DetailHeader, Tabs, TabPanel, useTabParam, EmptyState, ErrorState, LoadingPage, useApi,
@@ -24,6 +24,41 @@ import '../../styles/intel-lines.css';
  * makers + Concentrated supply. */
 
 const TAB_IDS = ['report', 'products', 'demand'];
+
+/* The Report tab stays mounted (B-04: no second ~100 KB fetch on return),
+ * so ReportTab's own place-keeping, which runs when it mounts, misses a tab
+ * switch: the switch restores each tab's window offset here. Taken from the
+ * last scroll while the tab was shown; kept per line for the session, so a
+ * Back that lands on another tab still finds the report's place; cleared
+ * when the line is opened afresh (by id, or by key: the id REPLACE). */
+function useTabPlaces(tab, storeKey) {
+  const navType = useNavigationType();
+  const places = useRef(null);
+  if (places.current === null) {
+    let saved = {};
+    if (navType === 'POP') {
+      try { saved = JSON.parse(sessionStorage.getItem(storeKey)) || {}; } catch { saved = {}; }
+    }
+    places.current = saved;
+  }
+  const shown = useRef(tab);
+
+  useEffect(() => {
+    const onScroll = () => { places.current[shown.current] = Math.round(window.scrollY); };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      try { sessionStorage.setItem(storeKey, JSON.stringify(places.current)); } catch { /* storage off */ }
+    };
+  }, [storeKey]);
+
+  useLayoutEffect(() => {
+    if (shown.current === tab) return;
+    shown.current = tab;
+    const y = places.current[tab];
+    if (y != null) window.scrollTo(0, y);
+  }, [tab]);
+}
 
 /* The page is keyed by the line it shows: moving from one line to another
  * (a caveat link, the back button) mounts a fresh page, so the previous
@@ -54,6 +89,7 @@ function LineDetail({ lineRef }) {
 
   const reports = line?.reports || [];
   const [tab, setTab] = useTabParam(TAB_IDS, line && !reports.length ? 'products' : 'report');
+  useTabPlaces(tab, `ixl-tab-y:${lineRef}`);
   const backTo = `${LINES_PATH}${location.state?.fromSearch || ''}`;
 
   if (status === 404) {
@@ -127,7 +163,7 @@ function LineDetail({ lineRef }) {
       />
 
       <div className={`ix-detail-body${loading ? ' is-refreshing' : ''}`}>
-        <TabPanel id="report" active={tab} idBase="line">
+        <TabPanel id="report" active={tab} idBase="line" keepMounted>
           <ReportTab line={line} />
         </TabPanel>
         <TabPanel id="products" active={tab} idBase="line">

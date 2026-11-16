@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
-import { DriftBar } from './wsCharts';
+import { DriftBar, GAP_STATUS as STATUS, gapStatus } from './wsCharts';
 import DemoDataNote from '../../components/DemoDataNote';
-import { dominantCurrency, fmtMoney, fmtSignedMoney, EXPOSURE_NOTE } from '../../utils/currency';
+import { qLabel } from '../../utils/quarters';
+import { dominantCurrency, fmtMoney, fmtSignedMoney, EXPOSURE_NOTE, rowExposure } from '../../utils/currency';
 
 /* ──────────────────────────────────────────────────────────────────────
  * Negotiate — landing lets a buyer pick which product to prep a call for,
@@ -20,13 +21,6 @@ import { dominantCurrency, fmtMoney, fmtSignedMoney, EXPOSURE_NOTE } from '../..
  * of the real flow.
  * ──────────────────────────────────────────────────────────────────── */
 
-const STATUS = {
-  alert: { label: 'Above should-cost', color: 'var(--accent2)', bg: 'var(--danger-bg)', rank: 0 },
-  watch: { label: 'Index moved', color: 'var(--accent3)', bg: 'var(--warn-bg)', rank: 1 },
-  ok: { label: 'On track', color: 'var(--accent)', bg: 'var(--success-bg)', rank: 2 },
-  draft: { label: 'Formula draft', color: 'var(--muted)', bg: 'var(--neutral-bg)', rank: 3 },
-};
-
 export default function NegotiateArea() {
   const { activeTeamId } = useAuth();
   const navigate = useNavigate();
@@ -37,7 +31,14 @@ export default function NegotiateArea() {
   const [reportCur, setReportCur] = useState('USD');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [search, setSearch] = useState('');
+  // The search lives in the URL so Back from a brief returns to the same list.
+  const [params, setParams] = useSearchParams();
+  const search = params.get('q') || '';
+  const setSearch = (v) => setParams(prev => {
+    const next = new URLSearchParams(prev);
+    if (v) next.set('q', v); else next.delete('q');
+    return next;
+  }, { replace: true });
 
   useEffect(() => {
     if (!activeTeamId) return;
@@ -72,19 +73,24 @@ export default function NegotiateArea() {
   const rows = useMemo(() => {
     const cmRows = costModels.map(cm => {
       const s = summaryByModel[cm.id];
-      const status = !s ? 'draft'
-        : s.flag_price_drift ? 'alert'
-          : s.flag_index_moved ? 'watch' : 'ok';
-      const exposure = s ? Math.abs(s.cumulative_impact ?? s.gap ?? 0) : 0;
+      const status = gapStatus(s);
+      const exposure = rowExposure(s);
       return {
         kind: 'cm', costModelId: cm.id, productId: cm.product_id,
         name: cm.product_name || 'Unnamed product',
         supplier: cm.supplier_name || null,
         region: cm.region || null,
+        // Two cost models for one product and supplier differ by destination
+        // (and Incoterm), which the row has to show to tell them apart.
+        destination: cm.destination_country || null,
+        incoterm: cm.incoterm || null,
         currency: cm.currency || reportCur,
         status,
         shouldCost: s ? s.current_should_cost : null,
+        // Priced at the latest quarter with data, the quarter its brief ends at.
+        asOf: s?.as_of_year ? qLabel(s.as_of_year, s.as_of_quarter) : null,
         actual: s ? s.latest_actual_price : null,
+        actualPeriod: s?.latest_actual_year ? qLabel(s.latest_actual_year, s.latest_actual_quarter) : null,
         gap: s ? s.gap : null,
         gapPct: s ? s.gap_pct : null,
         exposure,
@@ -105,6 +111,7 @@ export default function NegotiateArea() {
 
   const maxAbsGap = Math.max(25, ...rows.map(r => Math.abs(r.gapPct || 0)));
   const negotiable = rows.filter(r => r.kind === 'cm');
+  const liveCount = negotiable.filter(r => r.status !== 'draft').length;
   // The server's total converts each model's exposure into the reporting
   // currency (the same figure Monitor shows); the row sum is the fallback.
   const totalExposure = summary?.kpis?.total_exposure ?? rows.reduce((s, r) => s + (r.exposure || 0), 0);
@@ -130,9 +137,11 @@ export default function NegotiateArea() {
       ) : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, margin: '14px 0' }}>
+            {/* Counted as Monitor and Forecast count: products, then cost models. */}
             <div className="ca-metric">
-              <div className="ca-metric-lbl">Ready to negotiate</div>
-              <div className="ca-metric-val">{negotiable.length} / {rows.length}</div>
+              <div className="ca-metric-lbl">Products in portfolio</div>
+              <div className="ca-metric-val">{products.length}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{liveCount} of {negotiable.length} cost models ready to negotiate</div>
             </div>
             <div className="ca-metric" title={EXPOSURE_NOTE}>
               <div className="ca-metric-lbl">Total exposure</div>
@@ -153,7 +162,7 @@ export default function NegotiateArea() {
           <input className="ca-input" style={{ width: 240, marginBottom: 12 }} placeholder="Search product or supplier…" value={search} onChange={e => setSearch(e.target.value)} />
 
           <div className="ca-card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div className="ca-scroll-x">
+            <div className="ca-scroll-x ca-scroll-x--full">
               <table className="ca-table" style={{ width: '100%' }}>
                 <thead>
                   <tr>
@@ -180,16 +189,20 @@ export default function NegotiateArea() {
                         <td style={{ width: 4, padding: 0, background: st.color }} />
                         <td>
                           <div style={{ fontWeight: 600, color: r.kind === 'draft' ? 'var(--text-secondary)' : 'var(--text)' }}>{r.name}</div>
-                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.supplier || 'No supplier'}{r.region ? ` · ${r.region}` : ''}</div>
+                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                            {r.supplier || 'No supplier'}{r.destination ? ` → ${r.destination}` : r.region ? ` · ${r.region}` : ''}{r.incoterm ? ` · ${r.incoterm}` : ''}
+                          </div>
                         </td>
                         <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.shouldCost != null ? 'var(--accent)' : 'var(--muted)' }}>
                           {r.shouldCost != null ? fmtMoney(r.shouldCost, r.currency) : '—'}
+                          {r.asOf && <div style={{ fontSize: 10, color: 'var(--muted)' }}>as of {r.asOf}</div>}
                         </td>
                         <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.actual != null ? 'var(--accent4)' : 'var(--muted)' }}>
                           {r.actual != null ? fmtMoney(r.actual, r.currency) : '—'}
+                          {r.actualPeriod && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{r.actualPeriod}</div>}
                         </td>
                         <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.gap > 0 ? 'var(--accent2)' : r.gap < 0 ? 'var(--accent)' : 'var(--muted)' }}>
-                          {r.gap != null ? fmtSignedMoney(r.gap, r.currency) : '—'}
+                          {r.gap != null ? fmtSignedMoney(r.gap, r.currency, { scale: r.shouldCost }) : '—'}
                           {r.gapPct != null && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{r.gapPct > 0 ? '+' : ''}{r.gapPct.toFixed(1)}%</div>}
                         </td>
                         <td>{r.gapPct != null ? <DriftBar value={Math.abs(r.gapPct)} max={maxAbsGap} color={st.color} /> : null}</td>

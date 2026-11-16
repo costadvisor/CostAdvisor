@@ -5,6 +5,7 @@ import { qLabel, QUARTER_OPTS, currentQuarter, quarterStartDate, quarterKey } fr
 import { useConfirm } from '../components/ConfirmDialog';
 import FileUpload from '../components/FileUpload';
 import PriceChart from '../components/PriceChart';
+import { fmtMoney } from '../utils/currency';
 
 export default function Pricing() {
   const { costModelId } = useParams();
@@ -27,6 +28,7 @@ export default function Pricing() {
   const [addPrice, setAddPrice] = useState('');
   const [addVolume, setAddVolume] = useState('');
   const [saving, setSaving] = useState(false);
+  const [addError, setAddError] = useState(null);
 
   // Editing state
   const [editKey, setEditKey] = useState(null); // "year-quarter"
@@ -104,10 +106,20 @@ export default function Pricing() {
     }
   }, [mergedRows, loadingPrices]);
 
+  // The server's bounds, checked first so the message sits next to the row:
+  // a price above zero, a quantity of zero or more.
+  const entryError = (price, volume) => {
+    if (price !== '' && !(parseFloat(price) > 0)) return 'Price must be above zero.';
+    if (volume !== '' && !(parseFloat(volume) >= 0)) return "Quantity can't be negative.";
+    return null;
+  };
+
   const addPriceRow = () => {
     if (!addPrice && !addVolume) return;
+    const bad = entryError(addPrice, addVolume);
+    if (bad) { setAddError(bad); return; }
     setSaving(true);
-    setRowError(null);
+    setAddError(null);
     const promises = [];
     if (addPrice) {
       promises.push(api.put(`/api/prices/${costModelId}/${addYear}/${addQuarter}`, {
@@ -115,13 +127,15 @@ export default function Pricing() {
       }));
     }
     if (addVolume) {
+      // The quantity column is in the product's unit; without it the server
+      // used to store "kg" on a tonne-priced model.
       promises.push(api.put(`/api/volumes/${costModelId}/${addYear}/${addQuarter}`, {
-        year: addYear, quarter: addQuarter, volume: parseFloat(addVolume),
+        year: addYear, quarter: addQuarter, volume: parseFloat(addVolume), unit: model?.product_unit || undefined,
       }));
     }
     Promise.all(promises)
       .then(() => { setAddPrice(''); setAddVolume(''); fetchData(); })
-      .catch(err => setRowError(formatApiError(err)))
+      .catch(err => setAddError(formatApiError(err)))
       .finally(() => setSaving(false));
   };
 
@@ -132,6 +146,8 @@ export default function Pricing() {
   };
 
   const saveEdit = (row) => {
+    const bad = entryError(editPrice, editVolume);
+    if (bad) { setRowError(bad); return; }
     setRowError(null);
     const promises = [];
     if (editPrice !== '') {
@@ -141,7 +157,7 @@ export default function Pricing() {
     }
     if (editVolume !== '') {
       promises.push(api.put(`/api/volumes/${costModelId}/${row.year}/${row.quarter}`, {
-        year: row.year, quarter: row.quarter, volume: parseFloat(editVolume),
+        year: row.year, quarter: row.quarter, volume: parseFloat(editVolume), unit: model?.product_unit || undefined,
       }));
     }
     Promise.all(promises)
@@ -182,12 +198,11 @@ export default function Pricing() {
       to_year: toYear,
       to_quarter: toQuarter,
     })
-      .then(({ data }) => setAnalysis(data))
+      .then(({ data }) => setAnalysis({ ...data, from: { year: fromYear, quarter: fromQuarter }, to: { year: toYear, quarter: toQuarter } }))
       .catch(err => { setAnalysis(null); setAnalysisError(formatApiError(err)); })
       .finally(() => setLoadingAnalysis(false));
   };
 
-  const sym = model?.currency === 'EUR' ? '€' : '$';
   const unitLabel = model?.product_unit || '';  // product unit for price/quantity labels (no hardcoded 'kg')
   const priceUnit = unitLabel ? `${model?.currency || ''}/${unitLabel}`.replace(/^\//, '') : model?.currency || '';
 
@@ -198,10 +213,19 @@ export default function Pricing() {
     if (!vals.length) return 2;
     return Math.max(...vals) < 2 ? 4 : 2;
   }, [mergedRows]);
-  const fmtPrice = v => `${sym}${v.toLocaleString(undefined, { minimumFractionDigits: priceDecimals, maximumFractionDigits: priceDecimals })}`;
+  // Recorded prices keep their cents, on the shared fixed-locale formatter: the
+  // browser locale printed "€2.907,84" in a German browser.
+  const fmtPrice = v => fmtMoney(v, model?.currency, { decimals: priceDecimals });
+  const fmtQty = v => Number(v).toLocaleString('en-US');
 
   const pricedRows = mergedRows.filter(r => r.price != null);
-  const chartSeries = pricedRows.map(r => ({ date: quarterStartDate(r.year, r.quarter), rate: Number(r.price) }));
+  // What the supplier's price actually did over the analysed span, beside what
+  // the indices say it should have done.
+  const priceAt = (p) => (p ? pricedRows.find(r => r.year === p.year && r.quarter === p.quarter)?.price ?? null : null);
+  const actualFrom = analysis ? priceAt(analysis.from) : null;
+  const actualTo = analysis ? priceAt(analysis.to) : null;
+  const actualChangePct = actualFrom && actualTo != null ? ((actualTo - actualFrom) / actualFrom) * 100 : null;
+  const chartSeries = pricedRows.map(r => ({ date: quarterStartDate(r.year, r.quarter), rate: Number(r.price), label: qLabel(r.year, r.quarter) }));
   const latest = pricedRows[pricedRows.length - 1];
   const latestVol = [...mergedRows].reverse().find(r => r.volume != null);
   const bothCount = mergedRows.filter(r => r.price != null && r.volume != null).length;
@@ -223,7 +247,7 @@ export default function Pricing() {
   const stats = mergedRows.length ? [
     { lbl: 'Periods on record', val: mergedRows.length, sub: `${pricedRows.length} priced · ${mergedRows.length - pricedRows.length} quantity only` },
     { lbl: 'Latest price', val: latest ? fmtPrice(latest.price) : '—', sub: latest ? `${qLabel(latest.year, latest.quarter)}${priceUnit ? ` · per ${unitLabel}` : ''}` : 'no price recorded yet' },
-    { lbl: 'Latest quantity', val: latestVol ? Number(latestVol.volume).toLocaleString() : '—', sub: latestVol ? `${qLabel(latestVol.year, latestVol.quarter)}${latestVol.unit || unitLabel ? ` · ${latestVol.unit || unitLabel}` : ''}` : 'needed for total impact' },
+    { lbl: 'Latest quantity', val: latestVol ? fmtQty(latestVol.volume) : '—', sub: latestVol ? `${qLabel(latestVol.year, latestVol.quarter)}${latestVol.unit || unitLabel ? ` · ${latestVol.unit || unitLabel}` : ''}` : 'needed for total impact' },
     { lbl: 'Complete periods', val: `${bothCount} / ${mergedRows.length}`, sub: bothCount === mergedRows.length ? 'price and quantity on every period' : 'both price and quantity recorded' },
   ] : [];
 
@@ -343,7 +367,7 @@ export default function Pricing() {
                         <td className="right">
                           {isEditing ? (
                             <input
-                              type="number" step="0.01" className="ca-input"
+                              type="number" step="0.01" min="0" className="ca-input"
                               style={{ width: 110, textAlign: 'right', fontSize: 12, padding: '3px 6px' }}
                               aria-label={`Price for ${qLabel(row.year, row.quarter)}`}
                               value={editPrice}
@@ -358,7 +382,7 @@ export default function Pricing() {
                         <td className="right">
                           {isEditing ? (
                             <input
-                              type="number" step="1" className="ca-input"
+                              type="number" step="1" min="0" className="ca-input"
                               style={{ width: 110, textAlign: 'right', fontSize: 12, padding: '3px 6px' }}
                               aria-label={`Quantity for ${qLabel(row.year, row.quarter)}`}
                               value={editVolume}
@@ -367,7 +391,7 @@ export default function Pricing() {
                             />
                           ) : (
                             <span style={{ fontWeight: 500 }}>
-                              {row.volume != null ? `${Number(row.volume).toLocaleString()}${(row.unit || unitLabel) ? ` ${row.unit || unitLabel}` : ''}` : '—'}
+                              {row.volume != null ? `${fmtQty(row.volume)}${(row.unit || unitLabel) ? ` ${row.unit || unitLabel}` : ''}` : '—'}
                             </span>
                           )}
                         </td>
@@ -411,7 +435,7 @@ export default function Pricing() {
             <div>
               <label className="ca-label" htmlFor="add-price">Price{priceUnit ? ` (${priceUnit})` : ''}</label>
               <input
-                id="add-price" ref={priceInputRef} type="number" step="0.01" className="ca-input"
+                id="add-price" ref={priceInputRef} type="number" step="0.01" min="0" className="ca-input"
                 style={{ width: 140, fontSize: 12 }}
                 value={addPrice}
                 onChange={e => setAddPrice(e.target.value)}
@@ -421,7 +445,7 @@ export default function Pricing() {
             <div>
               <label className="ca-label" htmlFor="add-qty">Quantity{unitLabel ? ` (${unitLabel})` : ''}</label>
               <input
-                id="add-qty" type="number" step="1" className="ca-input"
+                id="add-qty" type="number" step="1" min="0" className="ca-input"
                 style={{ width: 140, fontSize: 12 }}
                 value={addVolume}
                 onChange={e => setAddVolume(e.target.value)}
@@ -432,6 +456,9 @@ export default function Pricing() {
               {saving ? 'Adding…' : 'Add'}
             </button>
           </div>
+          {addError && (
+            <div role="alert" style={{ fontSize: 12, color: 'var(--accent2)', marginTop: 8 }}>{addError}</div>
+          )}
         </div>
 
         {/* Recorded price trend */}
@@ -484,13 +511,36 @@ export default function Pricing() {
 
           {analysis && (
             <>
-              <div className="ca-result" style={{ marginBottom: 16 }}>
-                <div className="ca-result-label">Should-cost change · {analysis.from_label} → {analysis.to_label}</div>
-                <div className="ca-result-big" style={{ color: analysis.fair_change_pct > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
-                  {analysis.fair_change_pct > 0 ? '+' : ''}{analysis.fair_change_pct.toFixed(2)}%
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 16 }}>
+                <div className="ca-result">
+                  <div className="ca-result-label">Should-cost change · {analysis.from_label} → {analysis.to_label}</div>
+                  <div className="ca-result-big" style={{ color: analysis.fair_change_pct > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
+                    {analysis.fair_change_pct > 0 ? '+' : ''}{analysis.fair_change_pct.toFixed(2)}%
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+                    What the price should have moved by, given how the linked indices moved over this span.
+                  </div>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
-                  What the price should have moved by, given how the linked indices moved over this span.
+                <div className="ca-result">
+                  <div className="ca-result-label">Actual price change</div>
+                  {actualChangePct != null ? (
+                    <>
+                      <div className="ca-result-big" style={{ color: actualChangePct > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
+                        {actualChangePct > 0 ? '+' : ''}{actualChangePct.toFixed(2)}%
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+                        {fmtPrice(actualFrom)} → {fmtPrice(actualTo)}
+                        {' · '}
+                        <span style={{ color: actualChangePct - analysis.fair_change_pct > 0 ? 'var(--accent2)' : 'var(--accent)' }}>
+                          {actualChangePct - analysis.fair_change_pct > 0 ? '+' : ''}{(actualChangePct - analysis.fair_change_pct).toFixed(1)} pts
+                        </span>{' '}vs the should-cost change
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+                      Needs a recorded price in both {analysis.from_label} and {analysis.to_label}.
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -524,13 +574,14 @@ export default function Pricing() {
                         </td>
                       </tr>
                     ))}
-                    {/* Margin row — always shown, zeros if no margin */}
+                    {/* Margin row — always shown. It follows no index, so its index
+                        columns are blank rather than a misleading 0.00. */}
                     <tr style={{ opacity: 0.6 }}>
                       <td>Margin</td>
                       <td className="right">{(analysis.margin_weight || 0).toFixed(1)}%</td>
-                      <td className="right">0.00</td>
-                      <td className="right">0.00</td>
-                      <td className="right" style={{ color: 'var(--muted)' }}>0.0%</td>
+                      <td className="right">—</td>
+                      <td className="right">—</td>
+                      <td className="right" style={{ color: 'var(--muted)' }}>—</td>
                       <td className="right" style={{ color: 'var(--muted)' }}>0.00%</td>
                     </tr>
                     {/* Total row */}

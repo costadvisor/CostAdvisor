@@ -102,14 +102,26 @@ def _build_cost_model_out(cm: CostModel) -> CostModelOut:
     return out
 
 
+def _with_as_of(db: Session, cm: CostModel, out: CostModelOut) -> CostModelOut:
+    if cm.current_formula is not None:
+        from app.services.costing_engine import latest_data_quarter
+        out.as_of_year, out.as_of_quarter = latest_data_quarter(db, cm)
+    return out
+
+
 @router.get("/", response_model=list[CostModelOut])
 def list_cost_models(
     team_id: uuid.UUID,
+    as_of: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """`as_of=true` adds each model's as-of quarter (about 8 ms a model), for
+    the Portfolio grid, which prices "today" per row as every list does."""
     require_permission(db, current_user, team_id, "cost_models.view")
     models = db.query(CostModel).filter(CostModel.team_id == team_id).all()
+    if as_of:
+        return [_with_as_of(db, cm, _build_cost_model_out(cm)) for cm in models]
     return [_build_cost_model_out(cm) for cm in models]
 
 
@@ -198,7 +210,7 @@ def get_cost_model(
     if not cm:
         raise HTTPException(status_code=404, detail="Cost model not found")
     require_permission(db, current_user, cm.team_id, "cost_models.view")
-    return _build_cost_model_out(cm)
+    return _with_as_of(db, cm, _build_cost_model_out(cm))
 
 
 @router.put("/{cost_model_id}", response_model=CostModelOut)
@@ -216,7 +228,9 @@ def update_cost_model(
     changes = {}
     for field in ["supplier_id", "destination_country", "destination_region", "region", "currency", "incoterm"]:
         val = getattr(data, field, None)
-        if val is not None:
+        # Only what changed: the form submits every field, and the log read
+        # "region: Europe -> Europe" for each one.
+        if val is not None and str(val) != str(getattr(cm, field)):
             changes[field] = {"old": str(getattr(cm, field)), "new": str(val)}
             setattr(cm, field, val)
 
@@ -426,8 +440,10 @@ def list_nestable(
         except FormulaChainError as exc:
             out.append({
                 "cost_model_id": str(c.id),
+                "product_id": str(c.product_id),
                 "product_name": c.product.name if c.product else None,
                 "supplier_name": c.supplier.name if c.supplier else None,
+                "destination_country": c.destination_country,
                 "region": c.region,
                 "eligible": False,
                 # Named, not just excluded: "why is X missing from this list"
@@ -438,8 +454,12 @@ def list_nestable(
         fv = c.current_formula
         out.append({
             "cost_model_id": str(c.id),
+            # The product and ship-to tell two models of one product and
+            # supplier apart, and show which models share a product.
+            "product_id": str(c.product_id),
             "product_name": c.product.name if c.product else None,
             "supplier_name": c.supplier.name if c.supplier else None,
+            "destination_country": c.destination_country,
             "region": c.region,
             "eligible": fv is not None and fv.formula_type != "advanced",
             "reason": (

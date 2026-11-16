@@ -2,18 +2,26 @@ import { Fragment, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
-import { useConfirm } from '../components/ConfirmDialog';
+import { useConfirm, useAlert } from '../components/ConfirmDialog';
 import { DriftBar } from './workspace/wsCharts';
 import exportCsv from '../utils/exportCsv';
 import { fmtMoney } from '../utils/currency';
+
+// A portfolio summary row belongs to a supplier by id. A row without the
+// supplier_id key (older server) falls back to the name, which merged two
+// suppliers that share one.
+const suppliedBy = (m, supplierId, supplierName) =>
+  (m.supplier_id !== undefined ? String(m.supplier_id) === String(supplierId) : m.supplier_name === supplierName);
 
 export default function Suppliers() {
   const { activeTeamId } = useAuth();
   const navigate = useNavigate();
   const confirm = useConfirm();
+  const showAlert = useAlert();
   const [suppliers, setSuppliers] = useState([]);
   const [portfolio, setPortfolio] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [country, setCountry] = useState('');
@@ -28,18 +36,21 @@ export default function Suppliers() {
   const [trustResolution, setTrustResolution] = useState(null);
   const [computingTrust, setComputingTrust] = useState(false);
 
+  // A failed load must not read as "No suppliers yet". The portfolio summary
+  // only adds the per-supplier cost models, so its failure leaves the list up.
   const fetchData = () => {
     if (!activeTeamId) return;
     setLoading(true);
     Promise.all([
       api.get('/api/suppliers', { params: { team_id: activeTeamId } }),
-      api.get('/api/portfolio/summary', { params: { team_id: activeTeamId } }),
+      api.get('/api/portfolio/summary', { params: { team_id: activeTeamId } }).catch(() => null),
     ])
       .then(([sRes, pRes]) => {
         setSuppliers(sRes.data);
-        setPortfolio(pRes.data.models || []);
+        setPortfolio(pRes?.data.models || []);
+        setLoadError(null);
       })
-      .catch(console.error)
+      .catch(err => setLoadError(formatApiError(err)))
       .finally(() => setLoading(false));
   };
 
@@ -83,7 +94,7 @@ export default function Suppliers() {
     setComputingTrust(true);
     api.post('/api/suppliers/trust-scores/compute-all', null, { params: { team_id: activeTeamId } })
       .then(() => fetchTrustScores())
-      .catch(console.error)
+      .catch(err => showAlert({ title: "Couldn't compute trust scores", message: formatApiError(err) }))
       .finally(() => setComputingTrust(false));
   };
 
@@ -92,14 +103,30 @@ export default function Suppliers() {
     setSaving(true);
     api.post(`/api/suppliers?team_id=${activeTeamId}`, { name: name.trim(), country: country.trim() || null })
       .then(() => { setName(''); setCountry(''); setShowForm(false); fetchData(); })
-      .catch(console.error)
+      .catch(err => showAlert({ title: "Couldn't add the supplier", message: formatApiError(err) }))
       .finally(() => setSaving(false));
   };
 
-  const handleDelete = async (id) => {
-    const ok = await confirm({ title: 'Delete this supplier?', confirmLabel: 'Delete', danger: true });
+  // The server refuses to delete a supplier that cost models still name (it
+  // used to strip the supplier from all of them), so say why up front.
+  const handleDelete = async (s, models) => {
+    if (models.length > 0) {
+      showAlert({
+        title: `${s.name} is still in use`,
+        message: `It is the supplier of ${models.length} cost model${models.length === 1 ? '' : 's'}. Move them to another supplier (View model > Edit) before deleting it.`,
+      });
+      return;
+    }
+    const ok = await confirm({
+      title: `Delete ${s.name}?`,
+      message: 'Contracts with this supplier keep their terms but no longer name it.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
     if (!ok) return;
-    api.delete(`/api/suppliers/${id}`).then(fetchData).catch(console.error);
+    api.delete(`/api/suppliers/${s.id}`)
+      .then(fetchData)
+      .catch(err => showAlert({ title: "Couldn't delete the supplier", message: formatApiError(err) }));
   };
 
   const handleExportExcel = (id, name) => {
@@ -112,11 +139,13 @@ export default function Suppliers() {
         a.click();
         URL.revokeObjectURL(url);
       })
-      .catch(console.error);
+      .catch(err => showAlert({ title: "Couldn't export the supplier", message: formatApiError(err) }));
   };
 
-  const getSupplierModels = (supplierId) =>
-    portfolio.filter(m => m.supplier_name === suppliers.find(s => s.id === supplierId)?.name);
+  const getSupplierModels = (supplierId) => {
+    const s = suppliers.find(x => x.id === supplierId);
+    return s ? portfolio.filter(m => suppliedBy(m, s.id, s.name)) : [];
+  };
 
   return (
     <div className="ca-page ca-fade-in">
@@ -168,6 +197,11 @@ export default function Suppliers() {
 
       {loading ? (
         <div style={{ padding: 20, color: 'var(--muted)' }}>Loading...</div>
+      ) : loadError ? (
+        <div className="ca-card" style={{ textAlign: 'center', padding: 32 }}>
+          <div style={{ color: 'var(--accent2)', fontSize: 12, marginBottom: 14 }}>Couldn't load your suppliers — {loadError}</div>
+          <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={fetchData}>Try again</button>
+        </div>
       ) : suppliers.length === 0 ? (
         <div className="ca-card" style={{ textAlign: 'center', padding: 48 }}>
           <div style={{ color: 'var(--text-secondary)', marginBottom: 14 }}>
@@ -183,7 +217,8 @@ export default function Suppliers() {
                 <th style={{ width: 30 }}></th>
                 <th>Name</th>
                 <th>Country</th>
-                <th className="center">Products</th>
+                {/* Cost models, not products: one product to two ship-tos is two. */}
+                <th className="center">Cost models</th>
                 <th className="center">Created</th>
                 <th className="center">Actions</th>
               </tr>
@@ -211,7 +246,8 @@ export default function Suppliers() {
                         </span>
                       </td>
                       <td className="center" style={{ fontSize: 11, color: 'var(--muted)' }}>
-                        {s.created_at ? new Date(s.created_at).toLocaleDateString() : '\u2014'}
+                        {/* ISO date, as Contracts prints them: the browser locale read 11/6/2026. */}
+                        {s.created_at ? s.created_at.slice(0, 10) : '\u2014'}
                       </td>
                       <td className="center">
                         <button className="ca-btn ca-btn-ghost ca-btn-sm"
@@ -225,7 +261,7 @@ export default function Suppliers() {
                           </button>
                         )}
                         <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ marginLeft: 4, color: 'var(--accent2)' }}
-                          onClick={e => { e.stopPropagation(); handleDelete(s.id); }}>Delete</button>
+                          onClick={e => { e.stopPropagation(); handleDelete(s, models); }}>Delete</button>
                       </td>
                     </tr>
                     {isExpanded && (
@@ -234,7 +270,7 @@ export default function Suppliers() {
                           <table className="ca-table" style={{ margin: '8px 0' }}>
                             <thead>
                               <tr>
-                                <th>Family</th>
+                                <th>Product</th>
                                 <th>Reference</th>
                                 <th>Producing Region</th>
                                 <th className="center">Gap %</th>
@@ -301,8 +337,10 @@ function trustGrainLabel(s) {
 }
 
 function TrustGradeBadge({ summary }) {
-  if (!summary) {
-    return <span style={{ fontSize: 11, color: 'var(--muted)' }}>Not computed</span>;
+  // No stored score rows means the scores were never computed, not that the
+  // data is short: every supplier read "Insufficient data" on a fresh team.
+  if (!summary || !summary.scores?.length) {
+    return <span style={{ fontSize: 11, color: 'var(--muted)' }} title="Run 'Compute trust scores' above">Not computed</span>;
   }
   if (summary.insufficient_data || summary.overall_grade == null) {
     return <span style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>Insufficient data</span>;
@@ -350,7 +388,7 @@ function BenchmarkView({ data, loading, error, trustScores, trustResolution, com
   // say which: take it from the supplier's cost models. Mixed currencies get no
   // symbol, since the sum is not converted.
   const currenciesOf = Object.fromEntries(priced.map(s => [s.supplier_id, [...new Set(models
-    .filter(m => m.supplier_name === s.supplier_name).map(m => m.currency).filter(Boolean))]]));
+    .filter(m => suppliedBy(m, s.supplier_id, s.supplier_name)).map(m => m.currency).filter(Boolean))]]));
   const gapColor = (g) => (g > 1 ? 'var(--accent2)' : g < -1 ? 'var(--accent)' : 'var(--muted)');
   const trendArrow = (t) => {
     if (!t || t.length < 2) return null;
@@ -388,7 +426,7 @@ function BenchmarkView({ data, loading, error, trustScores, trustResolution, com
           <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={handleExport}>Export CSV</button>
         </div>
       </div>
-      <div className="ca-scroll-x">
+      <div className="ca-scroll-x ca-scroll-x--full">
         <table className="ca-table" style={{ width: '100%' }}>
           <thead>
             <tr>

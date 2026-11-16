@@ -109,6 +109,7 @@ from app.models.user import User
 from app.services.drop.report import LoadReport, TableDiff
 from app.services.formula_resolver import flatten_components, resolve_coverage
 from app.services.intelligence import derive
+from app.services.permissions import MEMBER_READABLE_CATEGORIES
 
 # ── Identity ─────────────────────────────────────────────────────────────────
 
@@ -515,7 +516,9 @@ def _reference_role_keys(db: Session, plan_keys: set[str],
                          exclude_team_id: uuid.UUID | None) -> dict[str, set[str]]:
     """The permission set each default role holds on existing teams — the most
     common set per role name, since no Dream-plan team exists to copy from.
-    Falls back to the migration's own rule if no team has roles yet."""
+    Falls back to the migration's own rule if no team has roles yet, with
+    Member limited to the categories permissions.py lets a plain member read
+    (never `contracts.*`)."""
     q = (
         db.query(Role.team_id, Role.name, Permission.key)
         .join(RolePermission, RolePermission.role_id == Role.id)
@@ -540,7 +543,8 @@ def _reference_role_keys(db: Session, plan_keys: set[str],
         elif name == "Admin":
             keys = {k for k in plan_keys if not k.endswith(".delete")}
         else:
-            keys = {k for k in plan_keys if k.endswith((".view", ".export"))}
+            keys = {k for k in plan_keys if k.endswith((".view", ".export"))
+                    and k.rpartition(".")[0] in MEMBER_READABLE_CATEGORIES}
         out[name] = (keys | STRATEGY_KEYS[name]) & plan_keys
     return out
 

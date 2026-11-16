@@ -4,7 +4,7 @@ import { useAuth } from '../../AuthContext';
 import { useToast } from '../../components/Toast';
 import { qLabel } from '../../utils/quarters';
 import exportCsv from '../../utils/exportCsv';
-import { fmtMoney, EXPOSURE_NOTE } from '../../utils/currency';
+import { dominantCurrency, fmtMoney, fmtNumber, EXPOSURE_NOTE } from '../../utils/currency';
 import DemoDataNote from '../../components/DemoDataNote';
 import { MultiLineChart } from './wsCharts';
 
@@ -38,8 +38,7 @@ const STATUS = {
     help: 'Every quarter this run projected has since been observed. Re-run projections for a forward view.' },
 };
 
-const num = (v, unit) => (v == null ? '—'
-  : `${v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 2 : 0 })}${unit ? ` ${unit}` : ''}`);
+const num = (v, unit) => (v == null ? '—' : `${fmtNumber(v)}${unit ? ` ${unit}` : ''}`);
 
 const daysSince = (iso) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : null);
 
@@ -69,6 +68,9 @@ export default function ForecastArea() {
   const { activeTeamId, user } = useAuth();
   const { addToast } = useToast();
   const [models, setModels] = useState([]);
+  const [kpis, setKpis] = useState(null);
+  const [reportCur, setReportCur] = useState('USD');
+  const [productCount, setProductCount] = useState(0);
   const [indices, setIndices] = useState([]);
   const [projections, setProjections] = useState({}); // commodity_name -> run | null
   const [selected, setSelected] = useState(null);
@@ -80,16 +82,62 @@ export default function ForecastArea() {
     if (!activeTeamId) return;
     setLoading(true); setError(null);
     Promise.all([
-      api.get('/api/portfolio/summary', { params: { team_id: activeTeamId } }),
-      api.get('/api/indexes/public-quarterly', { params: { limit: 16 } }),
-      // public-quarterly is a no-auth landing-page endpoint and deliberately
-      // carries no commodity_id, so the id has to come from the authenticated
-      // list. That id is what the projection endpoint is keyed on.
+      api.get('/api/cost-models/', { params: { team_id: activeTeamId } }),
+      // Commodity ids (the projection endpoint is keyed on them) and units.
       api.get('/api/indexes'),
     ])
-      .then(async ([sum, pub, all]) => {
+      .then(async ([cmRes, all]) => {
+        // The summary in the team's dominant currency, as Monitor and Negotiate
+        // ask for it, so the exposure KPI is the same FX-converted server total.
+        const reporting = dominantCurrency(cmRes.data) || 'USD';
+        const sum = await api.get('/api/portfolio/summary',
+          { params: { team_id: activeTeamId, reporting_currency: reporting } });
         setModels(sum.data.models || []);
-        const series = pub.data || [];
+        setKpis(sum.data.kpis || null);
+        setReportCur(reporting);
+        setProductCount(new Set((cmRes.data || []).map(cm => cm.product_id)).size);
+        // The indices under this team's own recipes (each cost model's current
+        // formula version, formula_versions[0]), the ones driving most products
+        // first. The landing page's headline list had none of them.
+        const usage = new Map();
+        (cmRes.data || []).forEach(cm => {
+          (cm.formula_versions?.[0]?.components || []).forEach(c => {
+            if (!c.commodity_name) return;
+            const u = usage.get(c.commodity_name) || { products: new Set(), weight: 0 };
+            u.products.add(cm.product_id);
+            u.weight += Number(c.weight) || 0;
+            usage.set(c.commodity_name, u);
+          });
+        });
+        const names = [...usage.entries()]
+          .sort((a, b) => (b[1].products.size - a[1].products.size) || (b[1].weight - a[1].weight))
+          .map(([name]) => name);
+        // The team's own quarterly values: they include the quarter means of
+        // monthly-only series (most recipe indices), which the landing page's
+        // public-quarterly endpoint does not read. One region per card, the
+        // one with the newest point, as the landing page picks it.
+        const unitByName = new Map((all.data || []).map(c => [c.name, c.unit]));
+        const fromYear = new Date().getFullYear() - 4;
+        const series = (await Promise.all(names.map(async name => {
+          try {
+            const { data } = await api.get('/api/indexes/values',
+              { params: { team_id: activeTeamId, commodity_name: name, from_year: fromYear } });
+            const rows = (data || []).filter(r => r.value != null);
+            if (!rows.length) return null;
+            const newest = rows.reduce((a, r) => (qOrd(r.year, r.quarter) > qOrd(a.year, a.quarter) ? r : a));
+            const points = rows.filter(r => r.region === newest.region)
+              .sort((a, r) => qOrd(a.year, a.quarter) - qOrd(r.year, r.quarter))
+              .slice(-16)
+              .map(r => ({ year: r.year, quarter: r.quarter, value: r.value }));
+            return {
+              commodity_name: name, region: newest.region, unit: unitByName.get(name) || null,
+              points, latest: points[points.length - 1].value,
+              products: usage.get(name).products.size,
+            };
+          } catch {
+            return null;   // one series failing must not blank the outlook
+          }
+        }))).filter(Boolean);
         setIndices(series);
         setSelected(s => s || series[0]?.commodity_name || null);
 
@@ -168,26 +216,24 @@ export default function ForecastArea() {
   const flagged = models.filter(m => m.flag_price_drift || m.flag_index_moved).length;
   const gaps = models.map(m => m.gap_pct).filter(v => v != null);
   const avgGap = gaps.length ? gaps.reduce((a, b) => a + Math.abs(b), 0) / gaps.length : null;
-  const totalExposure = models.reduce((a, m) => a + Math.abs(m.cumulative_impact || 0), 0);
-  // The sum is not FX-converted, so it only carries a symbol when every model
-  // is priced in one currency.
-  const currencies = [...new Set(models.map(m => m.currency).filter(Boolean))];
-  const exposureLabel = !totalExposure ? '—'
-    : currencies.length === 1 ? fmtMoney(totalExposure, currencies[0], { decimals: 0 })
-      : fmtMoney(totalExposure, null, { decimals: 0 });
+  // The server's total (FX-converted, overpaying only), the figure Monitor and
+  // Negotiate show; a client-side sum mixed currencies and counted savings.
+  const totalExposure = kpis?.total_exposure ?? 0;
+  const exposureLabel = fmtMoney(totalExposure, reportCur, { decimals: 0 });
   const stats = [
-    { lbl: 'Products tracked', val: String(models.length), color: 'var(--text)' },
+    { lbl: 'Products in portfolio', val: String(productCount), color: 'var(--text)',
+      sub: `${models.length} active cost model${models.length === 1 ? '' : 's'}` },
     { lbl: 'Flagged (drift / index)', val: String(flagged), color: flagged ? 'var(--accent3)' : 'var(--text)' },
     { lbl: 'Avg |gap|', val: avgGap != null ? `${avgGap.toFixed(1)}%` : '—', color: 'var(--accent)' },
-    { lbl: currencies.length > 1 ? 'Total exposure (mixed currencies)' : 'Total exposure', val: exposureLabel, color: 'var(--accent2)',
-      sub: "Sum over cost models of today's gap × all volume on record", title: EXPOSURE_NOTE },
+    { lbl: 'Total exposure', val: exposureLabel, color: totalExposure > 0 ? 'var(--accent2)' : 'var(--text)',
+      sub: `Sum of today's gap × all volume on record, in ${reportCur}`, title: EXPOSURE_NOTE },
   ];
 
   const doExport = () => exportCsv(
     'forecast-portfolio.csv',
-    ['Reference', 'Product', 'Supplier', 'Region', 'Should-cost', 'Actual price', 'Gap %'],
+    ['Reference', 'Product', 'Supplier', 'Region', 'Destination', 'Should-cost', 'Actual price', 'Gap %'],
     models.map(m => [
-      m.product_reference || '', m.product_name, m.supplier_name || '', m.region,
+      m.product_reference || '', m.product_name, m.supplier_name || '', m.region, m.destination_country || '',
       m.current_should_cost, m.latest_actual_price ?? '', m.gap_pct ?? '',
     ]),
   );
@@ -256,7 +302,7 @@ export default function ForecastArea() {
         </div>
 
         {indices.length === 0 ? (
-          <div style={{ padding: 20, color: 'var(--muted)' }}>No headline index data available yet.</div>
+          <div style={{ padding: 20, color: 'var(--muted)' }}>None of the indices under your cost models has quarterly data yet.</div>
         ) : (
           <>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -288,7 +334,9 @@ export default function ForecastArea() {
                     <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2 }}>
                       {ix.commodity_name}
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 8 }}>{ix.region}</div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 8 }}>
+                      {ix.region} · drives {ix.products} product{ix.products === 1 ? '' : 's'}
+                    </div>
                     <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>
                       {num(ix.latest, ix.unit)}
                     </div>
@@ -338,7 +386,7 @@ export default function ForecastArea() {
                       {run.method} over {run.history_points_used} quarters
                       {run.history_from_year != null && ` (${qLabel(run.history_from_year, run.history_from_quarter)}–${qLabel(run.history_to_year, run.history_to_quarter)})`}
                       {run.residual_std != null && `, residual σ ${run.residual_std.toFixed(2)}`}
-                      . Vintage {new Date(run.vintage_at).toLocaleDateString()}
+                      . Vintage {new Date(run.vintage_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                       {daysSince(run.vintage_at) > 30 && (
                         <span style={{ color: 'var(--accent3)' }}> — {daysSince(run.vintage_at)} days old, worth re-running</span>
                       )}
@@ -372,12 +420,12 @@ export default function ForecastArea() {
       <div className="ca-card" style={{ marginBottom: 20 }}>
         <div className="ca-card-title">Portfolio — current should-cost vs price</div>
         {models.length ? (
-          <div className="ca-scroll-x">
+          <div className="ca-scroll-x ca-scroll-x--full">
             <table className="ca-table">
               <caption className="ca-sr-only">Current should-cost against the latest actual price, per product.</caption>
               <thead>
                 <tr>
-                  <th scope="col">Ref</th><th scope="col">Product</th><th scope="col">Supplier</th><th scope="col">Region</th>
+                  <th scope="col">Ref</th><th scope="col">Product</th><th scope="col">Supplier</th><th scope="col">Destination</th>
                   <th scope="col" className="right">Should-cost</th><th scope="col" className="right">Actual</th><th scope="col" className="right">Gap %</th>
                 </tr>
               </thead>
@@ -387,7 +435,9 @@ export default function ForecastArea() {
                     <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{m.product_reference}</td>
                     <td style={{ fontWeight: 600 }}>{m.product_name}</td>
                     <td>{m.supplier_name || '—'}</td>
-                    <td>{m.region}</td>
+                    {/* Two cost models for one product and supplier differ by destination;
+                        the region alone ("Europe") read the same on both rows. */}
+                    <td>{m.destination_country || m.region}</td>
                     <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{m.current_should_cost != null ? fmtMoney(m.current_should_cost, m.currency) : '—'}</td>
                     <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{m.latest_actual_price != null ? fmtMoney(m.latest_actual_price, m.currency) : '—'}</td>
                     <td className="right" style={{ fontFamily: "'JetBrains Mono', monospace", color: m.gap_pct == null ? 'var(--muted)' : m.gap_pct > 0 ? 'var(--accent2)' : 'var(--accent)' }}>{m.gap_pct != null ? `${m.gap_pct > 0 ? '+' : ''}${m.gap_pct.toFixed(1)}%` : '—'}</td>

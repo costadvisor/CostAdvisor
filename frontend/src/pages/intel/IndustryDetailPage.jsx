@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import {
   DetailHeader, Panel, EmptyState, ErrorState, LoadingPage, StatusBadge, useApi, fmt,
 } from '../../components/intel';
@@ -27,6 +27,7 @@ function parseOpen(raw) {
 
 export default function IndustryDetailPage() {
   const { industrySlug } = useParams();
+  const location = useLocation();
   const { data, error, status, loading, reload } = useApi(
     industrySlug ? `/api/intel/industries/${encodeURIComponent(industrySlug)}` : null,
   );
@@ -38,14 +39,16 @@ export default function IndustryDetailPage() {
   const open = useMemo(() => parseOpen(params.get('open')), [params]);
   const [statusFilter, setStatusFilter] = useState(null);
 
+  // The entry keeps its state, or opening a category would make "Back"
+  // forget the page came from the Categories list (A-17).
   const setOpen = useCallback((next) => {
     setParams((prev) => {
       const p = new URLSearchParams(prev);
       if (next.size) p.set('open', Array.from(next).join(','));
       else p.delete('open');
       return p;
-    }, { replace: true });
-  }, [setParams]);
+    }, { replace: true, state: location.state });
+  }, [setParams, location.state]);
 
   const toggle = useCallback((code) => {
     const next = new Set(open);
@@ -109,7 +112,9 @@ export default function IndustryDetailPage() {
   return (
     <div className="ca-fade-in">
       <DetailHeader
-        backTo="/intelligence/categories"
+        // From the Categories list, "Back" is history, so the list keeps its
+        // sort and filters; opened directly, it goes to the list.
+        backTo={location.state?.fromList ? undefined : '/intelligence/categories'}
         crumbs={[
           { label: 'Intelligence', to: '/intelligence' },
           { label: 'Categories', to: '/intelligence/categories' },

@@ -10,8 +10,12 @@
  */
 
 /* ── Regions ───────────────────────────────────────────────────────── */
-// Drop codes, in the order the product page lists them.
-export const REGION_CODES = ['EU', 'NA', 'CN', 'APAC', 'IN', 'MEA', 'LA', 'GLOBAL'];
+// Drop codes, in the API's order (intel_market.REGION_ORDER: the card's dot
+// strip and the sidebar), so every strip and list reads the same way (A-20).
+export const REGION_CODES = ['NA', 'LA', 'EU', 'MEA', 'IN', 'CN', 'APAC', 'GLOBAL'];
+
+// What a chip prints: the code, with Global as GL like the card's dot strip.
+export const REGION_CHIP_TEXT = { GLOBAL: 'GL' };
 
 export const REGION_COLORS = {
   EU: '#0F6E56',

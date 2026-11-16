@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import api from '../api';
+import api, { formatApiError } from '../api';
 
 export default function QuarterPriceList({ year, quarter, products, onDataChanged }) {
   // products: [{ cost_model_id, product_name, product_reference, region, currency, price, volume }]
   const [edits, setEdits] = useState({});
   const [saving, setSaving] = useState(false);
+  // A refused save (e.g. a price of zero) used to go to the console only.
+  const [error, setError] = useState(null);
 
   const isEditing = (cmId) => cmId in edits;
 
@@ -30,6 +32,7 @@ export default function QuarterPriceList({ year, quarter, products, onDataChange
     const e = edits[cmId];
     if (!e) return;
     setSaving(true);
+    setError(null);
     try {
       const calls = [];
       if (e.price !== '') {
@@ -46,7 +49,7 @@ export default function QuarterPriceList({ year, quarter, products, onDataChange
       cancelEdit(cmId);
       onDataChanged?.();
     } catch (err) {
-      console.error(err);
+      setError(formatApiError(err));
     } finally {
       setSaving(false);
     }
@@ -54,6 +57,7 @@ export default function QuarterPriceList({ year, quarter, products, onDataChange
 
   const saveAll = async () => {
     setSaving(true);
+    setError(null);
     try {
       const calls = [];
       for (const [cmId, e] of Object.entries(edits)) {
@@ -72,7 +76,7 @@ export default function QuarterPriceList({ year, quarter, products, onDataChange
       setEdits({});
       onDataChanged?.();
     } catch (err) {
-      console.error(err);
+      setError(formatApiError(err));
     } finally {
       setSaving(false);
     }
@@ -113,6 +117,9 @@ export default function QuarterPriceList({ year, quarter, products, onDataChange
           </>
         )}
       </div>
+      {error && (
+        <div role="alert" style={{ fontSize: 12, color: 'var(--accent2)', marginBottom: 6 }}>Couldn't save — {error}</div>
+      )}
       <table className="ca-table" style={{ fontSize: 12 }}>
         <thead>
           <tr>

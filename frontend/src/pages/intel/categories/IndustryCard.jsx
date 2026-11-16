@@ -10,7 +10,7 @@ export default function IndustryCard({ industry: it, highlight }) {
   const counts = it.categories_by_status || {};
   const scopeTag = SCOPE_TAG[it.scope_status];
   return (
-    <Link to={industryHref(it.slug)} className="ix-card ixc-card">
+    <Link to={industryHref(it.slug)} state={{ fromList: true }} className="ix-card ixc-card">
       <div className="ix-card-top">
         <div className="ix-card-eyebrow">
           {fmt.plural(it.category_count, 'category', 'categories')} · {fmt.plural(it.product_count, 'product')}

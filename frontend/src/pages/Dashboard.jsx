@@ -7,7 +7,7 @@ import { useConfirm, useAlert } from '../components/ConfirmDialog';
 import { DriftBar } from './workspace/wsCharts';
 import PriorityMatrix from '../components/PriorityMatrix';
 import BuyWindows from '../components/BuyWindows';
-import { dominantCurrency, fmtMoney, EXPOSURE_NOTE } from '../utils/currency';
+import { dominantCurrency, fmtMoney, EXPOSURE_NOTE, rowExposure } from '../utils/currency';
 import DemoDataNote from '../components/DemoDataNote';
 
 // Severity colour tier mirrors the Monitor triage screen: price drift = alert,
@@ -115,8 +115,8 @@ export default function Dashboard() {
   const sortedModels = portfolio ? [...portfolio.models].sort((a, b) => {
     let va, vb;
     if (sortKey === 'exposure') {
-      va = Math.abs(a.cumulative_impact || a.gap || 0);
-      vb = Math.abs(b.cumulative_impact || b.gap || 0);
+      va = rowExposure(a);
+      vb = rowExposure(b);
     } else if (sortKey === 'gap_pct') {
       va = Math.abs(a.gap_pct || 0);
       vb = Math.abs(b.gap_pct || 0);
@@ -136,6 +136,11 @@ export default function Dashboard() {
   // Shared scale so the severity bars are comparable across rows (min 25% so a
   // portfolio with only small gaps doesn't render every bar near-full).
   const maxAbsGap = Math.max(25, ...sortedModels.map(m => Math.abs(m.gap_pct || 0)));
+
+  // The quarter the summary prices "today" at (its latest with data), not the
+  // calendar quarter, which only carries the last month forward.
+  const asOfs = [...new Set(sortedModels.filter(m => m.as_of_year).map(m => `Q${m.as_of_quarter} ${m.as_of_year}`))];
+  const asOfLabel = asOfs.length === 1 ? asOfs[0] : asOfs.length ? "each product's latest quarter with index data" : null;
 
   const SortHeader = ({ label, field, title }) => (
     <th className="center" title={title} style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(field)}>
@@ -159,13 +164,13 @@ export default function Dashboard() {
           <button className={`ca-btn ${view === 'buy' ? 'ca-btn-primary' : 'ca-btn-ghost'}`} onClick={() => setView('buy')}>Buy Windows</button>
           <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => portfolio && exportCsv(
             'portfolio.csv',
-            ['Supplier', 'Product Family', 'Product Reference', 'Region', 'Currency', 'Should-Cost', 'Actual', 'Gap %', 'Exposure', 'Index Flag', 'Drift Flag'],
-            sortedModels.map(m => [m.supplier_name, m.product_name, m.product_reference, m.region, m.currency, m.current_should_cost, m.latest_actual_price, m.gap_pct, Math.abs(m.cumulative_impact || m.gap || 0), m.flag_index_moved, m.flag_price_drift])
+            ['Supplier', 'Product', 'Product Reference', 'Region', 'Currency', 'Should-Cost', 'Actual', 'Gap %', 'Exposure', 'Index Flag', 'Drift Flag'],
+            sortedModels.map(m => [m.supplier_name, m.product_name, m.product_reference, m.region, m.currency, m.current_should_cost, m.latest_actual_price, m.gap_pct, rowExposure(m), m.flag_index_moved, m.flag_price_drift])
           )}>Export CSV</button>
           <button className="ca-btn ca-btn-primary" onClick={() => navigate('/cost-models/new')}>+ New Model</button>
         </div>
       </div>
-      <p className="ca-subtitle">Q{Math.ceil((new Date().getMonth() + 1) / 3)} {new Date().getFullYear()} &mdash; All cost models for your team, ranked by exposure.</p>
+      <p className="ca-subtitle">{asOfLabel && <>As of {asOfLabel} &mdash; </>}All cost models for your team, ranked by exposure.</p>
 
       {view === 'matrix' ? (
         <PriorityMatrix data={matrix} loading={matrixLoading} error={matrixErr} />
@@ -191,12 +196,13 @@ export default function Dashboard() {
         <>
           {view === 'table' ? (
             <div className="ca-card">
-              <div className="ca-scroll-x">
+              {/* --full: the 440px cap boxed the table into an inner scroll. */}
+              <div className="ca-scroll-x ca-scroll-x--full">
                 <table className="ca-table">
                   <thead>
                     <tr>
                       <th>Supplier</th>
-                      <SortHeader label="Product Family" field="product" />
+                      <SortHeader label="Product" field="product" />
                       <th>Product Reference</th>
                       <th className="center">Producing Region</th>
                       <SortHeader label="Should-Cost" field="should_cost" />
@@ -210,7 +216,8 @@ export default function Dashboard() {
                   </thead>
                   <tbody>
                     {sortedModels.map(m => {
-                      const exposure = Math.abs(m.cumulative_impact || m.gap || 0);
+                      // Overpaid money only, as Monitor and the server total count it.
+                      const exposure = rowExposure(m);
                       return (
                         <tr key={m.cost_model_id}>
                           <td style={{ color: 'var(--muted)' }}>{m.supplier_name || '\u2014'}</td>
@@ -232,7 +239,7 @@ export default function Dashboard() {
                               : <span style={{ color: 'var(--muted)' }}>{'\u2014'}</span>}
                           </td>
                           <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>
-                            {fmtMoney(exposure, m.currency)}
+                            {exposure ? fmtMoney(exposure, m.currency) : '—'}
                           </td>
                           <td className="center">
                             {m.flag_index_moved && <span title="Index moved >5%" style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 9, background: 'var(--info-bg)', color: 'var(--accent3)', marginRight: 4 }}>IDX</span>}
@@ -258,7 +265,7 @@ export default function Dashboard() {
             <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
               {sortedModels.map(m => {
-                const exposure = Math.abs(m.cumulative_impact || m.gap || 0);
+                const exposure = rowExposure(m);
                 return (
                   <div key={m.cost_model_id} className="ca-card" style={{ cursor: 'pointer', transition: 'border-color .2s' }}
                     onClick={() => navigate(`/cost-models/${m.cost_model_id}/evolution`)}
@@ -294,7 +301,7 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div style={{ fontSize: 11, fontWeight: 600 }} title={EXPOSURE_NOTE}>
-                      Exposure: <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{fmtMoney(exposure, m.currency)}</span>
+                      Exposure: <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{exposure ? fmtMoney(exposure, m.currency) : '—'}</span>
                     </div>
                     <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
                       <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={e => { e.stopPropagation(); navigate(`/cost-models/${m.cost_model_id}`); }}>View</button>

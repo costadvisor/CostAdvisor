@@ -129,26 +129,46 @@ function DaysChip({ days, basis }) {
 
 /* ── Inspection drawer ────────────────────────────────────────────────────── */
 
+// Labels for the evidence keys the feeds write today. An unknown key still
+// renders, as words, so a new feed's fields are never dropped.
+const EVIDENCE_LABEL = {
+  product: 'Product', series: 'Index', signal: 'Signal', direction: 'Direction',
+  gap_pct: 'Gap vs should-cost', move_pct: 'Index move', deviation_pct: 'vs 4-quarter average',
+  should_cost: 'Should-cost', actual: 'Latest actual',
+  threshold_unit_applicable: 'Money threshold applies',
+  reference: 'Contract', term_start: 'Term starts', term_end: 'Term ends', auto_renew: 'Auto-renews',
+  notice_days: 'Notice (days)', notice_deadline: 'Notice deadline', days_remaining: 'Days left',
+  price_review_cadence: 'Price review', close_basis_note: 'Close basis',
+  as_of_date: 'As of', as_of_inferred: 'Date inferred', expires_at: 'Expires', source_url: 'Source',
+};
+const PCT_KEYS = new Set(['gap_pct', 'move_pct', 'deviation_pct']);
+
 function EvidenceRows({ evidence }) {
   // Rendered generically: each driver writes its own evidence keys, and a
   // hand-maintained per-driver field list would silently drop whatever a new
-  // feed adds. Keys the panels below already render on their own are skipped.
+  // feed adds. Keys the panels below already render on their own are skipped,
+  // and so are ids (a UUID tells a buyer nothing); year + quarter read as one period.
   const SKIP = new Set([
     'suggested_negotiation_state', 'resolution_path', 'unresolved_type_codes',
-    'type_codes_resolving_here', 'body',
+    'type_codes_resolving_here', 'body', 'year', 'quarter',
   ]);
-  const rows = Object.entries(evidence || {})
-    .filter(([k, v]) => !SKIP.has(k) && v !== null && v !== undefined && v !== '')
+  const ev = evidence || {};
+  const rows = Object.entries(ev)
+    .filter(([k, v]) => !SKIP.has(k) && !k.endsWith('_id') && v !== null && v !== undefined && v !== '')
     .filter(([, v]) => typeof v !== 'object');
+  if (ev.year && ev.quarter) rows.unshift(['period', `Q${ev.quarter} ${ev.year}`]);
   if (!rows.length) return null;
+  const label = (k) => EVIDENCE_LABEL[k] || (k === 'period' ? 'Period'
+    : k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' '));
+  const value = (k, v) => (typeof v === 'boolean' ? (v ? 'yes' : 'no')
+    : PCT_KEYS.has(k) && typeof v === 'number' ? `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
+      : String(v));
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '3px 12px', fontSize: 11 }}>
       {rows.map(([k, v]) => (
         <Fragment key={k}>
-          <span style={{ color: 'var(--muted)' }}>{k.replace(/_/g, ' ')}</span>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-            {typeof v === 'boolean' ? (v ? 'yes' : 'no') : String(v)}
-          </span>
+          <span style={{ color: 'var(--muted)' }}>{label(k)}</span>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{value(k, v)}</span>
         </Fragment>
       ))}
     </div>
@@ -453,7 +473,7 @@ function Windows({ teamId, onInspect, reloadKey }) {
           </div>
           <div style={{ color: 'var(--muted)', fontSize: 11, lineHeight: 1.6, maxWidth: 460, margin: '0 auto' }}>
             {state === 'open'
-              ? 'Nothing is running against you right now — but check Coverage before reading that as calm: a product whose cost lines never resolve cannot produce a window at all. Recording a contract term and notice period is the one feed you can fill in directly.'
+              ? 'Nothing is running against you as of the last radar run (it runs nightly; a new team has none until the first). Check Coverage before reading that as calm: a product whose cost lines never resolve cannot produce a window at all. Recording a contract term and notice period is the one feed you can fill in directly.'
               : 'Nothing here yet.'}
           </div>
         </div>

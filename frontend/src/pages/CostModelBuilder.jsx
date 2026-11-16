@@ -12,12 +12,18 @@ import { stripReservedFns } from '../utils/formulaFns';
 import NumberInput from '../components/NumberInput';
 import { normalizeVarMap } from '../components/VariableMapEditor';
 import IndexCombo from '../components/IndexCombo';
-import { curSym } from '../utils/currency';
+import { SearchList } from '../components/ProductFormModal';
+import { curSym, fmtMoney, fmtPerUnit } from '../utils/currency';
+import { qLabel, currentQuarter } from '../utils/quarters';
 
 // Catalog recipes list their regions as drop codes (`catalog_meta.regions`);
 // the builder's region select uses the app codes they were loaded under
 // (backend/app/services/drop/catalog_loader.py REGION_MAP).
 const CATALOG_TO_APP_REGION = { EU: 'Europe', NA: 'NA', CN: 'China', IN: 'India', APAC: 'APAC', MEA: 'MEA', LA: 'Latam', GL: 'GLOBAL' };
+
+// A stored weight (4 decimals) as parts in percent, at full precision. Rounding
+// to a whole percent rewrote every line by up to half a point on the next save.
+const weightToParts = (w) => Math.round((Number(w) || 0) * 10000) / 100;
 
 export default function CostModelBuilder() {
   const { costModelId } = useParams();
@@ -31,6 +37,7 @@ export default function CostModelBuilder() {
   const [loaded, setLoaded] = useState(!costModelId);
   const [editing, setEditing] = useState(!costModelId);
   const [loadError, setLoadError] = useState(null);
+  const [modelLoadError, setModelLoadError] = useState(null);
   const [justCreated, setJustCreated] = useState(false);
 
   const [products, setProducts] = useState([]);
@@ -41,8 +48,13 @@ export default function CostModelBuilder() {
   const [productId, setProductId] = useState('');
   const [productName, setProductName] = useState('');
   const [formula, setFormula] = useState('');
-  const [activeContent, setActiveContent] = useState(0.65);
-  const [unit, setUnit] = useState('kg');
+  // The builder has no active-content field: keep the product's own value, or
+  // none (the engine reads that as 100%). A 0.65 default used to be written
+  // onto every product saved from here, which moved its "per active" price.
+  const [activeContent, setActiveContent] = useState(null);
+  // New models default to the default region's money and the tonne, as the AI
+  // cost modeler does: USD per kg for a Europe model had to be fixed every time.
+  const [unit, setUnit] = useState('t');
 
   // Cost model fields
   const [supplierId, setSupplierId] = useState('');
@@ -50,7 +62,8 @@ export default function CostModelBuilder() {
   const [destinationCountry, setDestinationCountry] = useState('');
   const [destinationRegion, setDestinationRegion] = useState('');
   const [region, setRegion] = useState('Europe');
-  const [currency, setCurrency] = useState('USD');
+  const [currency, setCurrency] = useState('EUR');
+  const [asOf, setAsOf] = useState(null);   // the model's latest quarter with data
   const [incoterm, setIncoterm] = useState('');
 
   // Formula version fields
@@ -134,7 +147,7 @@ export default function CostModelBuilder() {
     setProductName(p.name);
     setFormula(p.formula || '');
     setUnit(p.unit || 'kg');
-    setActiveContent(p.active_content ?? 0.65);
+    setActiveContent(p.active_content ?? null);
     // A catalog-linked product auto-loads its recipe at this model's region
     // (Scrum 58: "creating a product auto-loads the template by formula × region").
     if (p.formula_template_id && formulaTemplates.length && !autoLoadedTemplateRef.current) {
@@ -169,18 +182,20 @@ export default function CostModelBuilder() {
   // Load existing cost model
   useEffect(() => {
     if (!costModelId) return;
+    setModelLoadError(null);
     api.get(`/api/cost-models/${costModelId}`)
       .then(({ data }) => {
         setProductId(data.product_id);
         setProductName(data.product_name || '');
         setFormula(data.product_reference || '');
         setUnit(data.product_unit || 'kg');
-        setActiveContent(data.product_active_content ?? 0.65);
+        setActiveContent(data.product_active_content ?? null);
         setSupplierId(data.supplier_id || '');
         setDestinationCountry(data.destination_country || '');
         setDestinationRegion(data.destination_region || '');
         setRegion(data.region);
         setCurrency(data.currency);
+        setAsOf(data.as_of_year ? { year: data.as_of_year, quarter: data.as_of_quarter } : null);
         setIncoterm(data.incoterm || '');
 
         const currentFv = data.formula_versions?.[0];
@@ -198,7 +213,7 @@ export default function CostModelBuilder() {
             label: c.label,
             commodity_name: c.commodity_name || '',
             commodity_id: c.commodity_id,
-            parts: Math.round(c.weight * 100),
+            parts: weightToParts(c.weight),
             component_type: c.component_type,
             depth: c.depth,
             via_template_id: c.via_template_id,
@@ -220,7 +235,11 @@ export default function CostModelBuilder() {
         }
         setLoaded(true);
       })
-      .catch(err => { console.error(err); setLoaded(true); });
+      // An unknown id used to fall through to the new-model defaults and look
+      // like a real cost model.
+      .catch(err => setModelLoadError([404, 422].includes(err?.response?.status)
+        ? 'This cost model was not found. It may have been deleted, or the link is wrong.'
+        : `Couldn't load this cost model: ${formatApiError(err)}`));
   }, [costModelId]);
 
   // Computed
@@ -237,7 +256,17 @@ export default function CostModelBuilder() {
   const compWeight = (c) => totalParts > 0 ? (c.parts / totalParts) * (componentPool / basePrice) : 0;
   const compCost = (c) => totalParts > 0 ? (c.parts / totalParts) * componentPool : 0;
 
-  const shouldCost = basePrice;
+  // The live should-cost of a saved model, as Portfolio and the product page
+  // show it. This page's big figure is the base price, never an estimate.
+  // Priced at the model's latest quarter with data (as_of), as every list is.
+  const [liveSc, setLiveSc] = useState(null);
+  useEffect(() => {
+    if (!costModelId || editing || !loaded) return;
+    const cq = asOf || currentQuarter();
+    api.post('/api/costing/should-cost', { cost_model_id: costModelId, target_year: cq.year, target_quarter: cq.quarter })
+      .then(({ data }) => setLiveSc({ ...data, label: qLabel(cq.year, cq.quarter) }))
+      .catch(() => setLiveSc(null));
+  }, [costModelId, editing, loaded, asOf]);
 
   const donutSegs = useMemo(() => {
     const segs = components
@@ -453,6 +482,11 @@ export default function CostModelBuilder() {
     return () => { cancelled = true; };
   }, [costModelId]);
 
+  // Other cost models on this product: its name, reference and unit are
+  // shared, so an edit here changes them there too. Family is the taxonomy's.
+  const productSiblings = nestable.filter(n => productId && n.product_id === productId);
+  const productFamily = products.find(p => p.id === productId)?.family?.name || null;
+
   const addComp = () => setComponents([...components, { label: '', commodity_name: '', parts: 0 }]);
   const removeComp = (i) => setComponents(components.filter((_, j) => j !== i));
 
@@ -521,9 +555,18 @@ export default function CostModelBuilder() {
     }
   };
 
+  if (modelLoadError) return (
+    <div className="ca-page ca-fade-in">
+      <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => navigate('/portfolio')}>← Portfolio</button>
+      <div className="ca-card" style={{ color: 'var(--accent2)', marginTop: 12 }}>{modelLoadError}</div>
+    </div>
+  );
   if (!loaded) return <div className="ca-page" style={{ color: 'var(--muted)' }}>Loading...</div>;
 
   const sym = curSym(currency);
+  // Every part at the base price's scale, so the split reads like the total
+  // ("€300", not "€300.000").
+  const money = (v) => fmtMoney(v, currency, { scale: basePrice });
 
   return (
     <>
@@ -612,7 +655,8 @@ export default function CostModelBuilder() {
                 <div>
                   <label className="ca-label">Currency</label>
                   <select className="ca-select" value={currency} onChange={e => setCurrency(e.target.value)}>
-                    {['USD','EUR'].map(c => <option key={c}>{c}</option>)}
+                    {/* Currencies the FX layer converts; a loaded model keeps its own. */}
+                    {[...new Set(['EUR', 'USD', 'GBP', 'CNY', 'INR', currency])].map(c => <option key={c}>{c}</option>)}
                   </select>
                 </div>
                 <div>
@@ -665,8 +709,10 @@ export default function CostModelBuilder() {
                       onClick={() => { setFormulaMode(mode); setShowLandedCost(mode === 'simple'); }}
                       style={{
                         padding: '4px 14px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
-                        background: formulaMode === mode ? 'var(--accent)' : 'transparent',
-                        color: formulaMode === mode ? '#fff' : 'var(--muted)',
+                        // The theme's on-accent text, as .ca-btn-primary uses: white on
+                        // the mint accent was hard to read.
+                        background: formulaMode === mode ? 'var(--accent-fill, var(--accent))' : 'transparent',
+                        color: formulaMode === mode ? 'var(--on-accent)' : 'var(--muted)',
                         textTransform: 'capitalize',
                       }}
                     >{mode}</button>
@@ -691,8 +737,9 @@ export default function CostModelBuilder() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
                   <div>
                     <label className="ca-label">Total Price ({sym}/unit)</label>
-                    <input className="ca-input" type="number" value={basePrice} min={0} step={0.01}
-                      onChange={e => setBasePrice(+e.target.value)} />
+                    {/* NumberInput: a type=number field showed "052" after clearing and typing 52. */}
+                    <NumberInput value={basePrice} allowNegative={false}
+                      onChange={v => setBasePrice(v ?? 0)} />
                   </div>
                   <div>
                     <label className="ca-label">Base Year</label>
@@ -761,8 +808,8 @@ export default function CostModelBuilder() {
                                 onClick={() => setLinkMode(mode)}
                                 style={{
                                   padding: '4px 10px', fontSize: 10, fontWeight: 600, border: 'none', cursor: 'pointer',
-                                  background: (linkMode || 'pinned') === mode ? 'var(--accent)' : 'transparent',
-                                  color: (linkMode || 'pinned') === mode ? '#fff' : 'var(--muted)',
+                                  background: (linkMode || 'pinned') === mode ? 'var(--accent-fill, var(--accent))' : 'transparent',
+                                  color: (linkMode || 'pinned') === mode ? 'var(--on-accent)' : 'var(--muted)',
                                   textTransform: 'capitalize',
                                 }}
                               >{mode}</button>
@@ -782,48 +829,9 @@ export default function CostModelBuilder() {
                               position: 'absolute', right: 0, top: 'calc(100% + 4px)',
                               background: 'var(--surface)', border: '1px solid var(--border)',
                               borderRadius: 8, boxShadow: 'var(--shadow-popover)',
-                              zIndex: 50, minWidth: 280, maxHeight: 300, overflowY: 'auto', padding: 6,
+                              zIndex: 50, width: 380, maxWidth: '85vw', padding: 8,
                             }}>
-                              {formulaTemplates.length === 0 ? (
-                                <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--muted)' }}>
-                                  No templates available
-                                </div>
-                              ) : (
-                                [
-                                  { label: 'Default', items: formulaTemplates.filter(t => !t.team_id) },
-                                  { label: 'Team', items: formulaTemplates.filter(t => t.team_id) },
-                                ].map(group => group.items.length > 0 && (
-                                  <div key={group.label}>
-                                    <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '6px 8px 2px' }}>
-                                      {group.label}
-                                    </div>
-                                    {group.items.map(t => (
-                                      <button
-                                        key={t.id}
-                                        style={{
-                                          display: 'block', width: '100%', textAlign: 'left',
-                                          padding: '6px 10px', borderRadius: 4, fontSize: 12,
-                                          border: 'none', cursor: 'pointer', background: 'transparent',
-                                          color: 'var(--text)',
-                                        }}
-                                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface2)'; }}
-                                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                                        onClick={() => loadTemplateIntoModel(t)}
-                                      >
-                                        <span style={{ fontWeight: 600 }}>{t.name}</span>
-                                        {t.code && (
-                                          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--muted)', marginLeft: 6 }}>
-                                            {t.code}
-                                          </span>
-                                        )}
-                                        {t.description && (
-                                          <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>{t.description}</span>
-                                        )}
-                                      </button>
-                                    ))}
-                                  </div>
-                                ))
-                              )}
+                              <TemplatePicker templates={formulaTemplates} onPick={loadTemplateIntoModel} />
                             </div>
                           )}
                         </div>
@@ -839,7 +847,7 @@ export default function CostModelBuilder() {
                     </div>
                     {components.map((c, i) => (
                       <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 60px 80px 90px 30px', gap: 8, marginBottom: 6, alignItems: 'center' }}>
-                        <input className="ca-input" value={c.label} placeholder="Component label"
+                        <input className="ca-input" value={c.label} placeholder="Component label" title={c.label || undefined}
                           onChange={e => updateComp(i, 'label', e.target.value)} style={{ padding: '7px 8px' }} />
                         <select className="ca-select"
                           value={c.child_cost_model_id ? `model:${c.child_cost_model_id}` : (c.commodity_name || '')}
@@ -890,7 +898,7 @@ export default function CostModelBuilder() {
                             <optgroup label="Nested cost model">
                               {nestable.filter(n => n.eligible).map(n => (
                                 <option key={n.cost_model_id} value={`model:${n.cost_model_id}`}>
-                                  {n.product_name}{n.supplier_name ? ` \u00b7 ${n.supplier_name}` : ''}
+                                  {n.product_name}{n.supplier_name ? ` \u00b7 ${n.supplier_name}` : ''}{n.destination_country ? ` \u2192 ${n.destination_country}` : ''}
                                 </option>
                               ))}
                             </optgroup>
@@ -903,7 +911,7 @@ export default function CostModelBuilder() {
                           {(compWeight(c) * 100).toFixed(1)}%
                         </span>
                         <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right' }}>
-                          {sym}{compCost(c).toFixed(3)}
+                          {money(compCost(c))}
                         </span>
                         <button className="ca-btn-danger" onClick={() => removeComp(i)}>x</button>
                       </div>
@@ -934,44 +942,10 @@ export default function CostModelBuilder() {
                           <div style={{
                             position: 'absolute', right: 0, top: 'calc(100% + 4px)',
                             background: 'var(--surface)', border: '1px solid var(--border)',
-                            borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
-                            zIndex: 50, minWidth: 260, maxHeight: 300, overflowY: 'auto', padding: 6,
+                            borderRadius: 8, boxShadow: 'var(--shadow-popover)',
+                            zIndex: 50, width: 380, maxWidth: '85vw', padding: 8,
                           }}>
-                            {formulaTemplates.length === 0 ? (
-                              <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--muted)' }}>
-                                No templates available
-                              </div>
-                            ) : (
-                              [
-                                { label: 'Default', items: formulaTemplates.filter(t => !t.team_id) },
-                                { label: 'Team', items: formulaTemplates.filter(t => t.team_id) },
-                              ].map(group => group.items.length > 0 && (
-                                <div key={group.label}>
-                                  <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '6px 8px 2px' }}>
-                                    {group.label}
-                                  </div>
-                                  {group.items.map(t => (
-                                    <button
-                                      key={t.id}
-                                      style={{
-                                        display: 'block', width: '100%', textAlign: 'left',
-                                        padding: '6px 10px', borderRadius: 4, fontSize: 12,
-                                        border: 'none', cursor: 'pointer', background: 'transparent',
-                                        color: 'var(--text)',
-                                      }}
-                                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface2)'; }}
-                                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                                      onClick={() => loadTemplateIntoModel(t)}
-                                    >
-                                      <span style={{ fontWeight: 600 }}>{t.name}</span>
-                                      {t.description && (
-                                        <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>{t.description}</span>
-                                      )}
-                                    </button>
-                                  ))}
-                                </div>
-                              ))
-                            )}
+                            <TemplatePicker templates={formulaTemplates} onPick={loadTemplateIntoModel} />
                           </div>
                         )}
                       </div>
@@ -1047,7 +1021,7 @@ export default function CostModelBuilder() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
                   <div>
                     <label className="ca-label">Total Price ({sym}/unit)</label>
-                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, padding: '7px 0' }}>{sym}{basePrice.toFixed(3)}</div>
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, padding: '7px 0' }}>{money(basePrice)}</div>
                   </div>
                   <div>
                     <label className="ca-label">Base Period</label>
@@ -1111,7 +1085,7 @@ export default function CostModelBuilder() {
                           {(compWeight(c) * 100).toFixed(1)}%
                         </span>
                         <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textAlign: 'right' }}>
-                          {sym}{compCost(c).toFixed(3)}
+                          {money(compCost(c))}
                         </span>
                       </div>
                     ))}
@@ -1135,9 +1109,8 @@ export default function CostModelBuilder() {
                     </div>
                     <div>
                       <label className="ca-label">{marginType === 'pct' ? 'Margin %' : `Fixed Amount (${sym})`}</label>
-                      <input className="ca-input" type="number" value={marginValue} min={0}
-                        step={marginType === 'pct' ? 1 : 0.01}
-                        onChange={e => setMarginValue(+e.target.value)} />
+                      <NumberInput value={marginValue} allowNegative={false}
+                        onChange={v => setMarginValue(v ?? 0)} />
                     </div>
                     <div>
                       <label className="ca-label" style={{ fontSize: 9 }}>Weight</label>
@@ -1148,7 +1121,7 @@ export default function CostModelBuilder() {
                     <div>
                       <label className="ca-label" style={{ fontSize: 9 }}>Est. Cost</label>
                       <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, textAlign: 'right', padding: '7px 0' }}>
-                        {sym}{marginCost.toFixed(3)}
+                        {money(marginCost)}
                       </div>
                     </div>
                   </div>
@@ -1173,7 +1146,7 @@ export default function CostModelBuilder() {
                     <div>
                       <label className="ca-label" style={{ fontSize: 9 }}>Est. Cost</label>
                       <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, textAlign: 'right', padding: '7px 0' }}>
-                        {sym}{marginCost.toFixed(3)}
+                        {money(marginCost)}
                       </div>
                     </div>
                   </div>
@@ -1189,14 +1162,14 @@ export default function CostModelBuilder() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: 'var(--bg)', borderRadius: 8, marginTop: 8 }}>
               <span style={{ fontSize: 11, color: 'var(--muted)' }}>
                 {formulaMode === 'advanced'
-                  ? `Base price anchor: ${sym}${basePrice.toFixed(3)} - should-cost from expression`
-                  : `Components: ${sym}${componentPool >= 0 ? componentPool.toFixed(3) : '—'} + Margin: ${sym}${marginCost.toFixed(3)}`}
+                  ? `Base price anchor: ${money(basePrice)} - should-cost from expression`
+                  : `Components: ${componentPool >= 0 ? money(componentPool) : '—'} + Margin: ${money(marginCost)}`}
               </span>
               <span style={{
                 fontFamily: "'Syne', sans-serif", fontSize: 16, fontWeight: 700,
                 color: isValid ? 'var(--accent)' : 'var(--accent2)'
               }}>
-                {sym}{shouldCost.toFixed(3)}
+                {money(basePrice)}
               </span>
             </div>
           </div>
@@ -1204,14 +1177,15 @@ export default function CostModelBuilder() {
 
         {/* RIGHT COLUMN */}
         <div>
-          {/* Product Family */}
+          {/* Product. "Family" means the taxonomy family everywhere else, so it
+              is shown read-only here and the name is called a name. */}
           <div className="ca-card" style={{ marginBottom: 16 }}>
-            <div className="ca-card-title">Product Family</div>
+            <div className="ca-card-title">Product</div>
             {editing ? (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div style={{ gridColumn: '1 / -1' }}>
-                  <label className="ca-label">Product Family</label>
-                  <input className="ca-input" placeholder="e.g. Active Carbon" value={productName}
+                  <label className="ca-label">Product name</label>
+                  <input className="ca-input" placeholder="e.g. Activated carbon, coal-based" value={productName}
                     onChange={e => setProductName(e.target.value)} />
                 </div>
                 <div>
@@ -1224,13 +1198,25 @@ export default function CostModelBuilder() {
                     {['kg', 't', 'lb'].map(u => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
+                {productSiblings.length > 0 && (
+                  <div style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--accent3)' }}>
+                    Also used by {productSiblings.map(n => [n.supplier_name || 'no supplier', n.destination_country].filter(Boolean).join(' → ')).join(', ')}.
+                    A new name, reference or unit applies there too.
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div style={{ gridColumn: '1 / -1' }}>
-                  <label className="ca-label">Product Family</label>
+                  <label className="ca-label">Product name</label>
                   <div style={{ fontSize: 13, padding: '7px 0', fontWeight: 600 }}>{productName || '\u2014'}</div>
                 </div>
+                {productFamily && (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label className="ca-label">Family</label>
+                    <div style={{ fontSize: 13, padding: '7px 0' }}>{productFamily}</div>
+                  </div>
+                )}
                 <div>
                   <label className="ca-label">Product Reference</label>
                   <div style={{ fontSize: 13, padding: '7px 0' }}>{formula || '\u2014'}</div>
@@ -1245,24 +1231,29 @@ export default function CostModelBuilder() {
 
           {/* Should-Cost result */}
           <div className="ca-result" style={{ marginBottom: 16 }}>
-            <div className="ca-result-label">Estimated Should-Cost</div>
-            <div className="ca-result-big">{sym}{shouldCost.toFixed(3)}</div>
+            <div className="ca-result-label">{costModelId ? `Base price · ${qLabel(baseYear, baseQuarter)}` : 'Starting price'}</div>
+            <div className="ca-result-big">{money(basePrice)}</div>
             <div style={{ marginTop: 4, fontSize: 11, color: 'var(--muted)' }}>
               per {unit} · {region}
             </div>
+            {liveSc?.should_cost != null && (
+              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                Live should-cost {liveSc.label}: <strong>{fmtPerUnit(liveSc.should_cost, currency, unit)}</strong>
+              </div>
+            )}
             {formulaMode === 'simple' ? (
               <>
                 <hr className="ca-sep" />
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 20, fontWeight: 700, color: 'var(--accent3)' }}>
-                      {sym}{componentPool >= 0 ? componentPool.toFixed(3) : '\u2014'}
+                      {componentPool >= 0 ? money(componentPool) : '\u2014'}
                     </div>
                     <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Indexed Cost</div>
                   </div>
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 20, fontWeight: 700, color: 'var(--accent2)' }}>
-                      {sym}{marginCost.toFixed(3)}
+                      {money(marginCost)}
                     </div>
                     <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase' }}>Margin</div>
                   </div>
@@ -1311,7 +1302,7 @@ export default function CostModelBuilder() {
           )}
 
           {costModelId && (
-            <VersionHistory costModelId={costModelId} editing={editing} sym={sym} onLoadVersion={(v) => {
+            <VersionHistory costModelId={costModelId} editing={editing} currency={currency} onLoadVersion={(v) => {
               setBasePrice(v.base_price);
               setBaseYear(v.base_year);
               setBaseQuarter(v.base_quarter);
@@ -1324,12 +1315,14 @@ export default function CostModelBuilder() {
                 label: c.label,
                 commodity_name: c.commodity_name || '',
                 commodity_id: c.commodity_id,
-                parts: Math.round(c.weight * 100),
+                parts: weightToParts(c.weight),
                 component_type: c.component_type,
                 depth: c.depth,
                 via_template_id: c.via_template_id,
                 line_region: c.line_region,
                 is_proxy: c.is_proxy,
+                child_cost_model_id: c.child_cost_model_id || null,
+                child_cost_model_name: c.child_cost_model_name || null,
               })));
               const vtype = v.formula_type || 'simple';
               setFormulaMode(vtype);
@@ -1361,6 +1354,46 @@ export default function CostModelBuilder() {
       />
     )}
     </>
+  );
+}
+
+// The catalogue is ~1,750 recipes: a scrolling list of all of them in a 300px
+// popover could not be searched. Type a name, code, family or line; with no
+// query the team's own recipes come first. Ranking as ProductFormModal's.
+const TEMPLATE_PICKER_MAX = 50;
+function TemplatePicker({ templates, onPick }) {
+  const [query, setQuery] = useState('');
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const hits = !q ? templates : templates.filter(t =>
+      `${t.name} ${t.code || ''} ${t.family?.name || t.family_name || ''} ${t.product_line?.name || ''}`.toLowerCase().includes(q));
+    const rank = (t) => (q && (t.code || '').toLowerCase() === q ? 0 : q && t.name.toLowerCase().startsWith(q) ? 1 : 2);
+    return [...hits].sort((a, b) => (!!b.team_id - !!a.team_id) || rank(a) - rank(b) || a.name.localeCompare(b.name));
+  }, [templates, query]);
+  const shown = matches.slice(0, TEMPLATE_PICKER_MAX);
+  const footer = templates.length === 0 ? 'No templates available.'
+    : matches.length === 0 ? 'No recipe matches.'
+      : matches.length > TEMPLATE_PICKER_MAX
+        ? `First ${TEMPLATE_PICKER_MAX} of ${matches.length.toLocaleString('en-US')}. Type to narrow.`
+        : null;
+  return (
+    <SearchList
+      id="builder-template" label="Catalogue recipes" autoFocus
+      placeholder="Search name, code, family or line…"
+      query={query} onQuery={setQuery} items={shown} onPick={onPick} footer={footer}
+      renderItem={(t) => (
+        <>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>{t.name}</span>
+          {t.code && (
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'var(--muted)', marginLeft: 6 }}>{t.code}</span>
+          )}
+          {t.team_id && <span className="ca-badge" style={{ marginLeft: 6, fontSize: 9 }}>Team</span>}
+          <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>
+            {[t.family?.name || t.family_name, t.product_line?.name].filter(Boolean).join(' › ') || t.description || ''}
+          </span>
+        </>
+      )}
+    />
   );
 }
 
@@ -1423,8 +1456,8 @@ function SaveTemplateModal({ expression, variables, activeTeamId, canEditPlatfor
                   <button key={s} onClick={() => setScope(s)} style={{
                     padding: '5px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
                     border: `1px solid ${scope === s ? 'var(--accent)' : 'var(--border)'}`,
-                    background: scope === s ? 'var(--accent)' : 'transparent',
-                    color: scope === s ? '#fff' : 'var(--text)',
+                    background: scope === s ? 'var(--accent-fill, var(--accent))' : 'transparent',
+                    color: scope === s ? 'var(--on-accent)' : 'var(--text)',
                     fontWeight: scope === s ? 600 : 400,
                   }}>
                     {s === 'platform' ? 'Default (all teams)' : 'Team only'}
@@ -1445,7 +1478,8 @@ function SaveTemplateModal({ expression, variables, activeTeamId, canEditPlatfor
   );
 }
 
-function VersionHistory({ costModelId, editing, sym, onLoadVersion }) {
+function VersionHistory({ costModelId, editing, currency, onLoadVersion }) {
+  const sym = curSym(currency);
   const [versions, setVersions] = useState([]);
   const [open, setOpen] = useState(false);
   const confirm = useConfirm();
@@ -1499,9 +1533,9 @@ function VersionHistory({ costModelId, editing, sym, onLoadVersion }) {
               {versions.map(v => (
                 <tr key={v.id}>
                   <td>Q{v.base_quarter}-{v.base_year}</td>
-                  <td>{sym}{v.base_price.toFixed(2)}</td>
+                  <td>{fmtMoney(v.base_price, currency)}</td>
                   <td>{v.margin_type === 'pct' ? `${v.margin_value}%` : v.margin_type === 'fixed' ? `${sym}${v.margin_value}` : 'Unknown'}</td>
-                  <td style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(v.updated_at || v.created_at).toLocaleDateString()}</td>
+                  <td style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(v.updated_at || v.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
                   {editing && (
                     <td className="center">
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>

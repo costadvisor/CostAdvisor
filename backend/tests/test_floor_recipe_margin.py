@@ -18,6 +18,7 @@ from sqlalchemy import text
 
 from app.database import bypass_rls_var
 from app.models.product import Product
+from app.services.narrative import fmt_money
 from app.services.negotiation_prep import build_script
 
 
@@ -160,8 +161,9 @@ def test_prep_ladder_and_script_use_the_lower_floor(catalogue_model, link_mode):
     assert ladder["floor"] < ladder["should_cost"]
     close = next(ln for ln in p["script"] if ln.startswith("We are ready to settle"))
     assert "no margin left" in close
-    assert f"{ladder['floor']:,.2f}" in close
-    assert f"{ladder['should_cost']:,.2f}" in close
+    # In the app's money format (narrative.fmt_money), as the ladder shows them.
+    assert fmt_money(ladder["floor"], p["ladder"]["currency"], p["ladder"]["unit"]) in close
+    assert fmt_money(ladder["should_cost"], p["ladder"]["currency"], p["ladder"]["unit"]) in close
 
 
 def test_script_says_nothing_about_a_floor_equal_to_the_target():
@@ -172,6 +174,7 @@ def test_script_says_nothing_about_a_floor_equal_to_the_target():
         currency = "EUR"
         unit = "t"
         period_label = "Q1-26 to Q2-26"
+        as_of_label = "Q2-26"
         current_should_cost = 500.0
         current_floor = 500.0
         current_actual_price = None
@@ -179,5 +182,5 @@ def test_script_says_nothing_about_a_floor_equal_to_the_target():
         data_gaps: list = []
 
     body = " ".join(build_script(_Brief(), []))
-    assert "500.00 EUR/t" in body
+    assert "€500/t" in body
     assert "no margin left" not in body

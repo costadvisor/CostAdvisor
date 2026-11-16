@@ -7,6 +7,7 @@ import { PIE_COLORS } from '../../utils/constants';
 import { StackedBar } from './wsCharts';
 import { BuySignalBadge, LockHoldBadge } from '../../components/BuyWindows';
 import NotesPanel from '../../components/NotesPanel';
+import { decimalsFor, fmtMoney, fmtNumber } from '../../utils/currency';
 
 // Scrum 25 — negotiation flag states
 const NEG_STATES = [
@@ -26,9 +27,6 @@ const NEG_STATES = [
 const NOW = new Date();
 const CUR_Y = NOW.getFullYear();
 const CUR_Q = Math.ceil((NOW.getMonth() + 1) / 3);
-
-const curSym = (c) => (c === 'EUR' ? '€' : c === 'USD' ? '$' : c === 'GBP' ? '£' : c ? `${c} ` : '');
-const fmtMoney = (v) => (v == null ? '—' : v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(3));
 
 export default function ProductDetailArea() {
   const { costModelId } = useParams();
@@ -52,9 +50,15 @@ export default function ProductDetailArea() {
   const [spPeriod, setSpPeriod] = useState('');          // "year-quarter"
   const [saving, setSaving] = useState(false);
 
-  const loadSc = () => {
+  // "Today" is the model's latest quarter with data, the quarter Portfolio,
+  // Monitor and the brief price at. The calendar quarter only carries the last
+  // month forward, so this page read €292 "as of Q4 2026" beside their €291.
+  const asOf = (m) => (m?.as_of_year ? { y: m.as_of_year, q: m.as_of_quarter } : { y: CUR_Y, q: CUR_Q });
+
+  const loadSc = (m) => {
+    const { y, q } = asOf(m);
     setSc({ status: 'loading' });
-    api.post('/api/costing/should-cost', { cost_model_id: costModelId, target_year: CUR_Y, target_quarter: CUR_Q })
+    api.post('/api/costing/should-cost', { cost_model_id: costModelId, target_year: y, target_quarter: q })
       .then(({ data }) => setSc({ status: 'ok', ...data }))
       .catch(err => setSc({ status: 'err', msg: formatApiError(err) }));
   };
@@ -63,7 +67,7 @@ export default function ProductDetailArea() {
     setLoading(true);
     setError(null);
     api.get(`/api/cost-models/${costModelId}`)
-      .then(({ data }) => setCm(data))
+      .then(({ data }) => { setCm(data); loadSc(data); })
       .catch(err => setError(formatApiError(err)))
       .finally(() => setLoading(false));
   };
@@ -83,14 +87,14 @@ export default function ProductDetailArea() {
       .catch(() => setLockHold(null));
   };
 
-  useEffect(() => { loadCm(); loadSc(); loadBuy(); loadLockHold(); /* eslint-disable-next-line */ }, [costModelId]);
+  useEffect(() => { loadCm(); loadBuy(); loadLockHold(); /* eslint-disable-next-line */ }, [costModelId]);
 
   // Scrum 17 — should-cost breakdown, fetched lazily on first expand.
   const toggleBreakdown = () => {
     const next = !showBreakdown;
     setShowBreakdown(next);
     if (next && !breakdown && !breakdownErr) {
-      api.post('/api/costing/should-cost/breakdown', { cost_model_id: costModelId, target_year: CUR_Y, target_quarter: CUR_Q })
+      api.post('/api/costing/should-cost/breakdown', { cost_model_id: costModelId, target_year: asOf(cm).y, target_quarter: asOf(cm).q })
         .then(({ data }) => setBreakdown(data))
         .catch(err => setBreakdownErr(formatApiError(err)));
     }
@@ -136,16 +140,34 @@ export default function ProductDetailArea() {
       named_place: fv.named_place || null,
       landed_cost_adjustments: fv.landed_cost_adjustments || null,
       notes: fv.notes || null,
+      // The catalogue link and each line's provenance go back as they came, as
+      // the builder sends them: leaving them out unlinked a tracking model (its
+      // live should-cost moved) and dropped nested cost-model lines.
+      source_coverage_id: fv.source_coverage_id || null,
+      link_mode: fv.source_coverage_id ? (fv.link_mode || 'pinned') : null,
       ...(fv.formula_type === 'advanced'
         ? { expression: fv.expression, variables: fv.variables }
-        : { components: (fv.components || []).map(c => ({ label: c.label, commodity_name: c.commodity_name || null, weight: c.weight })) }),
+        : {
+            components: (fv.components || []).map(c => ({
+              label: c.label,
+              commodity_name: c.commodity_name || null,
+              commodity_id: c.commodity_id ?? null,
+              weight: c.weight,
+              component_type: c.component_type ?? null,
+              depth: c.depth ?? null,
+              via_template_id: c.via_template_id ?? null,
+              line_region: c.line_region ?? null,
+              is_proxy: c.is_proxy ?? null,
+              child_cost_model_id: c.child_cost_model_id ?? null,
+            })),
+          }),
     };
     setSaving(true);
     try {
       await api.post(`/api/cost-models/${costModelId}/renegotiate`, payload);
       setEditing(false);
+      setBreakdown(null);
       loadCm();
-      loadSc();
     } catch (err) {
       showAlert({ title: 'Could not save', message: formatApiError(err) });
     } finally {
@@ -168,10 +190,10 @@ export default function ProductDetailArea() {
     );
   }
 
-  const sym = curSym(cm.currency);
   const unit = cm.product_unit || (sc.status === 'ok' ? sc.unit : '');
   const basePrice = Number(fv.base_price);
   const liveVal = sc.status === 'ok' ? sc.should_cost : null;
+  const money = (v) => fmtMoney(v, cm.currency, { scale: liveVal });
   const deltaPct = liveVal != null && basePrice ? ((liveVal - basePrice) / basePrice) * 100 : null;
 
   // Weight breakdown for the simple-mode formula (component weights + margin remainder).
@@ -223,14 +245,14 @@ export default function ProductDetailArea() {
       {/* Live should-cost + starting point */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, margin: '16px 0' }}>
         <div className="ca-result">
-          <div className="ca-result-label">Live should-cost · as of Q{CUR_Q} {CUR_Y}</div>
+          <div className="ca-result-label">Live should-cost · as of Q{asOf(cm).q} {asOf(cm).y}</div>
           {sc.status === 'loading' ? (
             <div className="ca-result-big" style={{ color: 'var(--muted)' }}>…</div>
           ) : sc.status === 'err' ? (
             <div style={{ color: 'var(--accent2)', fontSize: 13, marginTop: 8 }}>{sc.msg || 'Could not compute should-cost.'}</div>
           ) : (
             <>
-              <div className="ca-result-big">{sym}{fmtMoney(liveVal)}<span style={{ fontSize: 14, color: 'var(--muted)', fontWeight: 400 }}> /{unit}</span></div>
+              <div className="ca-result-big">{fmtMoney(liveVal, cm.currency)}<span style={{ fontSize: 14, color: 'var(--muted)', fontWeight: 400 }}> /{unit}</span></div>
               {deltaPct != null && (
                 <div style={{ marginTop: 4, fontSize: 12, color: deltaPct > 0 ? 'var(--accent2)' : deltaPct < 0 ? 'var(--accent)' : 'var(--muted)' }}>
                   {deltaPct > 0 ? '+' : ''}{deltaPct.toFixed(1)}% since starting point
@@ -250,16 +272,14 @@ export default function ProductDetailArea() {
               ) : null}
               <hr className="ca-sep" />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                <Metric label="Indexed cost" value={`${sym}${fmtMoney(sc.cost_before_margin)}`} color="var(--accent3)" />
-                <Metric label="Margin" value={`${sym}${fmtMoney(sc.margin_amount)}`} color="var(--accent2)" />
-                <Metric label={`Per active ${unit}`} value={sc.per_active_unit != null ? `${sym}${fmtMoney(sc.per_active_unit)}` : '—'} color="var(--accent4)" />
+                {/* At the should-cost's scale, so the split reads like the total. */}
+                <Metric label="Indexed cost" value={money(sc.cost_before_margin)} color="var(--accent3)" />
+                <Metric label="Margin" value={money(sc.margin_amount)} color="var(--accent2)" />
+                <Metric label={`Per active ${unit}`} value={money(sc.per_active_unit)} color="var(--accent4)" />
               </div>
               <button className="ca-btn-link" style={{ fontSize: 11, marginTop: 10 }} onClick={toggleBreakdown}>
                 {showBreakdown ? '▾ Hide breakdown' : '▸ Show breakdown'}
               </button>
-              {showBreakdown && (
-                <ShouldCostBreakdownTable breakdown={breakdown} error={breakdownErr} sym={sym} />
-              )}
             </>
           )}
         </div>
@@ -294,7 +314,7 @@ export default function ProductDetailArea() {
           ) : (
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap' }}>
               <div>
-                <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 26, fontWeight: 700 }}>{sym}{fmtMoney(basePrice)}</div>
+                <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 26, fontWeight: 700 }}>{fmtMoney(basePrice, cm.currency)}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase' }}>Base price{unit ? ` / ${unit}` : ''}</div>
               </div>
               <div>
@@ -305,6 +325,14 @@ export default function ProductDetailArea() {
           )}
         </div>
       </div>
+
+      {/* Breakdown at full width: seven columns squeezed into the half-width
+          card wrapped every component name over four or five lines. */}
+      {showBreakdown && sc.status === 'ok' && (
+        <div style={{ marginBottom: 16 }}>
+          <ShouldCostBreakdownTable breakdown={breakdown} error={breakdownErr} currency={cm.currency} asOf={`Q${asOf(cm).q} ${asOf(cm).y}`} />
+        </div>
+      )}
 
       {/* Formula */}
       <div className="ca-card">
@@ -383,21 +411,32 @@ const SOURCE_LABEL = {
   composite: 'composite', fixed: 'fixed', team_override: 'override',
   scraped_region: 'scraped', scraped_global: 'scraped (global)',
   scraped_any_region: 'scraped (other region)', scraped_temporal_carry_forward: 'scraped (carried)',
+  // The as-of quarter is usually published monthly data: without these the
+  // raw enum (monthly_actual) showed on every line.
+  monthly_actual: 'monthly', monthly_partial_quarter: 'monthly (partial quarter)',
+  monthly_carry_forward: 'carried forward',
 };
 
 // Scrum 17 — itemized should-cost: index name, weight, base/current value, ratio,
 // contribution, and source, with a footer that sums to exactly the should-cost shown
 // above (mirrors FormulaDetailModal's resolved-recipe table pattern).
-function ShouldCostBreakdownTable({ breakdown, error, sym }) {
+function ShouldCostBreakdownTable({ breakdown, error, currency, asOf }) {
   if (error) return <div className="ca-card" style={{ marginTop: 10, color: 'var(--accent2)', fontSize: 12 }}>Error: {error}</div>;
   if (!breakdown) return <div style={{ marginTop: 10, color: 'var(--muted)', fontSize: 12 }}>Loading…</div>;
 
   const mono = { fontFamily: "'JetBrains Mono', monospace" };
-  const fmt = (v) => (v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 3 }));
+  // One fixed-locale money scale for the whole column (the should-cost's), so
+  // the lines visibly add up to the footer. Index levels are plain numbers.
+  const dp = decimalsFor(breakdown.should_cost);
+  const money = (v) => fmtMoney(v, currency, { decimals: dp });
+  // The "live" figure is often the latest index month carried to this quarter;
+  // say so rather than let "as of Q4 2026" imply fresh data.
+  const indexed = breakdown.components.filter(c => c.has_data && c.source);
+  const allCarried = indexed.length > 0 && indexed.every(c => /carry_forward/.test(c.source));
 
   return (
     <div style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-      <div className="ca-scroll-x">
+      <div className="ca-scroll-x ca-scroll-x--full">
         <table className="ca-table" style={{ margin: 0 }}>
           <thead>
             <tr>
@@ -437,8 +476,8 @@ function ShouldCostBreakdownTable({ breakdown, error, sym }) {
                   )}
                 </td>
                 <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{c.weight_pct.toFixed(1)}%</td>
-                <td style={{ ...mono, fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>{fmt(c.base_value)}</td>
-                <td style={{ ...mono, fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>{fmt(c.current_value)}</td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>{fmtNumber(c.base_value)}</td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right', color: 'var(--muted)' }}>{fmtNumber(c.current_value)}</td>
                 <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>
                   {c.has_data ? (
                     <span style={{ color: c.ratio > 1 ? 'var(--accent2)' : c.ratio < 1 ? 'var(--accent)' : 'var(--text-secondary)' }}>
@@ -448,18 +487,18 @@ function ShouldCostBreakdownTable({ breakdown, error, sym }) {
                     <span title="No index data — line rides flat" style={{ color: 'var(--accent3)' }}>flat</span>
                   )}
                 </td>
-                <td style={{ ...mono, fontSize: 11, textAlign: 'right', fontWeight: 600 }}>{fmt(c.contribution)}</td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right', fontWeight: 600 }}>{money(c.contribution)}</td>
                 <td style={{ fontSize: 10, color: 'var(--muted)' }}>{c.source ? (SOURCE_LABEL[c.source] || c.source) : '—'}</td>
               </tr>
             ))}
             <tr>
               <td colSpan={5} style={{ fontSize: 11, fontWeight: 600, textAlign: 'right', color: 'var(--text-secondary)' }}>Indexed cost (Σ components)</td>
-              <td style={{ ...mono, fontSize: 12, fontWeight: 700, textAlign: 'right' }}>{sym}{fmt(breakdown.cost_before_margin)}</td>
+              <td style={{ ...mono, fontSize: 12, fontWeight: 700, textAlign: 'right' }}>{money(breakdown.cost_before_margin)}</td>
               <td />
             </tr>
             <tr>
               <td colSpan={5} style={{ fontSize: 11, textAlign: 'right', color: 'var(--text-secondary)' }}>+ Margin ({breakdown.margin_type})</td>
-              <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{sym}{fmt(breakdown.margin_amount)}</td>
+              <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{money(breakdown.margin_amount)}</td>
               <td />
             </tr>
             {breakdown.incoterm_adjustment != null && (
@@ -467,18 +506,23 @@ function ShouldCostBreakdownTable({ breakdown, error, sym }) {
                 <td colSpan={5} style={{ fontSize: 11, textAlign: 'right', color: 'var(--text-secondary)' }}>
                   + Incoterm adjustment{breakdown.normalized_to_incoterm ? ` (→ ${breakdown.normalized_to_incoterm})` : ''}
                 </td>
-                <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{sym}{fmt(breakdown.incoterm_adjustment)}</td>
+                <td style={{ ...mono, fontSize: 11, textAlign: 'right' }}>{money(breakdown.incoterm_adjustment)}</td>
                 <td />
               </tr>
             )}
             <tr>
               <td colSpan={5} style={{ fontSize: 12, fontWeight: 700, textAlign: 'right' }}>= Should-cost</td>
-              <td style={{ ...mono, fontSize: 13, fontWeight: 700, textAlign: 'right', color: 'var(--accent)' }}>{sym}{fmt(breakdown.should_cost)}</td>
+              <td style={{ ...mono, fontSize: 13, fontWeight: 700, textAlign: 'right', color: 'var(--accent)' }}>{money(breakdown.should_cost)}</td>
               <td />
             </tr>
           </tbody>
         </table>
       </div>
+      {allCarried && (
+        <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
+          No index has published {asOf} values yet: every line carries its latest month forward.
+        </div>
+      )}
       {breakdown.data_gaps.length > 0 && (
         <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--accent3)', borderTop: '1px solid var(--border)' }}>
           {breakdown.data_gaps.length} component{breakdown.data_gaps.length > 1 ? 's' : ''} missing index data and rode flat: {breakdown.data_gaps.map(g => g.component_label).join(', ')}.

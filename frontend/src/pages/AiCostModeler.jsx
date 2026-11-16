@@ -31,7 +31,8 @@ export default function AiCostModeler() {
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
-    product_name: '', sector: 'Surfactants', rough_price: '',
+    // No default sector: 'Surfactants' was sent for any product left as is.
+    product_name: '', sector: '', rough_price: '',
     currency: 'EUR', unit: 't', region: 'Europe', product_id: '',
   });
   const [products, setProducts] = useState([]);
@@ -164,6 +165,7 @@ export default function AiCostModeler() {
           <label className="ca-label" htmlFor="ai-sector">Sector</label>
           <select id="ai-sector" className="ca-select" value={form.sector} onChange={set('sector')}
                   style={{ width: '100%', marginBottom: 10 }}>
+            <option value="">Not specified</option>
             {SECTORS.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
 

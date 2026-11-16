@@ -350,6 +350,10 @@ class TeamHit(Hit):
     product_name: str | None = None
     cost_model_id: uuid.UUID | None = None
     cost_model_region: str | None = None
+    # Two cost models of one product (per supplier or ship-to) otherwise read
+    # as the same row.
+    supplier_name: str | None = None
+    destination_country: str | None = None
     # True when the assertion's region is NULL (applies everywhere) or matches
     # the cost model's own region. A region-specific claim on an EU combo does
     # not carry over to that product's NA combo.
@@ -517,6 +521,8 @@ def query_team(
                     product_id=product.id, product_name=product.name,
                     cost_model_id=cm.id if cm else None,
                     cost_model_region=cm.region if cm else None,
+                    supplier_name=cm.supplier.name if cm and cm.supplier else None,
+                    destination_country=cm.destination_country if cm else None,
                     region_applies=applies,
                 ))
     hits.sort(key=lambda h: (h.product_name or "", h.cost_model_region or ""))

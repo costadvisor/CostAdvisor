@@ -1,13 +1,14 @@
 import { memo } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  TrendBadge, SupplyBadge, fmt, regionColor, REGION_LABELS, UNPUBLISHED_LINE, productHref,
+  TrendBadge, SupplyBadge, fmt, regionColor, REGION_CODES, REGION_LABELS, UNPUBLISHED_LINE, productHref,
 } from '../../../components/intel';
 import { Sparkline } from '../../../components/charts';
 
 /* The mockup's region-dot strip: its seven regions always shown (greyed when the
- * card is not priced there), plus GL for the few global-only recipes. */
-const DOT_REGIONS = ['NA', 'LA', 'EU', 'MEA', 'IN', 'CN', 'APAC'];
+ * card is not priced there), plus GL for the few global-only recipes. Same
+ * order as every other region strip (palette REGION_CODES). */
+const DOT_REGIONS = REGION_CODES.filter((r) => r !== 'GLOBAL');
 
 function RegionDots({ regions }) {
   const on = new Set(regions || []);
@@ -60,7 +61,8 @@ function ProductCard({ item, sparkWidth }) {
       <div className="ix-card-name">{item.name}</div>
       <div className="ixp-status"><SupplyBadge status={item.status} /></div>
       <div className="ix-card-meta ixp-meta">
-        <span>{[item.form, regionsText].filter(Boolean).join(' · ')}</span>
+        {/* The region count is the footer's link text; the dots show which. */}
+        {item.form && <span>{item.form}</span>}
         {item.is_group && (
           <span className="ixp-group" title={`Group card: ${fmt.plural(item.member_count, 'member product')}`}>
             Group · {item.member_count}

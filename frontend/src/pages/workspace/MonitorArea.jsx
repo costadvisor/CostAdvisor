@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import exportCsv from '../../utils/exportCsv';
-import { DriftBar } from './wsCharts';
+import { DriftBar, GAP_STATUS as STATUS, gapStatus } from './wsCharts';
 import RadarView from '../../components/RadarView';
 import DemoDataNote from '../../components/DemoDataNote';
-import { fmtMoney, fmtSignedMoney, EXPOSURE_NOTE } from '../../utils/currency';
+import { qLabel, quarterKey } from '../../utils/quarters';
+import { fmtMoney, fmtSignedMoney, EXPOSURE_NOTE, rowExposure } from '../../utils/currency';
 
 /* Monitor — the standing question of the job: across everything I buy, where am
  * I overpaying right now, before I walk into a negotiation. Rebuilt to the new IA
@@ -20,21 +21,11 @@ import { fmtMoney, fmtSignedMoney, EXPOSURE_NOTE } from '../../utils/currency';
  * priority matrix / alerts that turn "here's a gap" into "fix this one first"
  * are deliberately Wave 3, not built here. */
 
-// Status is derived on the frontend from the endpoint's existing flags + whether
-// a product has a completed formula — no new backend logic.
-const STATUS = {
-  alert: { label: 'Alert', color: 'var(--accent2)', bg: 'var(--danger-bg)', rank: 0 },
-  watch: { label: 'Watch', color: 'var(--accent3)', bg: 'var(--warn-bg)', rank: 1 },
-  ok: { label: 'On track', color: 'var(--accent)', bg: 'var(--success-bg)', rank: 2 },
-  draft: { label: 'Formula draft', color: 'var(--muted)', bg: 'var(--neutral-bg)', rank: 3 },
-};
-
+// Status comes from the summary's flags (GAP_STATUS in wsCharts, shared with
+// Negotiate) + whether a product has a completed formula.
 const STATUS_FILTERS = [
   { key: 'all', label: 'All products' },
-  { key: 'alert', label: 'Alerts only' },
-  { key: 'watch', label: 'Watch' },
-  { key: 'ok', label: 'On track' },
-  { key: 'draft', label: 'Formula draft' },
+  ...['alert', 'watch', 'below', 'ok', 'draft'].map(key => ({ key, label: STATUS[key].label })),
 ];
 
 function Badge({ color, bg, children, title }) {
@@ -54,14 +45,27 @@ export default function MonitorArea() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [familyFilter, setFamilyFilter] = useState('all');
+  // Search, filters and view live in the URL: Monitor → Brief → Back is the
+  // triage loop, and as component state every return (or reload) reset them.
+  // `replace` keeps one history entry per visit, not one per keystroke.
+  const [params, setParams] = useSearchParams();
+  const setParam = (key, value, fallback) => setParams(prev => {
+    const next = new URLSearchParams(prev);
+    if (!value || value === fallback) next.delete(key); else next.set(key, value);
+    return next;
+  }, { replace: true });
+  const search = params.get('q') || '';
+  const setSearch = (v) => setParam('q', v, '');
+  const statusFilter = params.get('status') || 'all';
+  const setStatusFilter = (v) => setParam('status', v, 'all');
+  const familyFilter = params.get('family') || 'all';
+  const setFamilyFilter = (v) => setParam('family', v, 'all');
   const [closed, setClosed] = useState(() => new Set());   // groups open unless closed
   // 'drift' = the shipped should-cost-vs-actual table; 'radar' = the SCRUM-79
   // trigger radar. Two different questions — where am I overpaying now, and
   // what has a deadline on it — so they are views, not merged columns.
-  const [view, setView] = useState('drift');
+  const view = params.get('view') === 'radar' ? 'radar' : 'drift';
+  const setView = (v) => setParam('view', v, 'drift');
 
   useEffect(() => {
     if (!activeTeamId) return;
@@ -105,21 +109,31 @@ export default function MonitorArea() {
       const s = summaryByModel[cm.id];
       const fam = productById[cm.product_id]?.family || null;
       // A cost model with no completed formula still reads as a draft.
-      const status = !s ? 'draft'
-        : s.flag_price_drift ? 'alert'
-          : s.flag_index_moved ? 'watch' : 'ok';
-      const exposure = s ? Math.abs(s.cumulative_impact ?? s.gap ?? 0) : 0;
+      const status = gapStatus(s);
+      const exposure = rowExposure(s);
       return {
         kind: 'cm', key: cm.id, costModelId: cm.id, productId: cm.product_id,
         ref: cm.product_reference || null,
         name: cm.product_name || 'Unnamed product',
         supplier: cm.supplier_name || null,
         region: cm.region || null,
+        // Two cost models for one product and supplier differ by destination
+        // (and Incoterm), which the row has to show to tell them apart.
+        destination: cm.destination_country || null,
+        incoterm: cm.incoterm || null,
         currency: cm.currency || reportCur,
         familyLabel: fam?.name || 'No family',
         status,
         shouldCost: s ? s.current_should_cost : null,
+        // The quarter the should-cost is priced at (the latest with data, as
+        // on the brief) and the quarter of the last invoice.
+        asOf: s?.as_of_year ? qLabel(s.as_of_year, s.as_of_quarter) : null,
         actual: s ? s.latest_actual_price : null,
+        actualPeriod: s?.latest_actual_year ? qLabel(s.latest_actual_year, s.latest_actual_quarter) : null,
+        // An invoice is "in" only when it covers the should-cost's quarter; an
+        // older one leaves this quarter's price still awaited.
+        invoiceIn: !!(s && s.latest_actual_year && s.as_of_year
+          && quarterKey(s.latest_actual_year, s.latest_actual_quarter) >= quarterKey(s.as_of_year, s.as_of_quarter)),
         gap: s ? s.gap : null,
         gapPct: s ? s.gap_pct : null,
         exposure,
@@ -131,7 +145,8 @@ export default function MonitorArea() {
       ref: p.formula || null, name: p.name, supplier: null, region: null,
       currency: reportCur,
       familyLabel: p.family?.name || 'No family',
-      status: 'draft', shouldCost: null, actual: null, gap: null, gapPct: null, exposure: 0,
+      status: 'draft', shouldCost: null, asOf: null, actual: null, actualPeriod: null, invoiceIn: false,
+      gap: null, gapPct: null, exposure: 0,
     }));
     return [...cmRows, ...draftRows];
   }, [costModels, products, summaryByModel, productById, reportCur]);
@@ -141,6 +156,12 @@ export default function MonitorArea() {
     () => [...new Set(rows.map(r => r.familyLabel))].sort(), [rows]);
 
   const q = search.trim().toLowerCase();
+  const filtersOn = q !== '' || statusFilter !== 'all' || familyFilter !== 'all';
+  const clearFilters = () => setParams(prev => {
+    const next = new URLSearchParams(prev);
+    ['q', 'status', 'family'].forEach(k => next.delete(k));
+    return next;
+  }, { replace: true });
   const filtered = rows.filter(r => {
     if (statusFilter !== 'all' && r.status !== statusFilter) return false;
     if (familyFilter !== 'all' && r.familyLabel !== familyFilter) return false;
@@ -175,18 +196,19 @@ export default function MonitorArea() {
   // two suppliers has two cost models but is one product of the portfolio.
   const liveProducts = new Set(costModels.filter(cm => summaryByModel[cm.id]).map(cm => cm.product_id)).size;
   const draftCount = rows.filter(r => r.status === 'draft').length;
-  // "Awaiting invoice" = a live should-cost exists but no actual price landed yet.
-  const awaitingInvoice = rows.filter(r => r.shouldCost != null && r.actual == null).length;
+  // "Awaiting invoice" = a live should-cost exists but no invoice covers its
+  // quarter yet (any invoice ever recorded used to count as "in").
+  const awaitingInvoice = rows.filter(r => r.shouldCost != null && !r.invoiceIn).length;
   const totalProducts = products.length;
   const stats = [
     { lbl: 'Products in portfolio', val: totalProducts, sub: `${completeCount} active cost model${completeCount === 1 ? '' : 's'} · ${draftCount} formula incomplete` },
     { lbl: 'Should-costs live', val: `${liveProducts} / ${totalProducts}`, color: 'var(--accent)', sub: draftCount ? `${draftCount} awaiting formula completion` : 'all products modelled' },
-    { lbl: 'Estimated drift', val: fmtMoney(kpis?.total_exposure || 0, reportCur, { decimals: 0 }), color: (kpis?.total_exposure || 0) > 0 ? 'var(--accent2)' : undefined, sub: `sum of exposures: today's gap × all volume on record, in ${reportCur}`, title: EXPOSURE_NOTE },
+    { lbl: 'Total exposure', val: fmtMoney(kpis?.total_exposure || 0, reportCur, { decimals: 0 }), color: (kpis?.total_exposure || 0) > 0 ? 'var(--accent2)' : undefined, sub: `sum of exposures: today's gap × all volume on record, in ${reportCur}`, title: EXPOSURE_NOTE },
     { lbl: 'Awaiting invoice', val: awaitingInvoice, sub: awaitingInvoice ? 'price not yet received this period' : 'all invoices in' },
   ];
 
   const filterBtn = (active) => (active ? 'ca-btn ca-btn-primary ca-btn-sm' : 'ca-btn ca-btn-ghost ca-btn-sm');
-  const groupBadges = (counts) => ['alert', 'watch', 'ok', 'draft']
+  const groupBadges = (counts) => ['alert', 'watch', 'below', 'ok', 'draft']
     .filter(k => counts[k])
     .map(k => <Badge key={k} color={STATUS[k].color} bg={STATUS[k].bg}>{counts[k]} {STATUS[k].label.toLowerCase()}</Badge>);
 
@@ -212,15 +234,17 @@ export default function MonitorArea() {
               </button>
             ))}
           </div>
-          {view === 'drift' && filtered.length > 0 && (
-            <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => exportCsv(
+          {/* Always rendered (disabled when nothing matches), so the header
+              does not reflow when a filter empties the table. */}
+          {view === 'drift' && (
+            <button className="ca-btn ca-btn-ghost ca-btn-sm" disabled={filtered.length === 0} onClick={() => exportCsv(
               'monitor.csv',
               ['Family', 'Ref', 'Product', 'Supplier', 'Region', 'Currency', 'Should-cost', 'Actual', 'Gap', 'Gap %', 'Exposure', 'Status', 'Invoice'],
               filtered.map(r => [
                 r.familyLabel, r.ref || '', r.name, r.supplier || '', r.region || '', r.currency,
                 r.shouldCost != null ? r.shouldCost : '', r.actual != null ? r.actual : '',
                 r.gap != null ? r.gap : '', r.gapPct != null ? r.gapPct : '', r.exposure || '',
-                STATUS[r.status].label, r.kind === 'cm' ? (r.actual != null ? 'Received' : 'Awaited') : '',
+                STATUS[r.status].label, r.kind === 'cm' ? (r.invoiceIn ? `${r.actualPeriod} received` : 'Awaited') : '',
               ])
             )}>Export CSV</button>
           )}
@@ -250,7 +274,7 @@ export default function MonitorArea() {
                 <button key={f.key} className={filterBtn(statusFilter === f.key)} onClick={() => setStatusFilter(f.key)}>{f.label}</button>
               ))}
             </div>
-            {familyLabels.length > 0 && <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 2px' }} />}
+            {familyLabels.length > 0 && <div className="ca-filter-divider" />}
             {familyLabels.length > 0 && (
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 <button className={filterBtn(familyFilter === 'all')} onClick={() => setFamilyFilter('all')}>All families</button>
@@ -261,8 +285,13 @@ export default function MonitorArea() {
             )}
           </div>
 
-          {/* Stats */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 14 }}>
+          {/* Stats: the whole portfolio, whatever the filters show — said so
+              when a filter is on, rather than recomputing FX-converted totals. */}
+          {filtersOn && (
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>Whole portfolio — the filters apply to the table below.</div>
+          )}
+          {/* auto-fit, as on Negotiate: four fixed columns overflowed a phone. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 14 }}>
             {stats.map(s => (
               <div key={s.lbl} className="ca-metric" title={s.title}>
                 <div className="ca-metric-lbl">{s.lbl}</div>
@@ -274,7 +303,7 @@ export default function MonitorArea() {
 
           {/* Grouped monitor table */}
           <div className="ca-card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div className="ca-scroll-x">
+            <div className="ca-scroll-x ca-scroll-x--full">
               <table className="ca-table" style={{ width: '100%' }}>
                 <thead>
                   <tr>
@@ -293,7 +322,10 @@ export default function MonitorArea() {
                 </thead>
                 <tbody>
                   {groups.length === 0 && (
-                    <tr><td colSpan={11} style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>No products match these filters.</td></tr>
+                    <tr><td colSpan={11} style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
+                      No products match these filters.{' '}
+                      <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={clearFilters}>Clear filters</button>
+                    </td></tr>
                   )}
                   {groups.map(group => {
                     const open = !closed.has(group.key);
@@ -317,29 +349,38 @@ export default function MonitorArea() {
                               <td style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: 'var(--muted)' }}>{r.ref || '—'}</td>
                               <td>
                                 <div style={{ fontWeight: 600, color: r.kind === 'draft' ? 'var(--text-secondary)' : 'var(--text)' }}>{r.name}</div>
-                                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.supplier || 'No supplier'}{r.region ? ` · ${r.region}` : ''}</div>
+                                <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                                  {r.supplier || 'No supplier'}{r.destination ? ` → ${r.destination}` : r.region ? ` · ${r.region}` : ''}{r.incoterm ? ` · ${r.incoterm}` : ''}
+                                </div>
                               </td>
                               <td className="center">
                                 {r.shouldCost != null ? (
-                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                    <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent)' }}>{fmtMoney(r.shouldCost, r.currency)}</span>
-                                    <Badge color="var(--accent)" bg="var(--success-bg)">live</Badge>
-                                  </div>
+                                  <>
+                                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                      <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent)' }}>{fmtMoney(r.shouldCost, r.currency)}</span>
+                                      <Badge color="var(--accent)" bg="var(--success-bg)">live</Badge>
+                                    </div>
+                                    {r.asOf && <div style={{ fontSize: 10, color: 'var(--muted)' }}>as of {r.asOf}</div>}
+                                  </>
                                 ) : <span style={{ color: 'var(--muted)' }}>—</span>}
                               </td>
                               <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.actual != null ? 'var(--accent4)' : 'var(--muted)' }}>
                                 {r.actual != null ? fmtMoney(r.actual, r.currency) : '—'}
+                                {r.actualPeriod && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{r.actualPeriod}</div>}
                               </td>
                               <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: r.gap > 0 ? 'var(--accent2)' : r.gap < 0 ? 'var(--accent)' : 'var(--muted)' }}>
-                                {r.gap != null ? fmtSignedMoney(r.gap, r.currency) : '—'}
+                                {r.gap != null ? fmtSignedMoney(r.gap, r.currency, { scale: r.shouldCost }) : '—'}
                                 {r.gapPct != null && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{r.gapPct > 0 ? '+' : ''}{r.gapPct.toFixed(1)}%</div>}
                               </td>
                               <td>{r.gapPct != null ? <DriftBar value={Math.abs(r.gapPct)} max={maxAbsGap} color={st.color} /> : null}</td>
                               <td className="center">
                                 {r.shouldCost != null
-                                  ? (r.actual != null
-                                    ? <Badge color="var(--accent)" bg="var(--success-bg)">Received</Badge>
-                                    : <Badge color="var(--accent3)" bg="var(--warn-bg)">Awaited</Badge>)
+                                  ? (r.invoiceIn
+                                    ? <Badge color="var(--accent)" bg="var(--success-bg)">{r.actualPeriod} received</Badge>
+                                    : <Badge color="var(--accent3)" bg="var(--warn-bg)"
+                                        title={r.actualPeriod ? `Last invoice ${r.actualPeriod}; none yet for ${r.asOf}` : 'No invoice recorded yet'}>
+                                        {r.asOf ? `${r.asOf} awaited` : 'Awaited'}
+                                      </Badge>)
                                   : <span style={{ color: 'var(--muted)' }}>—</span>}
                               </td>
                               <td className="center"><Badge color={st.color} bg={st.bg}>{st.label}</Badge></td>

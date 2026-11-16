@@ -8,6 +8,7 @@ import { useConfirm } from '../../../components/ConfirmDialog';
 import ActionForm from './ActionForm';
 import ActionTimeline, { actionWindow } from './ActionTimeline';
 import OppDialog from './OppDialog';
+import useUrlState from '../useUrlState';
 import {
   ACTION_STATUSES, countActions, isOverdue, statusTone, strategyUrl, todayIso, useTeamMembers, plural,
 } from './OppShared';
@@ -20,8 +21,15 @@ import '../../../styles/strategy-opps.css';
 
 const enc = encodeURIComponent;
 const NO_FILTERS = { status: '', assignee: '', gem: '' };
+const DEFAULT_VIEW = { view: 'table' };
 const NONE = 'none';
 const leverKeyOf = (a) => (a.lever_id != null ? `a${a.lever_id}` : a.custom_lever_id ? `c${a.custom_lever_id}` : NONE);
+
+/* Done means finished: an action marked Done at under 100% is moved to 100%
+   in the same save, so its bar and the Done count agree. */
+function withDonePct(a, status) {
+  return status === 'Done' && (a.pct_complete ?? 0) < 100 ? { status, pct_complete: 100 } : { status };
+}
 
 function PctCell({ value, onCommit, label, disabled }) {
   const [draft, setDraft] = useState(null);
@@ -87,7 +95,8 @@ function ActionTable({ actions, today, onPatch, onEdit, onDelete, readOnly }) {
                 </td>
                 <td>
                   <select className={`ix-select so-status tone-${statusTone(a.status)}`} value={a.status}
-                    disabled={readOnly} aria-label={`Status of ${a.title}`} onChange={(e) => onPatch(a, { status: e.target.value })}>
+                    disabled={readOnly} aria-label={`Status of ${a.title}`}
+                    onChange={(e) => onPatch(a, withDonePct(a, e.target.value))}>
                     {ACTION_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </td>
@@ -132,8 +141,9 @@ export default function ActionsTab({ slug, teamId }) {
   useEffect(() => { setActions(null); }, [slug, teamId]);
   const today = res.data?.today || todayIso();
 
-  const [filters, setFilters] = useState(NO_FILTERS);
-  const [view, setView] = useState('table');
+  const [filters, setFilters] = useUrlState(NO_FILTERS, 'act_');
+  const [{ view }, setViewState] = useUrlState(DEFAULT_VIEW, 'act_');
+  const setView = (value) => setViewState({ view: value });
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [dialog, setDialog] = useState(null);
   const seq = useRef({});

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { Link, useLocation, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { Sparkline } from './wsCharts';
@@ -64,6 +64,24 @@ function Card({ title, sub, children }) {
   );
 }
 
+/* Width of the element `ref` is on, kept current, so a fixed-size chart can
+   span its card (0 until measured). */
+function useWidth() {
+  const ref = useRef(null);
+  const [w, setW] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const update = () => setW(Math.floor(el.getBoundingClientRect().width));
+    update();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, w];
+}
+
 function SeasonBars({ factors }) {
   const max = Math.max(6, ...factors.map(f => Math.abs(f - 100)));
   return (
@@ -94,6 +112,7 @@ function SeasonBars({ factors }) {
 function DerivedTab({ d, onFixAnchor }) {
   const levels = (d.series || []).map(p => p.level);
   const g = GRADE[d.trust?.grade || 'unrated'];
+  const [historyRef, historyW] = useWidth();
 
   if (!d.evaluable) {
     return (
@@ -172,8 +191,11 @@ function DerivedTab({ d, onFixAnchor }) {
       {levels.length >= 2 && (
         <Card title="Index history"
           sub={`${d.series.length} quarters, rebased to 100 at the combo's base period — margin sits inside the recipe, so the level is exactly 100 there by construction.`}>
-          <Sparkline data={levels} width={620} height={90}
-            label={`Index level over ${levels.length} quarters`} />
+          {/* Full card width, so the line ends above the last quarter's label. */}
+          <div ref={historyRef}>
+            <Sparkline data={levels} width={historyW || 620} height={90}
+              label={`Index level over ${levels.length} quarters`} />
+          </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
             <span>{d.series[0].year} Q{d.series[0].quarter}</span>
             <span>{d.series[d.series.length - 1].year} Q{d.series[d.series.length - 1].quarter}</span>
@@ -373,6 +395,7 @@ export default function IntelligenceComboArea() {
   const { templateId, region, costModelId } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { activeTeamId } = useAuth();
 
   const [tab, setTab] = useState('derived');
@@ -432,8 +455,14 @@ export default function IntelligenceComboArea() {
 
   return (
     <div className="ca-page ca-fade-in">
+      {/* From the combos grid, Back is history, so the grid keeps its search,
+          region and page; opened directly, it goes to the grid. */}
       <button className="ca-btn ca-btn-ghost ca-btn-sm" style={{ marginBottom: 10 }}
-        onClick={() => navigate(params.get('from') === 'portfolio' ? '/portfolio' : '/intelligence/combos')}>
+        onClick={() => {
+          if (params.get('from') === 'portfolio') navigate('/portfolio');
+          else if (location.state?.fromList && window.history.length > 1) navigate(-1);
+          else navigate('/intelligence/combos');
+        }}>
         ← Back
       </button>
 

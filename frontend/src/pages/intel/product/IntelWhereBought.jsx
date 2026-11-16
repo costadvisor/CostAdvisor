@@ -5,7 +5,8 @@ import { industryHref, productHref } from './IntelUtil';
 
 /* "Where this product is bought": the ratified category tree's placements,
  * grouped by industry (the API already orders them by industry, then
- * category). Each industry links to its Categories page. */
+ * category). Each industry links to its Categories page, each category to
+ * that page opened on it; a group's member shows by name, PID on hover. */
 
 const STATUS_ORDER = ['servable', 'partial', 'build'];
 
@@ -24,7 +25,7 @@ function groupByIndustry(placements) {
   return groups;
 }
 
-function IndustryGroup({ group, pid }) {
+function IndustryGroup({ group, pid, names }) {
   return (
     <section className="ixi-where-group" aria-label={group.name}>
       <h3 className="ixi-where-industry">
@@ -35,7 +36,12 @@ function IndustryGroup({ group, pid }) {
           <li key={`${pl.category_code}-${i}`} className="ixi-where-row">
             <span className="ixi-where-code">{pl.category_code}</span>
             <span className="ixi-where-name">
-              <span className="ixi-where-cat">{pl.category_name || pl.placement_name}</span>
+              {group.slug && pl.category_code ? (
+                <Link className="ixi-where-cat"
+                  to={`${industryHref(group.slug)}?open=${encodeURIComponent(pl.category_code)}`}>
+                  {pl.category_name || pl.placement_name}
+                </Link>
+              ) : <span className="ixi-where-cat">{pl.category_name || pl.placement_name}</span>}
               <span className="ixi-where-fn">
                 {pl.fn}
                 {pl.via_shared && (
@@ -46,7 +52,7 @@ function IndustryGroup({ group, pid }) {
                 {pl.pid && pl.pid !== pid && (
                   <>
                     {' · via '}
-                    <Link to={productHref(pl.pid)}>{pl.pid}</Link>
+                    <Link to={productHref(pl.pid)} title={pl.pid}>{names.get(pl.pid) || pl.pid}</Link>
                   </>
                 )}
               </span>
@@ -68,6 +74,7 @@ export default function IntelWhereBought({ product }) {
   const [showAll, setShowAll] = useState(false);
   const placements = product.placements || [];
   const groups = groupByIndustry(placements);
+  const names = new Map((product.members || []).filter((m) => m.name).map((m) => [m.pid, m.name]));
   const collapsible = groups.length > COLLAPSE_AT;
   const visible = collapsible && !showAll ? groups.slice(0, SHOWN_COLLAPSED) : groups;
 
@@ -85,7 +92,7 @@ export default function IntelWhereBought({ product }) {
       ) : (
         <>
           <div className="ixi-where">
-            {visible.map((g) => <IndustryGroup key={g.key} group={g} pid={product.pid} />)}
+            {visible.map((g) => <IndustryGroup key={g.key} group={g} pid={product.pid} names={names} />)}
           </div>
           {collapsible && (
             <button type="button" className="ix-link ixi-where-more" aria-expanded={showAll}

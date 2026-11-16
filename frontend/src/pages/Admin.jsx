@@ -1,10 +1,14 @@
 import { useState, useEffect, useRef, Fragment, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { useConfirm, useAlert } from '../components/ConfirmDialog';
 import Tooltip from '../components/Tooltip';
 import { invalidateRegions } from '../components/RegionSelect';
 import SupportAdminTab from '../components/SupportAdminTab';
+import { useEscapeKey } from '../components/Modal';
+
+const ADMIN_TABS = ['users', 'teams', 'audit', 'requests', 'regions', 'support', 'settings'];
 
 export default function Admin() {
   const { user, refreshUser } = useAuth();
@@ -19,7 +23,11 @@ export default function Admin() {
   const [demoRequests, setDemoRequests] = useState([]);
   const [regions, setRegions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState('users');
+  // The tab lives in the URL (as on the Team page), so Back returns to the
+  // previous tab and Admin > Requests can be linked to.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = ADMIN_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'users';
+  const setTab = (t) => setSearchParams(t === 'users' ? {} : { tab: t });
   const [impersonating, setImpersonating] = useState(false);
   const [search, setSearch] = useState('');
   const [showDeleted, setShowDeleted] = useState(false);
@@ -81,11 +89,27 @@ export default function Admin() {
     if (tab === 'audit') fetchAuditLogs();
     else if (tab === 'requests') fetchRequests();
     else if (tab === 'regions') fetchRegions();
-    else if (tab !== 'settings') fetchData();
+    // Settings too: it needs the user list, and a link straight to
+    // ?tab=settings would otherwise never clear the loading state.
+    else fetchData();
   }, [tab, showDeleted]);
 
   useEffect(() => {
     setImpersonating(document.cookie.split(';').some(c => c.trim().startsWith('ca_impersonating=')));
+  }, []);
+
+  // The tab row counts users, teams, pending requests and regions, but each
+  // list otherwise loads only with its own tab, so counts read (0) or were
+  // missing until then. Load the ones the opening tab will not, quietly.
+  useEffect(() => {
+    const quiet = (url, set) => api.get(url).then(r => set(r.data)).catch(() => {});
+    if (['audit', 'requests', 'regions'].includes(tab)) {
+      quiet('/api/admin/users', setUsers);
+      quiet('/api/admin/teams', setTeams);
+      quiet('/api/admin/access-requests', setAccessRequests);
+    }
+    quiet('/api/admin/demo-requests', setDemoRequests);
+    quiet('/api/regions', setRegions);
   }, []);
 
   const setPlatformRole = async (userId, roleName, grant) => {
@@ -305,6 +329,8 @@ function EditRoleModal({ user, platformRoles, onSetRole, onClose, onRefresh }) {
   const [assignedRoleIds, setAssignedRoleIds] = useState(new Set());
   const [loadingRoles, setLoadingRoles] = useState(true);
 
+  useEscapeKey(true, onClose);
+
   useEffect(() => {
     api.get(`/api/admin/users/${user.id}/platform-roles`)
       .then(r => setAssignedRoleIds(new Set(r.data.map(x => x.id))))
@@ -337,7 +363,8 @@ function EditRoleModal({ user, platformRoles, onSetRole, onClose, onRefresh }) {
 
   return (
     <div className="ca-modal-backdrop" onClick={onClose}>
-      <div className="ca-modal" style={{ width: 400 }} onClick={e => e.stopPropagation()}>
+      <div className="ca-modal" style={{ width: 400 }} onClick={e => e.stopPropagation()}
+        role="dialog" aria-modal="true" aria-label="Edit Platform Roles">
         <div className="ca-modal-header">
           <div className="ca-modal-title">Edit Platform Roles</div>
           <button className="ca-modal-close" onClick={onClose}>×</button>
@@ -1136,6 +1163,7 @@ function RegionsTab({ regions, onRefresh }) {
 
 function RegionFormModal({ region, allRegions, onClose, onSaved }) {
   const isEdit = !!region;
+  useEscapeKey(true, onClose);
   const [code, setCode] = useState(region?.code || '');
   const [name, setName] = useState(region?.name || '');
   const [parentId, setParentId] = useState(region?.parent_id ?? '');
@@ -1169,7 +1197,8 @@ function RegionFormModal({ region, allRegions, onClose, onSaved }) {
 
   return (
     <div className="ca-modal-backdrop" onClick={onClose}>
-      <div className="ca-modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
+      <div className="ca-modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}
+        role="dialog" aria-modal="true" aria-label={isEdit ? 'Edit region' : 'Add region'}>
         <div className="ca-modal-header">
           <div className="ca-modal-title">{isEdit ? 'Edit region' : 'Add region'}</div>
           <button className="ca-modal-close" onClick={onClose}>×</button>
@@ -1228,9 +1257,11 @@ function RegionFormModal({ region, allRegions, onClose, onSaved }) {
 function UserDetailPanel({ user, onClose, onNavigateToTeam, platformRoles,
   onSetPlatformRole, onImpersonate, onDelete, onRestore, currentUser, isImpersonating, onRefresh }) {
   const [showEditRole, setShowEditRole] = useState(false);
+  // While the roles dialog is open on top, Escape is that dialog's.
+  useEscapeKey(!!user && !showEditRole, onClose);
   if (!user) return null;
   return (
-    <div style={{
+    <div role="dialog" aria-modal="true" aria-label="User details" style={{
       position: 'fixed', top: 0, right: 0,
       width: 360, height: '100vh',
       background: 'var(--surface)',
@@ -1540,6 +1571,7 @@ function DemoRequestsTab({ requests, currentUser, onRefresh }) {
   const [search, setSearch] = useState('');
   const [actionDialog, setActionDialog] = useState(null); // { type: 'accept'|'reject', req }
   const [actionRemarks, setActionRemarks] = useState('');
+  useEscapeKey(!!actionDialog, () => setActionDialog(null));
   const [editingRemarks, setEditingRemarks] = useState(null); // req.id
   const [editingRemarksText, setEditingRemarksText] = useState('');
 
@@ -1598,7 +1630,8 @@ function DemoRequestsTab({ requests, currentUser, onRefresh }) {
             style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.5)' }}
             onClick={() => setActionDialog(null)}
           />
-          <div style={{
+          <div role="dialog" aria-modal="true"
+            aria-label={actionDialog.type === 'accept' ? 'Accept Demo Request' : 'Reject Demo Request'} style={{
             position: 'fixed', zIndex: 201, top: '50%', left: '50%',
             transform: 'translate(-50%,-50%)', background: 'var(--surface)',
             border: '1px solid var(--border)', borderRadius: 10, padding: 24, width: 420,
@@ -1808,6 +1841,14 @@ function AdminSettingsTab({ users = [] }) {
     if (section === 'roles') fetchRoles();
     if (section === 'demo_hosts') fetchDemoHosts();
   }, [section]);
+
+  // The section buttons show counts, so load these small lists up front;
+  // without this they read 'Plans (0)' until the section was opened.
+  useEffect(() => {
+    api.get('/api/settings/plans').then(r => setPlans(r.data)).catch(console.error);
+    api.get('/api/settings/roles').then(r => setRoles(r.data)).catch(console.error);
+    api.get('/api/admin/demo-hosts').then(r => setDemoHosts(r.data)).catch(console.error);
+  }, []);
 
   const fetchPlans = () => {
     setLoadingPlans(true);

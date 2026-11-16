@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import Modal from './Modal';
 import api, { formatApiError } from '../api';
+import NumberInput from './NumberInput';
 
 /* Shared add/edit product form, extracted from Products.jsx.
  *
@@ -53,8 +54,9 @@ function PickedValue({ title, detail, onClear, clearLabel }) {
 }
 
 /* A search box with its result list inline below it. Inline (not a floating
-   popover) because the modal body scrolls: a popover would be clipped. */
-function SearchList({ id, label, placeholder, query, onQuery, items, onPick, renderItem, footer }) {
+   popover) because the modal body scrolls: a popover would be clipped. Also the
+   builder's catalogue-recipe picker. */
+export function SearchList({ id, label, placeholder, query, onQuery, items, onPick, renderItem, footer, autoFocus }) {
   const [active, setActive] = useState(0);
   useEffect(() => { setActive(0); }, [items]);
 
@@ -79,6 +81,7 @@ function SearchList({ id, label, placeholder, query, onQuery, items, onPick, ren
         placeholder={placeholder}
         onChange={e => onQuery(e.target.value)}
         onKeyDown={onKeyDown}
+        autoFocus={autoFocus}
       />
       {(items.length > 0 || footer) && (
         <div style={{
@@ -289,8 +292,9 @@ export default function ProductFormModal({
           </div>
           <div>
             <label className="ca-label" htmlFor="pf-active">Active Content (0-1)</label>
-            <input id="pf-active" className="ca-input" type="number" value={activeContent} min={0} max={1} step={0.01}
-              onChange={e => setActiveContent(+e.target.value)} />
+            {/* NumberInput, not type=number: that showed "01.5" after clearing. Empty = no active content. */}
+            <NumberInput id="pf-active" value={activeContent} allowNegative={false}
+              onChange={setActiveContent} />
           </div>
 
           <div style={{ gridColumn: '1 / -1' }}>

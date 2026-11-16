@@ -38,7 +38,10 @@ export default function NegotiateDetailArea() {
     setError(null);
     api.post('/api/costing/brief', { cost_model_id: costModelId })
       .then(({ data }) => setData(data))
-      .catch(err => setError(formatApiError(err)))
+      // A bad or unknown id is "not found", not the validator's raw text.
+      .catch(err => setError([404, 422].includes(err?.response?.status)
+        ? 'This product was not found. It may have been deleted, or the link is wrong.'
+        : `Error: ${formatApiError(err)}`))
       .finally(() => setLoading(false));
   }, [costModelId]);
 
@@ -46,7 +49,7 @@ export default function NegotiateDetailArea() {
   if (error) return (
     <div className="ca-page ca-fade-in">
       <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => navigate('/negotiate')}>← Negotiate</button>
-      <div className="ca-card" style={{ color: 'var(--accent2)', marginTop: 12 }}>Error: {error}</div>
+      <div className="ca-card" style={{ color: 'var(--accent2)', marginTop: 12 }}>{error}</div>
     </div>
   );
   if (!data) return null;
@@ -55,7 +58,12 @@ export default function NegotiateDetailArea() {
     product_name, supplier_name, destination_country, currency, unit,
     current_should_cost, current_floor, current_actual_price, gap, gap_pct,
     total_impact, volumes_missing, period_label, evolution, narrative, drivers,
+    as_of_label, base_period_label,
   } = data;
+  // A single figure is as of the window's last quarter; the window itself
+  // ("Q3-24 to Q2-26") is for the chart and the totals over it.
+  const asOf = as_of_label || period_label;
+  const since = base_period_label ? `since ${base_period_label}` : 'since the base quarter';
   const sym = curSym(currency);
   const money = (v, opts) => fmtMoney(v, currency, opts);
 
@@ -157,12 +165,12 @@ export default function NegotiateDetailArea() {
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 320px', minWidth: 0 }}>
               <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
-                No supplier price recorded for {period_label}
+                No supplier price recorded for {asOf}
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
                 The should-cost below is complete, but without a supplier price there is no gap to
-                negotiate against — so the assessment, the total impact and each driver's
-                contribution can't be calculated yet.
+                negotiate against — so the assessment and the total impact can't be
+                calculated yet.
                 {indicesFlat && ' The linked indices have also not moved over this period.'}
               </div>
             </div>
@@ -188,7 +196,7 @@ export default function NegotiateDetailArea() {
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: 'var(--accent)' }}>
               {money(current_should_cost, { decimals: dp })}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>per {unit} at {period_label}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>per {unit} as of {asOf}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Actual Price</div>
@@ -244,11 +252,17 @@ export default function NegotiateDetailArea() {
           </div>
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-          {current_floor != null
-            ? <>Your defensible range for this product is <strong>{money(current_floor, { decimals: dp })}</strong> to{' '}
-                <strong>{money(current_should_cost, { decimals: dp })}</strong> — anchor the conversation near should-cost and hold
-                the floor as your walk-away point, not your opening offer.</>
-            : 'The floor (cost before margin) is not available for this formula.'}
+          {/* Already under should-cost: anchoring "near should-cost" would argue
+              the price up, so the advice is to hold what you pay. */}
+          {hasActual && gap < 0
+            ? <>You already pay <strong>{money(current_actual_price, { decimals: dp })}</strong>, below the
+                should-cost of <strong>{money(current_should_cost, { decimals: dp })}</strong>. Hold the current
+                price; there is no case here for paying more.</>
+            : current_floor != null
+              ? <>Your defensible range for this product is <strong>{money(current_floor, { decimals: dp })}</strong> to{' '}
+                  <strong>{money(current_should_cost, { decimals: dp })}</strong> — anchor the conversation near should-cost and hold
+                  the floor as your walk-away point, not your opening offer.</>
+              : 'The floor (cost before margin) is not available for this formula.'}
         </div>
       </div>
 
@@ -304,6 +318,12 @@ export default function NegotiateDetailArea() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)' }}>
             <div style={{ width: 20, height: 0, borderTop: '2px dashed var(--accent)' }} /> Should-Cost
           </div>
+          {/* The chart's faint "REF" line. Here it is the should-cost the cards above
+              quote; on Evolution and Squeeze it is the formula's base price, which
+              the brief response does not carry, so it is named here. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)' }}>
+            <div style={{ width: 20, height: 0, borderTop: '1px dashed var(--chart-ref-text)' }} /> REF = Should-cost today ({asOf})
+          </div>
         </div>
       </div>
 
@@ -321,31 +341,37 @@ export default function NegotiateDetailArea() {
                * height (31px); a percentage height on the bar then resolved
                * against an indefinite parent and collapsed. The chart has never
                * shown a difference between $1.94 and $0.16. */
-              const PLOT_H = 96;
+              const PLOT_H = 140;
               // Scale against the total, not the largest component, so bar heights
               // are read as shares of the should-cost the total bar represents.
               const scaleMax = Math.max(Math.abs(current_should_cost) || 0, ...drivers.map(d => Math.abs(d.component_cost)), 0.001);
               const barPx = (v) => Math.max(2, Math.round((Math.abs(v) / scaleMax) * PLOT_H));
+              // Wide enough for 10 px labels, but a long formula (8+ lines) still
+              // fits a printed A4 page (~660 px), where the row cannot scroll.
+              const colMin = Math.min(76, Math.floor(600 / (drivers.length + 1)));
               const column = (key, { value, color, opacity, label, bold, divider }) => (
                 <div key={key} style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end',
-                  flex: 1, minWidth: 44, height: '100%',
+                  flex: 1, minWidth: colMin, height: '100%',
                   ...(divider ? { borderLeft: '1px solid var(--border)', paddingLeft: 6, marginLeft: 2 } : {}),
                 }}>
-                  <div style={{ fontSize: 9, color: bold ? color : 'var(--muted)', fontWeight: bold ? 700 : 400, marginBottom: 3, whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace" }}>
+                  <div style={{ fontSize: 10, color: bold ? color : 'var(--muted)', fontWeight: bold ? 700 : 400, marginBottom: 3, whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace" }}>
                     {money(value, { decimals: dp })}
                   </div>
                   <div
                     style={{ width: '58%', height: barPx(value), background: color, borderRadius: '3px 3px 0 0', opacity }}
                     title={`${label} — ${money(value, { decimals: dp })}`}
                   />
-                  <div style={{ fontSize: 8, fontWeight: bold ? 700 : 400, color: 'var(--text-secondary)', marginTop: 5, textAlign: 'center', lineHeight: 1.25, minHeight: 20 }}>
+                  <div style={{ fontSize: 10, fontWeight: bold ? 700 : 400, color: 'var(--text-secondary)', marginTop: 5, textAlign: 'center', lineHeight: 1.25, minHeight: 26, overflowWrap: 'anywhere' }}>
                     {label}
                   </div>
                 </div>
               );
+              // Readable labels need wider columns than a phone has: the row
+              // scrolls inside its card there, like the drivers table below.
               return (
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: PLOT_H + 46 }}>
+                <div style={{ overflowX: 'auto' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: PLOT_H + 64 }}>
                   {drivers.map((d, i) => column(i, {
                     value: d.component_cost, color: 'var(--accent4)', opacity: 0.85, label: d.component_label,
                   }))}
@@ -353,6 +379,7 @@ export default function NegotiateDetailArea() {
                     value: current_should_cost, color: 'var(--accent)', opacity: 0.75,
                     label: 'SHOULD-COST', bold: true, divider: true,
                   })}
+                </div>
                 </div>
               );
             })()}
@@ -363,9 +390,10 @@ export default function NegotiateDetailArea() {
         </div>
       )}
 
-      {/* Cost Drivers. "Contribution to gap" is undefined without a supplier price,
-          so that column is dropped rather than filled with a column of $0.000 — the
-          component's share of the should-cost is shown instead, which is real. */}
+      {/* Cost Drivers. A driver's figure (`contribution_to_gap` in the API) is how
+          far the should-cost moved on that line since the formula's base quarter —
+          not a split of the supplier gap, so it is labelled as what it is. Without
+          a supplier price the component's share of the should-cost is shown instead. */}
       <div className="ca-card" style={{ marginBottom: 16 }}>
         <div className="ca-card-title" style={{ marginBottom: 8 }}>
           {hasActual ? 'Top Cost Drivers' : 'Cost Components'}
@@ -374,13 +402,15 @@ export default function NegotiateDetailArea() {
           <div style={{ color: 'var(--muted)', fontSize: 12, padding: 16 }}>No component drivers for this model.</div>
         ) : (
           <>
+            {/* Scrolls inside its card on a phone instead of spilling out of it. */}
+            <div style={{ overflowX: 'auto' }}>
             <table className="ca-table">
               <thead>
                 <tr>
                   <th scope="col">Component</th>
                   <th scope="col">Index</th>
-                  <th scope="col" className="right">Index Change</th>
-                  <th scope="col" className="right">{hasActual ? 'Contribution to Gap' : 'Share of Should-Cost'}</th>
+                  <th scope="col" className="right">Index change {since}</th>
+                  <th scope="col" className="right">{hasActual ? `Should-cost change ${since}` : 'Share of Should-Cost'}</th>
                   <th scope="col" className="right">Direction</th>
                 </tr>
               </thead>
@@ -421,10 +451,11 @@ export default function NegotiateDetailArea() {
                 })}
               </tbody>
             </table>
+            </div>
             {!hasActual && (
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
                 Each row shows what the component contributes to the should-cost. Once a supplier
-                price is recorded, this becomes each component's contribution to the gap.
+                price is recorded, this column shows how far each line moved the should-cost {since}.
               </div>
             )}
           </>

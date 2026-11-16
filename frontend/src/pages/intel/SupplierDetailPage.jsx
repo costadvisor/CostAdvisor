@@ -34,17 +34,17 @@ export default function SupplierDetailPage() {
       const next = new URLSearchParams(prev);
       if (f) next.set('family_id', f); else next.delete('family_id');
       return next;
-    }, { replace: true });
-  }, [setParams]);
+    }, { replace: true, state: location.state });
+  }, [setParams, location.state]);
   const openFamily = useCallback((f) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('tab', 'products');
       if (f) next.set('family_id', f); else next.delete('family_id');
       return next;
-    }, { replace: true });
+    }, { replace: true, state: location.state });
     window.scrollTo({ top: 0 });
-  }, [setParams]);
+  }, [setParams, location.state]);
 
   // Reached from the directory or another supplier page, "Back" is history
   // (the list keeps its filters); opened directly, it goes to the directory.

@@ -10,6 +10,7 @@ import { useConfirm } from '../../../components/ConfirmDialog';
 import OppObjectives from './OppObjectives';
 import LeverRow from './LeverRow';
 import OppCustomLeverDialog from './OppCustomLeverDialog';
+import useUrlState from '../useUrlState';
 import {
   LEVER_STATUSES, leverKey, isPlotted, strategyUrl, useTeamMembers, plural,
 } from './OppShared';
@@ -70,7 +71,7 @@ export default function OpportunitiesTab({ slug, teamId }) {
 
   const [selObj, setSelObj] = useState([]);
   const onSelectedChange = useCallback((codes) => setSelObj((p) => (sameCodes(p, codes) ? p : codes)), []);
-  const [filters, setFilters] = useState(NO_FILTERS);
+  const [filters, setFilters] = useUrlState(NO_FILTERS, 'opp_');
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [selKey, setSelKey] = useState(null);
   const [scrollTo, setScrollTo] = useState(null);

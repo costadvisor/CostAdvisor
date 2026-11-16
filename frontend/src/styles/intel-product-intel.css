@@ -117,6 +117,8 @@
 .ixi-where-code { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); padding-top: 1px; }
 .ixi-where-name { display: flex; flex-direction: column; min-width: 0; }
 .ixi-where-cat { color: var(--text); font-weight: 600; line-height: 1.35; }
+a.ixi-where-cat { text-decoration: none; }
+a.ixi-where-cat:hover { color: var(--accent); text-decoration: underline; }
 .ixi-where-fn { font-size: 10.5px; color: var(--muted); }
 .ixi-where-fn a { color: var(--accent4); text-decoration: none; }
 .ixi-where-shared { cursor: help; }

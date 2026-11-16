@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api, { formatApiError } from '../../api';
 import { useToast } from '../../components/Toast';
+import { fmtPerUnit } from '../../utils/currency';
 
 /* Guided negotiation prep (Scrum 29).
  *
@@ -27,18 +28,20 @@ const VERDICT_STYLE = {
   unmapped: { color: 'var(--accent4)', bg: 'var(--accent4-dim)' },
 };
 
-const money = (v, cur, unit) =>
-  v == null ? '—' : `${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}/${unit}`;
+// Every ladder figure at the should-cost's scale, as on the brief (utils/currency).
+const money = (v, cur, unit, scale) => fmtPerUnit(v, cur, unit, { scale });
 
 const slug = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 function Ladder({ ladder }) {
   const { currency: cur, unit, floor, should_cost: target, current_price: ask } = ladder;
-  const lo = Math.min(...[floor, target, ask].filter(v => v != null));
-  const hi = Math.max(...[floor, target, ask].filter(v => v != null));
-  const span = hi - lo || 1;
+  // Bars from zero, so their lengths compare like the prices do. Scaled
+  // between the lowest and highest figure, the floor always drew at 2% and
+  // the ask at 100%, whatever the gap.
+  const hi = Math.max(...[floor, target, ask].filter(v => v != null)) || 1;
   const rows = [
-    ['Their price', ask, 'var(--accent2)'],
+    // Red only when they ask more than the target.
+    ['Their price', ask, ask != null && ask > target ? 'var(--accent2)' : 'var(--text-secondary)'],
     ['Your target — should-cost', target, 'var(--accent)'],
     ['Floor — indexed cost before margin', floor, 'var(--accent4)'],
   ];
@@ -48,11 +51,11 @@ function Ladder({ ladder }) {
         <div key={label} style={{ marginBottom: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4, gap: 10 }}>
             <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
-            <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{money(value, cur, unit)}</span>
+            <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{money(value, cur, unit, target)}</span>
           </div>
           <div style={{ background: 'var(--surface2)', height: 6, borderRadius: 3 }}>
             <div style={{
-              width: value == null ? 0 : `${Math.max(2, ((value - lo) / span) * 100)}%`,
+              width: value == null ? 0 : `${Math.max(2, (value / hi) * 100)}%`,
               background: color, height: '100%', borderRadius: 3,
             }} />
           </div>
@@ -61,7 +64,7 @@ function Ladder({ ladder }) {
       {ladder.unexplained != null && (
         <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 14 }}>
           Unexplained portion of their price:{' '}
-          <strong style={{ color: 'var(--accent2)' }}>{money(ladder.unexplained, cur, unit)}</strong>
+          <strong style={{ color: 'var(--accent2)' }}>{money(ladder.unexplained, cur, unit, target)}</strong>
           {ladder.gap_pct != null && ` (${ladder.gap_pct > 0 ? '+' : ''}${ladder.gap_pct.toFixed(1)}%)`}
           . The should-cost has already consumed every verified index movement, so nothing they cite can
           re-explain this.
@@ -85,7 +88,9 @@ export default function NegotiationPrepArea() {
     setErr(null);
     api.get(`/api/negotiation-prep/${costModelId}/prep`)
       .then(({ data }) => setPrep(data))
-      .catch(e => setErr(formatApiError(e) || 'Could not load the prep.'));
+      .catch(e => setErr([404, 422].includes(e?.response?.status)
+        ? 'This product was not found. It may have been deleted, or the link is wrong.'
+        : formatApiError(e) || 'Could not load the prep.'));
   }, [costModelId]);
 
   useEffect(() => { load(); }, [load]);
@@ -94,13 +99,12 @@ export default function NegotiationPrepArea() {
     if (!said.trim()) return;
     setBusy(true);
     try {
-      // The period comes from the brief the prep was built at, so a claim is
-      // always checked against the window it was made about.
-      const [, q, yy] = prep.period_label.match(/Q(\d)-(\d{2})/) || [];
+      // Recorded against the quarter the prep's figures are as of (the window's
+      // last, sent as numbers) — parsing period_label took its first quarter.
       await api.post(`/api/negotiation-prep/${costModelId}/claims`, {
         said: said.trim(),
-        year: yy ? 2000 + Number(yy) : new Date().getFullYear(),
-        quarter: q ? Number(q) : Math.floor(new Date().getMonth() / 3) + 1,
+        year: prep.as_of_year ?? new Date().getFullYear(),
+        quarter: prep.as_of_quarter ?? Math.floor(new Date().getMonth() / 3) + 1,
         driver_label: driver || null,
         claimed_change_pct: claimedPct === '' ? null : Number(claimedPct),
       });
@@ -138,7 +142,13 @@ export default function NegotiationPrepArea() {
     setTimeout(() => { document.title = prev; }, 500);
   };
 
-  if (err) return <div className="ca-page ca-fade-in"><div className="ca-card" style={{ color: 'var(--accent2)' }}>{err}</div></div>;
+  // A way back, not a dead end.
+  if (err) return (
+    <div className="ca-page ca-fade-in">
+      <Link to="/negotiate" className="ca-btn ca-btn-ghost ca-btn-sm">← Negotiate</Link>
+      <div className="ca-card" style={{ color: 'var(--accent2)', marginTop: 12 }}>{err}</div>
+    </div>
+  );
   if (!prep) return <div className="ca-page ca-fade-in"><div style={{ padding: 20, color: 'var(--muted)' }}>Loading…</div></div>;
 
   return (
@@ -155,7 +165,7 @@ export default function NegotiationPrepArea() {
         <div style={{ minWidth: 0 }}>
           <h1 className="ca-h1">Prepare · {prep.product_name}</h1>
           <p className="ca-subtitle" style={{ marginBottom: 0 }}>
-            {prep.supplier_name || 'No supplier'} · {prep.period_label} — record what they claimed, see what
+            {prep.supplier_name || 'No supplier'} · as of {prep.as_of_label || prep.period_label} — record what they claimed, see what
             the indices actually did.
           </p>
         </div>
@@ -200,8 +210,11 @@ export default function NegotiationPrepArea() {
               <select className="ca-select" value={driver} aria-label="Cost line"
                       onChange={e => setDriver(e.target.value)} style={{ flex: '2 1 180px' }}>
                 <option value="">Which cost line? (optional)</option>
+                {/* The cost line's own label is the value: two lines priced off one
+                    index shared the index name, and the select (and the claim)
+                    landed on the first of them, with its recipe weight. */}
                 {prep.drivers.map(d => (
-                  <option key={d.label} value={d.index_name || d.label}>
+                  <option key={d.label} value={d.label}>
                     {d.label}{d.index_name ? ` · ${d.index_name}` : ''} ({d.change_pct > 0 ? '+' : ''}{d.change_pct.toFixed(1)}%)
                   </option>
                 ))}
@@ -253,7 +266,7 @@ export default function NegotiationPrepArea() {
                   >
                     <option value="">Attach a cost line…</option>
                     {prep.drivers.map(d => (
-                      <option key={d.label} value={d.index_name || d.label}>
+                      <option key={d.label} value={d.label}>
                         {d.label}{d.index_name ? ` · ${d.index_name}` : ''}
                       </option>
                     ))}

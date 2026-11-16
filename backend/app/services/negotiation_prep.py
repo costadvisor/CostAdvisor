@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.services.narrative import fmt_money
+
 # A claim within this much of the real movement is "about right", not
 # overstated. Suppliers round; arguing with 11.4 vs 12 loses the room and the
 # point is the 30-vs-11 cases.
@@ -123,8 +125,11 @@ def check_claim(claim, drivers, should_cost: float | None) -> CheckedClaim:
     )
 
 
-def _money(v: float, currency: str, unit: str) -> str:
-    return f"{v:,.2f} {currency}/{unit}"
+def _money(v: float, currency: str, unit: str, scale: float | None = None) -> str:
+    # The app's money format (narrative.fmt_money), so the script reads the
+    # same figure the brief and the ladder show: a gap at the should-cost's
+    # scale ("€35/t", as the brief prints it, not "€34.85/t").
+    return fmt_money(v, currency, unit, scale=scale)
 
 
 def build_script(brief, checked: list[CheckedClaim]) -> list[str]:
@@ -137,13 +142,16 @@ def build_script(brief, checked: list[CheckedClaim]) -> list[str]:
     cur, unit = brief.currency, brief.unit
     lines: list[str] = []
 
+    # One number at one point in time: as of the window's last quarter, not
+    # "at Q3-24 to Q2-26".
+    as_of = brief.as_of_label or brief.period_label
     opening = (f"We have modelled {brief.product_name} bottom-up from published indices. "
-               f"At {brief.period_label} the defensible number is "
+               f"As of {as_of} the defensible number is "
                f"{_money(brief.current_should_cost, cur, unit)}.")
     if brief.current_actual_price is not None and brief.gap is not None:
         direction = "above" if brief.gap > 0 else "below"
         opening += (f" Your current price is {_money(brief.current_actual_price, cur, unit)}, "
-                    f"{_money(abs(brief.gap), cur, unit)} {direction} that.")
+                    f"{_money(abs(brief.gap), cur, unit, scale=brief.current_should_cost)} {direction} that.")
     lines.append(opening)
 
     for c in checked:
@@ -151,14 +159,20 @@ def build_script(brief, checked: list[CheckedClaim]) -> list[str]:
             continue
         lines.append(f"On “{c.said}” — {c.note}")
 
-    close = f"We are ready to settle at {_money(brief.current_should_cost, cur, unit)}."
-    # Only when the floor sits below the target. A recipe that models no
-    # margin at all has floor == should-cost, and the sentence would then tell
-    # the buyer the target itself leaves the supplier nothing.
-    if brief.current_floor is not None and brief.current_floor < brief.current_should_cost:
-        close += (f" Below {_money(brief.current_floor, cur, unit)} there is no margin left in the chain, "
-                  "so that is not a number we expect you to accept.")
-    lines.append(close)
+    if brief.current_actual_price is not None and brief.gap is not None and brief.gap < 0:
+        # Already paying under should-cost: "settle at should-cost" would offer
+        # the supplier more money. Hold the current price instead.
+        lines.append(f"Your current price of {_money(brief.current_actual_price, cur, unit)} is already "
+                     "below our should-cost, so we expect it to hold.")
+    else:
+        close = f"We are ready to settle at {_money(brief.current_should_cost, cur, unit)}."
+        # Only when the floor sits below the target. A recipe that models no
+        # margin at all has floor == should-cost, and the sentence would then
+        # tell the buyer the target itself leaves the supplier nothing.
+        if brief.current_floor is not None and brief.current_floor < brief.current_should_cost:
+            close += (f" Below {_money(brief.current_floor, cur, unit)} there is no margin left in the chain, "
+                      "so that is not a number we expect you to accept.")
+        lines.append(close)
 
     if brief.data_gaps:
         # Said in the script, not just shown on the page: walking in citing a

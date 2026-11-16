@@ -225,7 +225,16 @@ class BriefResult(BaseModel):
     gap_pct: float | None
     total_impact: float | None
     volumes_missing: bool = False
+    # The chart window ("Q3-24 to Q2-26"); a single figure is as of its last
+    # quarter (as_of_*), which is what a sentence about one number should name.
     period_label: str
+    as_of_label: str = ""
+    as_of_year: int | None = None
+    as_of_quarter: int | None = None
+    # The formula's base quarter: drivers' index change and
+    # contribution_to_gap are measured from here (should-cost movement since
+    # the base, not a split of the supplier gap).
+    base_period_label: str = ""
     evolution: list[EvolutionPeriod]
     narrative: str
     drivers: list[BriefDriver]

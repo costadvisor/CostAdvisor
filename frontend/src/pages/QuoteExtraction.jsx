@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../components/Toast';
@@ -214,10 +215,14 @@ function PositionPreview({ quoteLine, templates }) {
 export default function QuoteExtraction() {
   const { activeTeamId } = useAuth();
   const { addToast } = useToast();
+  const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
   const [uploading, setUploading] = useState(false);
   const [run, setRun] = useState(null);
+  // Recent uploads, as /price-lists lists them: a run used to live only in this
+  // page's state, so leaving before confirming lost its pending lines.
+  const [recent, setRecent] = useState([]);
   const [records, setRecords] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [confirmedPreview, setConfirmedPreview] = useState(null);
@@ -229,9 +234,24 @@ export default function QuoteExtraction() {
       .catch(() => {});
   };
 
+  const loadRecent = () => {
+    if (!activeTeamId) return;
+    api.get('/api/quotes/runs', { params: { team_id: activeTeamId, limit: 10 } })
+      .then(({ data }) => setRecent(data))
+      .catch(() => setRecent([]));
+  };
+
+  const openRun = (id) => {
+    setConfirmedPreview(null);
+    api.get(`/api/quotes/runs/${id}`)
+      .then(({ data }) => setRun(data))
+      .catch(err => addToast(formatApiError(err), 'error'));
+  };
+
   useEffect(() => {
     if (!activeTeamId) return;
     loadRecords();
+    loadRecent();
     api.get('/api/formulas/', { params: { team_id: activeTeamId } })
       .then(({ data }) => setTemplates(data))
       .catch(() => {});
@@ -249,6 +269,7 @@ export default function QuoteExtraction() {
       form.append('file', file);
       const { data } = await api.post('/api/quotes/extract', form, { params: { team_id: activeTeamId } });
       setRun(data);
+      loadRecent();
       addToast(`Extracted ${data.lines.length} line(s) — review below`, 'success');
     } catch (err) {
       addToast(formatApiError(err), 'error');
@@ -265,6 +286,7 @@ export default function QuoteExtraction() {
     }));
     setConfirmedPreview(recordLine);
     loadRecords();
+    loadRecent();
   };
 
   const handleLineRejected = (lineId) => {
@@ -272,17 +294,20 @@ export default function QuoteExtraction() {
       ...prev,
       lines: prev.lines.map(l => l.id === lineId ? { ...l, status: 'rejected' } : l),
     }));
+    loadRecent();
   };
 
   const pendingCount = run?.lines?.filter(l => l.status === 'pending').length ?? 0;
 
   return (
     <div className="ca-page ca-fade-in">
-      <div className="ca-h1" style={{ marginBottom: 4 }}>Quote Extraction</div>
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
-        Upload a supplier quote or price list (PDF). Every extracted field carries a confidence
-        and a locator back into the document — nothing lands in the quote record until you confirm it.
-      </div>
+      <div className="ca-h1">Quote Extraction</div>
+      <p className="ca-subtitle">
+        Upload a supplier quote (PDF) to build a negotiation position from. Every extracted field carries a
+        confidence and a locator back into the document — nothing lands in the quote record until you confirm it.
+        A recurring price list that should become actual prices goes to{' '}
+        <button className="ca-btn-link" onClick={() => navigate('/price-lists')}>Price lists</button>.
+      </p>
 
       <div className="ca-card" style={{ marginBottom: 16 }}>
         <button className="ca-btn ca-btn-primary ca-btn-sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
@@ -295,7 +320,7 @@ export default function QuoteExtraction() {
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
               {run.filename} — {run.lines.length} line(s), {pendingCount} pending review
             </div>
-            <div className="ca-scroll-x">
+            <div className="ca-scroll-x ca-scroll-x--full">
               <table className="ca-table" style={{ width: '100%' }}>
                 <thead>
                   <tr><th style={{ width: 40 }}>#</th><th>Extracted fields</th><th style={{ width: 180 }}>Actions</th></tr>
@@ -315,6 +340,40 @@ export default function QuoteExtraction() {
           </div>
         )}
       </div>
+
+      {recent.length > 0 && (
+        <div className="ca-card" style={{ marginBottom: 16 }}>
+          <div className="ca-card-title" style={{ marginBottom: 12 }}>Recent uploads</div>
+          <div className="ca-scroll-x ca-scroll-x--full">
+            <table className="ca-table">
+              <caption className="ca-sr-only">Previously uploaded quotes and how many lines await review.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">File</th>
+                  <th scope="col">Uploaded</th>
+                  <th scope="col" style={{ textAlign: 'right' }}>Lines</th>
+                  <th scope="col" style={{ textAlign: 'right' }}>Pending</th>
+                  <th scope="col" />
+                </tr>
+              </thead>
+              <tbody>
+                {recent.map(r => (
+                  <tr key={r.id}>
+                    <td>{r.filename}</td>
+                    <td style={{ color: 'var(--muted)' }}>{new Date(r.created_at).toLocaleString()}</td>
+                    <td style={{ textAlign: 'right' }}>{r.line_count}</td>
+                    <td style={{ textAlign: 'right', color: r.pending_count ? 'var(--accent3)' : 'var(--muted)' }}>{r.pending_count}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => openRun(r.id)}
+                        disabled={run?.id === r.id}>{r.pending_count ? 'Review' : 'Open'}</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {confirmedPreview && (
         <div className="ca-card" style={{ marginBottom: 16 }}>

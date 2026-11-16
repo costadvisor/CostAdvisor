@@ -19,6 +19,7 @@ from app.schemas.supplier import (
     SupplierTrustSummaryOut, SupplierTrustScoresResponse,
 )
 from app.services.audit import log_event
+from app.services.data_resolver import index_lookup_cache
 from app.services.permissions import require_permission
 from app.services.supplier_trust import (
     compute_supplier_trust_scores, team_producer_map, _grade_for,
@@ -33,6 +34,15 @@ def _should_cost_for_period(db, model, year, quarter):
     without a second, driftable copy."""
     from app.services.costing_engine import should_cost_for_period
     return should_cost_for_period(db, model, year, quarter)
+
+
+def _quantity(v: ActualVolume, model: CostModel | None) -> float:
+    """A volume row in the unit its model is priced in. A row stored before
+    quantities were kept in the product unit can say kg on a per-t product
+    (10,000 kg is 10 t, not 10,000 t: audit C-01)."""
+    from app.services.costing_engine import quantity_in_product_unit
+    product_unit = model.product.unit if model and model.product else None
+    return quantity_in_product_unit(float(v.volume), v.unit, product_unit)
 
 
 @router.get("/", response_model=list[SupplierOut])
@@ -104,7 +114,14 @@ def benchmark_suppliers(
     and volume-weighted exposure. Ranked by mean gap% desc so the biggest
     margin-padder (largest negotiation opportunity) is first."""
     require_team_role(db, current_user, team_id, ["owner", "admin"])
+    # One memo for the whole read, as the portfolio endpoints do: each priced
+    # quarter is its own should-cost call, and without a shared memo every call
+    # re-read the same index values and recipe lines (~15 s on the demo team).
+    with index_lookup_cache():
+        return _benchmark(db, team_id)
 
+
+def _benchmark(db: Session, team_id: uuid.UUID) -> dict:
     suppliers = db.query(Supplier).filter(Supplier.team_id == team_id).order_by(Supplier.name).all()
     results = []
     for s in suppliers:
@@ -119,8 +136,9 @@ def benchmark_suppliers(
         volumes = (
             db.query(ActualVolume).filter(ActualVolume.cost_model_id.in_(model_ids)).all()
         ) if model_ids else []
-        vol_map = {(str(v.cost_model_id), v.year, v.quarter): float(v.volume) for v in volumes}
         model_by_id = {str(m.id): m for m in models}
+        vol_map = {(str(v.cost_model_id), v.year, v.quarter): _quantity(v, model_by_id.get(str(v.cost_model_id)))
+                   for v in volumes}
 
         # should-cost cache per (model, year, quarter) — avoids recompute across price rows
         sc_cache = {}
@@ -304,12 +322,16 @@ def get_purchase_history(
         .all()
     ) if model_ids else []
 
-    # Index volumes by (cost_model_id, year, quarter)
+    # Index volumes by (cost_model_id, year, quarter), in the product's unit:
+    # the page saves the number back without a unit, which the volumes API
+    # stores in that unit, so a raw legacy kg figure would come back as tonnes.
+    model_by_id = {str(m.id): m for m in models}
     vol_map = {}
     for v in volumes:
+        m = model_by_id.get(str(v.cost_model_id))
         vol_map[(str(v.cost_model_id), v.year, v.quarter)] = {
-            "volume": float(v.volume),
-            "unit": v.unit,
+            "volume": _quantity(v, m),
+            "unit": (m.product.unit if m and m.product else None) or v.unit,
         }
 
     # Group prices by cost_model_id and merge with volumes
@@ -336,8 +358,7 @@ def get_purchase_history(
                 "year": v.year,
                 "quarter": v.quarter,
                 "price": None,
-                "volume": float(v.volume),
-                "unit": v.unit,
+                **vol_map[key],
             })
 
     models_list = []
@@ -396,9 +417,10 @@ def export_supplier_excel(
     for p in prices:
         price_map[str(p.cost_model_id)][(p.year, p.quarter)] = float(p.price)
 
+    model_by_id = {str(m.id): m for m in models}
     vol_map = defaultdict(dict)
     for v in volumes:
-        vol_map[str(v.cost_model_id)][(v.year, v.quarter)] = float(v.volume)
+        vol_map[str(v.cost_model_id)][(v.year, v.quarter)] = _quantity(v, model_by_id.get(str(v.cost_model_id)))
 
     # Styling
     header_font = Font(name="Calibri", bold=True, size=11, color="FFFFFF")
@@ -620,6 +642,16 @@ def delete_supplier(
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
     require_permission(db, current_user, supplier.team_id, "suppliers.delete")
+    # Deleting used to null the supplier on every cost model that named it, with
+    # no warning. Refuse until they are moved to another supplier. (Contracts
+    # keep their history with no supplier by design: contract.supplier_id.)
+    n_models = db.query(CostModel).filter(CostModel.supplier_id == supplier.id).count()
+    if n_models:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{supplier.name} is the supplier of {n_models} cost model{'' if n_models == 1 else 's'}. "
+                   "Move them to another supplier (View model > Edit) before deleting it.",
+        )
     log_event(db, supplier.team_id, current_user.id, "delete", "supplier", str(supplier.id),
               previous_value={"name": supplier.name, "country": supplier.country})
     db.delete(supplier)

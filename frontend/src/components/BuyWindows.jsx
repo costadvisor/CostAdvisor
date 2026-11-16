@@ -1,15 +1,17 @@
 import { useNavigate } from 'react-router-dom';
 import exportCsv from '../utils/exportCsv';
+import { fmtMoney } from '../utils/currency';
 
 /* Scrum 22 — Opportunistic buy windows.
  * Per-product "cheap now / expensive now" signal: current should-cost vs the
  * trailing-4-quarter average. Data from GET /api/portfolio/buy-windows. */
 
-const curSym = (c) => (c === 'EUR' ? '€' : c === 'USD' ? '$' : c === 'GBP' ? '£' : c ? `${c} ` : '');
-
+// Named for what it measures (now vs the last four quarters), the words the
+// radar and alerts use. "Hold / wait" belongs to the forward verdict below,
+// where it means the opposite colour.
 export const BUY_SIGNAL = {
-  cheap:        { label: 'Buy now',      color: 'var(--accent)',  bg: 'var(--success-bg)' },
-  expensive:    { label: 'Hold / wait',  color: 'var(--accent2)', bg: 'var(--danger-bg)' },
+  cheap:        { label: 'Cheap now',     color: 'var(--accent)',  bg: 'var(--success-bg)' },
+  expensive:    { label: 'Expensive now', color: 'var(--accent2)', bg: 'var(--danger-bg)' },
   neutral:      { label: 'Neutral',      color: 'var(--muted)',   bg: 'var(--neutral-bg)' },
   insufficient: { label: 'Not enough history', color: 'var(--muted)', bg: 'var(--neutral-bg)' },
 };
@@ -78,11 +80,11 @@ export default function BuyWindows({ data, loading, error }) {
     <div className="ca-card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
         <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-          Current should-cost vs the trailing 4-quarter average. "Buy now" = ≥3% below recent; "Hold / wait" = ≥3% above.
+          Current should-cost vs the trailing 4-quarter average. "Cheap now" = ≥3% below recent; "Expensive now" = ≥3% above.
         </div>
         <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={handleCsv}>Export CSV</button>
       </div>
-      <div className="ca-scroll-x">
+      <div className="ca-scroll-x ca-scroll-x--full">
         <table className="ca-table" style={{ width: '100%' }}>
           <thead>
             <tr>
@@ -97,13 +99,14 @@ export default function BuyWindows({ data, loading, error }) {
           </thead>
           <tbody>
             {rows.map(w => {
-              const cs = curSym(w.currency);
+              // The 4Q average at the current price's scale, so the pair reads alike.
+              const money = (v) => fmtMoney(v, w.currency, { scale: w.current_should_cost });
               return (
                 <tr key={w.cost_model_id}>
                   <td style={{ fontWeight: 600 }}>{w.product_name}</td>
                   <td style={{ color: 'var(--muted)' }}>{w.supplier_name || '—'}</td>
-                  <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent)' }}>{cs}{w.current_should_cost.toFixed(2)}</td>
-                  <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--muted)' }}>{w.avg_4q != null ? `${cs}${w.avg_4q.toFixed(2)}` : '—'}</td>
+                  <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent)' }}>{money(w.current_should_cost)}</td>
+                  <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--muted)' }}>{w.avg_4q != null ? money(w.avg_4q) : '—'}</td>
                   <td className="center" style={{ fontFamily: "'JetBrains Mono', monospace", color: w.deviation_pct > 0 ? 'var(--accent2)' : w.deviation_pct < 0 ? 'var(--accent)' : 'var(--muted)' }}>
                     {w.deviation_pct != null ? `${w.deviation_pct > 0 ? '+' : ''}${w.deviation_pct.toFixed(2)}%` : '—'}
                   </td>

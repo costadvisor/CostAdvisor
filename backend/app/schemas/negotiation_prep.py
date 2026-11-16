@@ -90,6 +90,11 @@ class PrepOut(BaseModel):
     product_name: str
     supplier_name: str | None = None
     period_label: str
+    # The quarter the ladder's figures are as of (the window's last); a claim
+    # is recorded against it.
+    as_of_label: str = ""
+    as_of_year: int | None = None
+    as_of_quarter: int | None = None
     ladder: PositionLadder
     drivers: list[AvailableDriver]
     claims: list[CheckedClaimOut]

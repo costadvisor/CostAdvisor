@@ -7,6 +7,7 @@ import { GroupHeader } from './wsCharts';
 import ProductFormModal from '../../components/ProductFormModal';
 import { useConfirm, useAlert } from '../../components/ConfirmDialog';
 import DemoDataNote from '../../components/DemoDataNote';
+import useUrlState from '../strategy/useUrlState';
 
 /* ──────────────────────────────────────────────────────────────────────
  * Portfolio — the product as the central object. REAL data: every product
@@ -57,6 +58,23 @@ const fmtMoney = (v) => {
   return n.toLocaleString(MONEY_LOCALE, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 };
 
+// URL defaults (left out of the URL when unchanged); see strategy/useUrlState.
+const PORTFOLIO_VIEW = { q: '', family: 'all', status: 'all', group: 'family', sort: '', dir: 'asc' };
+
+// A header that sorts its column: click once ascending, again descending.
+function SortTh({ label, k, sortKey, sortDir, onSort, right }) {
+  const active = sortKey === k;
+  return (
+    <th scope="col" className={right ? 'right' : undefined} style={{ whiteSpace: 'nowrap' }}
+      aria-sort={active ? (sortDir === 'desc' ? 'descending' : 'ascending') : 'none'}>
+      <button type="button" className="ca-btn-link" onClick={() => onSort(k)}
+        style={{ font: 'inherit', color: 'inherit', textTransform: 'inherit', letterSpacing: 'inherit', textDecoration: 'none' }}>
+        {label}{active ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
+      </button>
+    </th>
+  );
+}
+
 function StatusBadge({ status }) {
   const complete = status === 'complete';
   return (
@@ -100,10 +118,15 @@ export default function PortfolioArea() {
     }
   };
 
-  const [search, setSearch] = useState('');
-  const [familyFilter, setFamilyFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [groupBy, setGroupBy] = useState('family');
+  // Search, filters, grouping and sort live in the URL, so Back from a product
+  // returns to the same view (they were local state and reset on every visit).
+  const [view, setView] = useUrlState(PORTFOLIO_VIEW);
+  const { q: search, family: familyFilter, status: statusFilter, group: groupBy, sort: sortKey, dir: sortDir } = view;
+  const setSearch = (v) => setView(f => ({ ...f, q: v }));
+  const setFamilyFilter = (v) => setView(f => ({ ...f, family: v }));
+  const setStatusFilter = (v) => setView(f => ({ ...f, status: v }));
+  const setGroupBy = (v) => setView(f => ({ ...f, group: v }));
+  const sortBy = (k) => setView(f => ({ ...f, sort: k, dir: f.sort === k && f.dir === 'asc' ? 'desc' : 'asc' }));
   const [closed, setClosed] = useState(() => new Set());   // groups are open unless closed
   // Add-product modal — embedded here so a new product shows up in this page's own
   // table immediately, with no navigation to /products and back.
@@ -128,7 +151,10 @@ export default function PortfolioArea() {
     setLoading(true);
     setError(null);
     Promise.all([
-      api.get('/api/cost-models', { params: { team_id: activeTeamId } }),
+      // as_of: each model's latest quarter with data, where "today" is priced
+      // on Monitor, Negotiate and the brief (the calendar quarter only carries
+      // the last month forward).
+      api.get('/api/cost-models', { params: { team_id: activeTeamId, as_of: true } }),
       api.get('/api/products', { params: { team_id: activeTeamId } }),
       api.get('/api/formulas/', { params: { team_id: activeTeamId } }),
     ])
@@ -192,7 +218,7 @@ export default function PortfolioArea() {
     let cancelled = false;
     setSc(Object.fromEntries(costModels.map(cm => [cm.id, { status: 'loading' }])));
     costModels.forEach(cm => {
-      api.post('/api/costing/should-cost', { cost_model_id: cm.id, target_year: CUR_Y, target_quarter: CUR_Q })
+      api.post('/api/costing/should-cost', { cost_model_id: cm.id, target_year: cm.as_of_year || CUR_Y, target_quarter: cm.as_of_quarter || CUR_Q })
         .then(({ data }) => {
           if (cancelled) return;
           setSc(prev => ({ ...prev, [cm.id]: { status: 'ok', value: data.should_cost, currency: data.currency, unit: data.unit } }));
@@ -217,7 +243,18 @@ export default function PortfolioArea() {
       : groupBy === 'region' ? (r.shipFrom || 'No region')
         : (r.familyLabel || 'No family');
     const map = new Map();
-    filtered.forEach(r => { const k = keyOf(r); if (!map.has(k)) map.set(k, []); map.get(k).push(r); });
+    // Within a group, rows follow the chosen column; a row with no value
+    // (no supplier, no should-cost yet) sorts last either way.
+    const sortVal = (r) => sortKey === 'name' ? r.name
+      : sortKey === 'supplier' ? r.supplier
+        : sortKey === 'sc' ? (sc[r.costModelId]?.status === 'ok' ? sc[r.costModelId].value : null) : null;
+    const sign = sortDir === 'desc' ? -1 : 1;
+    const sorted = !sortKey ? filtered : [...filtered].sort((a, b) => {
+      const va = sortVal(a), vb = sortVal(b);
+      if (va == null || vb == null) return (va == null) - (vb == null);
+      return sign * (typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb)));
+    });
+    sorted.forEach(r => { const k = keyOf(r); if (!map.has(k)) map.set(k, []); map.get(k).push(r); });
     // The "no X" bucket (products with nothing assigned) sorts last regardless of
     // where its label would otherwise fall alphabetically — it's a catch-all, not
     // a real category, so it shouldn't interrupt the alphabetical list of real ones.
@@ -229,7 +266,7 @@ export default function PortfolioArea() {
         return a[0].localeCompare(b[0]);
       })
       .map(([label, rs]) => ({ key: `${groupBy}:${label}`, label, rows: rs }));
-  }, [filtered, groupBy]);
+  }, [filtered, groupBy, sortKey, sortDir, sc]);
 
   const toggleGroup = (key) => setClosed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
@@ -253,7 +290,11 @@ export default function PortfolioArea() {
   }, [rows]);
 
   const filtersActive = familyFilter !== 'all' || statusFilter !== 'all' || !!search;
-  const clearFilters = () => { setFamilyFilter('all'); setStatusFilter('all'); setSearch(''); };
+  const clearFilters = () => setView(f => ({ ...f, q: '', family: 'all', status: 'all' }));
+
+  // One quarter for every row, or say it is per model.
+  const asOfs = [...new Set(costModels.filter(cm => cm.as_of_year).map(cm => `Q${cm.as_of_quarter} ${cm.as_of_year}`))];
+  const asOfLabel = asOfs.length === 1 ? asOfs[0] : asOfs.length ? "each product's latest quarter with index data" : `Q${CUR_Q} ${CUR_Y}`;
 
   const supplierCount = new Set(costModels.map(cm => cm.supplier_name).filter(Boolean)).size;
   const regionCount = new Set(costModels.map(cm => cm.region).filter(Boolean)).size;
@@ -261,7 +302,9 @@ export default function PortfolioArea() {
   // Mockup g4: Total products / Formulas complete / Draft formulas / Suppliers.
   const stats = [
     { val: products.length, lbl: 'Total products', sub: `Across ${new Set(rows.map(r => r.familyLabel)).size} families` },
-    { val: costModels.length, lbl: 'Formulas complete', sub: 'Should-cost live' },
+    // Cost models, not products: one product bought from two suppliers is two,
+    // so this can exceed "Total products" (22 vs 11 read as an error).
+    { val: costModels.length, lbl: 'Cost models', sub: 'Formula complete, should-cost live' },
     { val: draftCount, lbl: 'Draft formulas', sub: draftCount ? 'Action needed' : 'All modelled' },
     { val: supplierCount, lbl: 'Suppliers', sub: `Across ${regionCount || 0} region${regionCount === 1 ? '' : 's'}` },
   ];
@@ -334,7 +377,7 @@ export default function PortfolioArea() {
           <button className="ca-btn ca-btn-primary" onClick={() => setShowAddProduct(true)}>+ Add product</button>
         </div>
       </div>
-      <p className="ca-subtitle" style={{ marginTop: 4 }}>Every product you buy, its supplier and route, and its live should-cost — evolved to Q{CUR_Q} {CUR_Y} by your linked indices.</p>
+      <p className="ca-subtitle" style={{ marginTop: 4 }}>Every product you buy, its supplier and route, and its live should-cost — evolved by your linked indices to {asOfLabel}.</p>
 
       <ProductFormModal
         isOpen={showAddProduct}
@@ -425,12 +468,12 @@ export default function PortfolioArea() {
                   <tr>
                     <th style={{ width: 20 }}><span className="ca-sr-only">Expand</span></th>
                     <th scope="col">Ref</th>
-                    <th scope="col">Product</th>
-                    <th scope="col">Supplier</th>
+                    <SortTh label="Product" k="name" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} />
+                    <SortTh label="Supplier" k="supplier" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} />
                     <th scope="col">Ship-from</th>
                     <th scope="col">Ship-to</th>
                     <th scope="col">Formula</th>
-                    <th scope="col" className="right" style={{ whiteSpace: 'nowrap' }}>Should-cost today</th>
+                    <SortTh label="Should-cost today" k="sc" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} right />
                     <th scope="col" style={{ width: 180 }}><span className="ca-sr-only">Actions</span></th>
                   </tr>
                 </thead>

@@ -146,7 +146,7 @@ button.ixl-cluster-name:focus-visible { outline: 2px solid var(--accent); outlin
 .ixl-demand a:hover { color: var(--accent); text-decoration: underline; }
 .ixl-demand .ixl-code { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); white-space: nowrap; }
 .ixl-pid-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.ixl-pid-chips a.ix-tag { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; font-weight: 500; }
+.ixl-pid-chips a.ix-tag { font-size: 10.5px; font-weight: 500; }
 
 @media (max-width: 1100px) {
   .ixl-pgrid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }

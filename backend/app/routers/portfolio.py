@@ -13,12 +13,13 @@ from app.models.actual_volume import ActualVolume
 from app.routers.auth import get_current_user
 from app.schemas.costing import EvolutionRequest, DataGap
 from app.services.costing_engine import (
-    calculate_should_cost, calculate_evolution, calculate_forward_should_cost, _current_quarter,
-    _default_period_range,
+    calculate_should_cost, calculate_evolution, calculate_forward_should_cost,
+    _default_period_range, latest_data_quarter, quantity_in_product_unit,
 )
 from app.services.data_resolver import get_single_index_value, index_lookup_cache
 from app.services.fx_converter import convert_price
 from app.services.permissions import require_permission
+from app.services.thresholds import effective_threshold
 
 router = APIRouter()
 
@@ -46,28 +47,42 @@ def _team_cost_models(db: Session, team_id: uuid.UUID) -> list[CostModel]:
 
 
 def _should_cost_today(db: Session, cm: CostModel) -> float:
-    """The should-cost at the current quarter — what "should-cost now" means on
-    every portfolio view. With no target quarter, calculate_should_cost
-    evaluates at the formula's base quarter, i.e. returns the base price."""
-    now_y, now_q = _current_quarter()
-    return calculate_should_cost(db, cm, target_year=now_y, target_quarter=now_q).should_cost
+    """The should-cost at the latest quarter with data — what "should-cost now"
+    means on every portfolio view and on the brief (latest_data_quarter). With
+    no target quarter, calculate_should_cost evaluates at the formula's base
+    quarter, i.e. returns the base price."""
+    y, q = latest_data_quarter(db, cm)
+    return calculate_should_cost(db, cm, target_year=y, target_quarter=q).should_cost
 
 
 class PortfolioModelSummary(BaseModel):
     cost_model_id: uuid.UUID
     product_name: str
     product_reference: str | None
+    # The supplier's id, so a page matches rows to suppliers by id, not name.
+    supplier_id: int | None = None
     supplier_name: str | None
     destination_country: str | None
     region: str
     currency: str
     current_should_cost: float
+    # The quarter current_should_cost is priced at (the latest with data, as
+    # on the brief) and the quarter of the latest actual, so a page can say
+    # "as of Q2 2026" and tell an invoice that is in from one still awaited.
+    as_of_year: int | None = None
+    as_of_quarter: int | None = None
     latest_actual_price: float | None
+    latest_actual_year: int | None = None
+    latest_actual_quarter: int | None = None
     gap: float | None
     gap_pct: float | None
     cumulative_impact: float | None
     flag_index_moved: bool
+    # Paying more than should-cost by more than the team's alert threshold.
     flag_price_drift: bool
+    # Paying less than should-cost by more than the threshold: worth knowing,
+    # never an alert (a sign-blind flag labelled these "Above should-cost").
+    flag_below_should_cost: bool = False
 
 
 class PortfolioKPIs(BaseModel):
@@ -101,58 +116,62 @@ def _portfolio_summary(db: Session, team_id: uuid.UUID, reporting_currency: str)
     # rather than two per model. (cost_model_id, year, quarter) is unique on
     # both tables, so "latest" is unambiguous.
     cm_ids = [cm.id for cm in cost_models]
-    latest_price_by_cm: dict[uuid.UUID, float] = {}
+    latest_price_by_cm: dict[uuid.UUID, tuple[float, int, int]] = {}
     total_volume_by_cm: dict[uuid.UUID, float] = {}
     if cm_ids:
-        for cm_id, price in (
-            db.query(ActualPrice.cost_model_id, ActualPrice.price)
+        product_unit = {cm.id: cm.product.unit for cm in cost_models}
+        for cm_id, price, year, quarter in (
+            db.query(ActualPrice.cost_model_id, ActualPrice.price, ActualPrice.year, ActualPrice.quarter)
             .filter(ActualPrice.cost_model_id.in_(cm_ids))
             .order_by(ActualPrice.cost_model_id, ActualPrice.year.desc(), ActualPrice.quarter.desc())
         ):
-            latest_price_by_cm.setdefault(cm_id, float(price))
-        for cm_id, volume in (
-            db.query(ActualVolume.cost_model_id, ActualVolume.volume)
+            latest_price_by_cm.setdefault(cm_id, (float(price), year, quarter))
+        for cm_id, volume, unit in (
+            db.query(ActualVolume.cost_model_id, ActualVolume.volume, ActualVolume.unit)
             .filter(ActualVolume.cost_model_id.in_(cm_ids))
         ):
-            total_volume_by_cm[cm_id] = total_volume_by_cm.get(cm_id, 0.0) + float(volume)
+            qty = quantity_in_product_unit(float(volume), unit, product_unit[cm_id])
+            total_volume_by_cm[cm_id] = total_volume_by_cm.get(cm_id, 0.0) + qty
 
     summaries = []
     total_exposure = 0.0
     largest_exposure = 0.0
     largest_exposure_id = None
     models_flagged = 0
-
-    # "Should-cost today" = the should-cost at the current quarter, as the
-    # Portfolio and product pages compute it. With no target quarter,
-    # calculate_should_cost evaluates at the formula's base quarter, i.e.
-    # returns the base price, and every gap below would mix the index move
-    # since the base date into the supplier gap.
-    now_y, now_q = _current_quarter()
+    # The team's alert threshold (the one /alerts edits), not a literal 10%.
+    # A currency threshold is meaningful here: both sides are money.
+    threshold = effective_threshold(db, team_id)
 
     for cm in cost_models:
         fv = cm.current_formula
         if not fv:
             continue
 
-        # Compute current should-cost
-        sc_result = calculate_should_cost(db, cm, target_year=now_y, target_quarter=now_q)
+        # "Should-cost today" = the should-cost at the latest quarter with data
+        # for this model, the quarter the brief ends at (latest_data_quarter),
+        # so a row and its brief show the same number. With no target quarter,
+        # calculate_should_cost evaluates at the formula's base quarter, i.e.
+        # returns the base price, and every gap below would mix the index move
+        # since the base date into the supplier gap.
+        to_y, to_q = latest_data_quarter(db, cm)
+        sc_result = calculate_should_cost(db, cm, target_year=to_y, target_quarter=to_q)
         current_sc = sc_result.should_cost
-        # Latest quarter with index data for this model (flags and FX below).
-        _, _, to_y, to_q = _default_period_range(db, cm)
 
-        latest_actual = latest_price_by_cm.get(cm.id)
+        latest_actual, actual_y, actual_q = latest_price_by_cm.get(cm.id, (None, None, None))
 
         gap = (latest_actual - current_sc) if latest_actual is not None else None
-        base_price = float(fv.base_price)
-        gap_pct = (gap / base_price * 100) if (gap is not None and base_price) else None
+        # Gap % of the should-cost it is compared with, as on the brief and in alerts.
+        gap_pct = (gap / current_sc * 100) if (gap is not None and current_sc) else None
 
         # Calculate cumulative impact if volumes exist
         cumulative_impact = None
         if cm.id in total_volume_by_cm and gap is not None:
             cumulative_impact = gap * total_volume_by_cm[cm.id]
 
-        # Flags
-        flag_price_drift = abs(gap_pct) > 10 if gap_pct is not None else False
+        # Flags. Sign-aware: paying 12% under should-cost is not drift to fix.
+        drift = gap_pct if threshold.is_pct else gap
+        flag_price_drift = drift is not None and drift > threshold.value
+        flag_below = drift is not None and drift < -threshold.value
         flag_index_moved = False
 
         # Check if indices moved >5% since base date without new formula version
@@ -178,7 +197,9 @@ def _portfolio_summary(db: Session, team_id: uuid.UUID, reporting_currency: str)
         if flag_price_drift or flag_index_moved:
             models_flagged += 1
 
-        exposure = abs(cumulative_impact) if cumulative_impact is not None else (abs(gap) if gap else 0)
+        # Money at stake is what you overpay: a model priced under should-cost
+        # adds nothing (abs() counted savings as exposure and ranked them).
+        exposure = max(cumulative_impact if cumulative_impact is not None else (gap or 0.0), 0.0)
 
         # Convert exposure to reporting currency for aggregation
         fx_exposure = exposure
@@ -190,28 +211,34 @@ def _portfolio_summary(db: Session, team_id: uuid.UUID, reporting_currency: str)
 
         total_exposure += fx_exposure
         if fx_exposure > largest_exposure:
-            largest_exposure = exposure
+            largest_exposure = fx_exposure    # in the reporting currency, like the total
             largest_exposure_id = cm.id
 
         summaries.append(PortfolioModelSummary(
             cost_model_id=cm.id,
             product_name=cm.product.name,
             product_reference=cm.product.formula,
+            supplier_id=cm.supplier_id,
             supplier_name=cm.supplier.name if cm.supplier else None,
             destination_country=cm.destination_country,
             region=cm.region,
             currency=cm.currency,
             current_should_cost=round(current_sc, 4),
+            as_of_year=to_y,
+            as_of_quarter=to_q,
             latest_actual_price=round(latest_actual, 4) if latest_actual else None,
+            latest_actual_year=actual_y,
+            latest_actual_quarter=actual_q,
             gap=round(gap, 4) if gap is not None else None,
             gap_pct=round(gap_pct, 2) if gap_pct is not None else None,
             cumulative_impact=round(cumulative_impact, 2) if cumulative_impact is not None else None,
             flag_index_moved=flag_index_moved,
             flag_price_drift=flag_price_drift,
+            flag_below_should_cost=flag_below,
         ))
 
-    # Sort by exposure descending
-    summaries.sort(key=lambda s: abs(s.cumulative_impact or s.gap or 0), reverse=True)
+    # Sort by exposure (money overpaid) descending
+    summaries.sort(key=lambda s: max(s.cumulative_impact or s.gap or 0, 0), reverse=True)
 
     return PortfolioResponse(
         models=summaries,
@@ -304,7 +331,8 @@ def _priority_matrix(db: Session, team_id: uuid.UUID, reporting_currency: str) -
             .limit(4)
             .all()
         )
-        trailing_vol = sum(float(v.volume) for v in vols)
+        trailing_vol = sum(quantity_in_product_unit(float(v.volume), v.unit, cm.product.unit)
+                           for v in vols)
         has_volume = trailing_vol > 0
         sc_reporting = current_sc
         if cm.currency != reporting_currency:

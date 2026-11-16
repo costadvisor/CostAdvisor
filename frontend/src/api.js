@@ -63,14 +63,30 @@ api.interceptors.response.use(
   }
 );
 
+const BAD_LINK_MESSAGE = 'This link is not valid or the item no longer exists.';
+
+// A rejected value that is a segment of the page's own URL came from the link
+// (/cost-models/<id>/evolution posts the id in the body), not from a form.
+const inPageUrl = (v) => typeof v === 'string' && v !== ''
+  && window.location.pathname.split('/').some((s) => {
+    try { return decodeURIComponent(s) === v; } catch { return false; }
+  });
+
 /**
  * Convert an Axios error into a human-readable string.
  * Handles Pydantic validation arrays, plain strings, and fallbacks.
+ * A malformed id from the URL (a 422 on a path parameter, or on a value taken
+ * from the page's URL) and an unmatched route (FastAPI's bare "Not Found")
+ * read as a bad link, not as Pydantic text; a 404 with its own message
+ * ("Cost model not found") keeps it.
  */
 export function formatApiError(err) {
   const detail = err?.response?.data?.detail;
   if (!detail) return err?.message || 'An unexpected error occurred.';
+  if (err.response.status === 404 && detail === 'Not Found') return BAD_LINK_MESSAGE;
   if (typeof detail === 'string') return detail;
+  if (err.response.status === 422 && Array.isArray(detail) && detail.length
+      && detail.every(d => d?.loc?.[0] === 'path' || inPageUrl(d?.input))) return BAD_LINK_MESSAGE;
   if (Array.isArray(detail)) {
     return detail.map(d => {
       const field = d.loc?.slice(-1)[0];

@@ -23,6 +23,7 @@ from app.models.cost_model import CostModel
 from app.models.negotiation_prep import SupplierClaim
 from app.models.user import User
 from app.routers.auth import get_current_user
+from app.routers.costing import log_deliverable_view
 from app.schemas.costing import BriefRequest
 from app.schemas.negotiation_prep import (
     AvailableDriver, CheckedClaimOut, ClaimCreate, ClaimOut, ClaimUpdate,
@@ -175,11 +176,13 @@ def prep(
         unexplained=(brief.gap if brief.gap is not None and brief.gap > 0 else None),
     )
 
-    log_event(db, cm.team_id, current_user.id, "negotiation_prep_generated", "cost_model", str(cm.id),
-              new_value={"claims": len(claims), "gap": brief.gap})
+    log_deliverable_view(db, cm, current_user.id, "negotiation_prep_generated",
+                         {"claims": len(claims), "gap": brief.gap})
     out = PrepOut(
         cost_model_id=cm.id, product_name=brief.product_name, supplier_name=brief.supplier_name,
-        period_label=brief.period_label, ladder=ladder, drivers=drivers,
+        period_label=brief.period_label, as_of_label=brief.as_of_label,
+        as_of_year=brief.as_of_year, as_of_quarter=brief.as_of_quarter,
+        ladder=ladder, drivers=drivers,
         claims=[CheckedClaimOut(**vars(c) | {"claim_id": uuid.UUID(c.claim_id)}) for c in checked],
         script=script,
         data_gaps=[f"{g.component_label} ({g.period}): {g.reason}" for g in brief.data_gaps],

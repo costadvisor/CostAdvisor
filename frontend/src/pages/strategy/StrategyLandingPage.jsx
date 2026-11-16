@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
 import {
@@ -6,11 +6,15 @@ import {
   KRALJIC_QUADRANTS, normalizeKraljicBadge,
 } from '../../components/intel';
 import LandingSuggestions from './LandingSuggestions';
+import useUrlState from './useUrlState';
 import '../../styles/strategy.css';
 
 /* Strategy landing: the team's adopted strategy categories (one per playbook
  * the team started), then the playbooks its portfolio reaches but has not
  * started ("Suggested from your portfolio"). Data: GET /api/strategy/categories. */
+
+const NO_FILTERS = { family: '', status: '', kraljic: '', owner: '' };
+const DEFAULT_SORT = { sort: 'overdue' };
 
 const SORTS = [
   { id: 'overdue', label: 'Actions overdue (default)' },
@@ -19,10 +23,13 @@ const SORTS = [
   { id: 'updated', label: 'Last updated' },
 ];
 
-function kraljicKey(row) {
+/* The quadrants a row is filed under: both halves of a boundary position
+   ("Leverage / Strategic"), as its badge shows them. */
+function kraljicKeys(row) {
   const k = row.kraljic;
-  if (!k) return 'none';
-  return normalizeKraljicBadge(k.badge) || 'none';
+  if (!k) return [];
+  const names = k.boundary && String(k.label || '').includes('/') ? k.label.split('/') : [k.badge];
+  return [...new Set(names.map(normalizeKraljicBadge).filter(Boolean))];
 }
 
 function sortRows(rows, sort) {
@@ -49,8 +56,9 @@ export default function StrategyLandingPage() {
     activeTeamId ? '/api/strategy/categories' : null,
     { team_id: activeTeamId },
   );
-  const [filters, setFilters] = useState({ family: '', status: '', kraljic: '', owner: '' });
-  const [sort, setSort] = useState('overdue');
+  const [filters, setFilters] = useUrlState(NO_FILTERS);
+  const [{ sort }, setSortState] = useUrlState(DEFAULT_SORT);
+  const setSort = (value) => setSortState({ sort: value });
 
   const adopted = useMemo(() => data?.adopted || [], [data]);
   const suggested = data?.suggested || [];
@@ -60,7 +68,7 @@ export default function StrategyLandingPage() {
   const options = useMemo(() => ({
     families: uniq(adopted.map((r) => r.family)),
     statuses: uniq(adopted.map((r) => r.status)),
-    kraljic: uniq(adopted.map(kraljicKey)).filter((k) => k !== 'none'),
+    kraljic: uniq(adopted.flatMap(kraljicKeys)),
     owners: uniq(adopted.map((r) => r.owner?.name)),
     hasUnassigned: adopted.some((r) => !r.owner),
   }), [adopted]);
@@ -68,7 +76,7 @@ export default function StrategyLandingPage() {
   const rows = useMemo(() => sortRows(adopted.filter((r) => {
     if (filters.family && r.family !== filters.family) return false;
     if (filters.status && r.status !== filters.status) return false;
-    if (filters.kraljic && kraljicKey(r) !== filters.kraljic) return false;
+    if (filters.kraljic && !kraljicKeys(r).includes(filters.kraljic)) return false;
     if (filters.owner === '__none' && r.owner) return false;
     if (filters.owner && filters.owner !== '__none' && r.owner?.name !== filters.owner) return false;
     return true;
@@ -173,7 +181,7 @@ export default function StrategyLandingPage() {
           </select>
           {filtered && (
             <button type="button" className="ix-link ix-small"
-              onClick={() => setFilters({ family: '', status: '', kraljic: '', owner: '' })}>
+              onClick={() => setFilters(NO_FILTERS)}>
               Clear
             </button>
           )}

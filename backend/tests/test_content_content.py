@@ -292,10 +292,17 @@ def test_current_events_read_related_product():
 
 
 def test_no_loaded_note_keeps_the_share_instruction():
-    """Every loaded supplier note, once cleaned, is free of the instruction."""
+    """Every loaded supplier note, once cleaned, is free of the instruction,
+    of the empty brackets it sat in, and of a run of sentences repeated back
+    to back (audit A-07)."""
     for pid in expect.content_codes():
         note = sanitize.clean_supplier_note(_cards()[pid].get("supplierNote"))
         assert not re.search(r"share\s*:\s*0", note or "", re.IGNORECASE), pid
+        assert not re.search(r"\(\s*\)", note or ""), pid
+        parts = re.split(r"(?<=[.!?])\s+", note or "")
+        for k in range(1, len(parts) // 2 + 1):
+            for i in range(len(parts) - 2 * k + 1):
+                assert parts[i:i + k] != parts[i + k:i + 2 * k], (pid, parts[i:i + k])
 
 
 # ── The canonicaliser (pure) ─────────────────────────────────────────────────

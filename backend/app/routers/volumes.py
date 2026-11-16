@@ -14,10 +14,32 @@ from app.models.actual_volume import ActualVolume
 from app.routers.auth import get_current_user
 from app.schemas.actual_volume import ActualVolumeOut, ActualVolumeCreate
 from app.services.file_parser import parse_volume_upload
+from app.services.unit_converter import convert_unit
 from app.services.audit import log_event
 from app.services.permissions import require_permission
 
 router = APIRouter()
+
+
+def _product_unit(cm: CostModel) -> str:
+    return (cm.product.unit if cm.product else None) or "kg"
+
+
+def _in_product_unit(cm: CostModel, volume: float, unit: str | None) -> tuple[float, str]:
+    """The quantity in the unit the cost model is priced in.
+
+    The engine (Squeeze, Brief) and the portfolio exposure read the volume number
+    without its unit, so every row is stored in the product's unit: 600,000 kg on
+    a EUR/t product is stored as 600 t, not read as 600,000 t. No unit means the
+    product's unit. Raises ValueError for a unit that cannot be converted.
+    """
+    target = _product_unit(cm)
+    if not unit or unit.strip().lower() == target.lower():
+        return volume, target
+    try:
+        return convert_unit(volume, unit.strip(), target), target
+    except ValueError:
+        raise ValueError(f"Can't convert {unit} to {target}, the unit this product is priced in.")
 
 
 @router.get("/{cost_model_id}", response_model=list[ActualVolumeOut])
@@ -61,9 +83,10 @@ def download_volume_template(
     writer = csv.writer(output)
     writer.writerow(["period", "volume", "unit"])
 
+    unit = _product_unit(cm)
     if existing:
         for v in existing:
-            writer.writerow([f"Q{v.quarter}-{v.year}", v.volume, v.unit or "kg"])
+            writer.writerow([f"Q{v.quarter}-{v.year}", v.volume, v.unit or unit])
     else:
         now = datetime.now(timezone.utc)
         y, q = now.year, (now.month - 1) // 3 + 1
@@ -75,7 +98,7 @@ def download_volume_template(
                 q = 4
                 y -= 1
         for yr, qt in reversed(quarters):
-            writer.writerow([f"Q{qt}-{yr}", "", "kg"])
+            writer.writerow([f"Q{qt}-{yr}", "", unit])
 
     output.seek(0)
     return StreamingResponse(
@@ -106,8 +129,15 @@ async def upload_volumes(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    rows = result["rows"]
     parse_errors = result["errors"]
+    rows = []
+    for row in result["rows"]:
+        try:
+            volume, unit = _in_product_unit(cm, row["volume"], row.get("unit"))
+        except ValueError as exc:
+            parse_errors.append({"message": f"Q{row['quarter']}-{row['year']}: {exc}"})
+            continue
+        rows.append({**row, "volume": volume, "unit": unit})
 
     if dry_run:
         return {"rows_processed": len(rows), "errors": parse_errors, "dry_run": True, "filename": filename}
@@ -122,7 +152,7 @@ async def upload_volumes(
 
         if existing:
             existing.volume = row["volume"]
-            existing.unit = row.get("unit", "kg")
+            existing.unit = row["unit"]
             existing.uploaded_by = current_user.id
             existing.source_file = filename
         else:
@@ -132,7 +162,7 @@ async def upload_volumes(
                 year=row["year"],
                 quarter=row["quarter"],
                 volume=row["volume"],
-                unit=row.get("unit", "kg"),
+                unit=row["unit"],
                 source_file=filename,
             )
             db.add(av)
@@ -165,10 +195,15 @@ def update_volume(
         ActualVolume.quarter == quarter,
     ).first()
 
+    try:
+        volume, unit = _in_product_unit(cm, data.volume, data.unit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     previous = {"volume": float(existing.volume), "unit": existing.unit} if existing else None
     if existing:
-        existing.volume = data.volume
-        existing.unit = data.unit
+        existing.volume = volume
+        existing.unit = unit
         existing.uploaded_by = current_user.id
     else:
         existing = ActualVolume(
@@ -176,14 +211,14 @@ def update_volume(
             uploaded_by=current_user.id,
             year=data.year,
             quarter=data.quarter,
-            volume=data.volume,
-            unit=data.unit,
+            volume=volume,
+            unit=unit,
         )
         db.add(existing)
 
     log_event(db, cm.team_id, current_user.id, "update", "actual_volume", str(cost_model_id),
               previous_value={"year": year, "quarter": quarter, **previous} if previous else None,
-              new_value={"year": year, "quarter": quarter, "volume": float(data.volume), "unit": data.unit})
+              new_value={"year": year, "quarter": quarter, "volume": float(volume), "unit": unit})
     db.flush()
     db.expunge(existing)
     db.commit()

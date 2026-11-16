@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import api, { formatApiError } from '../api';
 import { useToast } from './Toast';
+import { useAuth } from '../AuthContext';
 
 // Web push, the other half of the PWA (the installable shell already shipped).
 //
@@ -40,6 +41,7 @@ function CapRow({ label, ok, detail }) {
 }
 
 export default function PushNotifications() {
+  const { user } = useAuth();
   const { addToast } = useToast();
   const [caps, setCaps] = useState(null);
   const [config, setConfig] = useState(null);
@@ -176,8 +178,12 @@ export default function PushNotifications() {
 
       {!config.enabled ? (
         <p style={{ fontSize: 12, color: 'var(--muted)' }}>
-          Push is not configured on this server yet. It needs a VAPID key pair — free, no third-party
-          service — set as <code>VAPID_PUBLIC_KEY</code> and <code>VAPID_PRIVATE_KEY</code>.
+          Push notifications are not available yet.
+          {/* The setup detail is for whoever can fix it, not for every user. */}
+          {user?.is_super_admin && (
+            <> It needs a VAPID key pair — free, no third-party service — set as{' '}
+              <code>VAPID_PUBLIC_KEY</code> and <code>VAPID_PRIVATE_KEY</code>.</>
+          )}
         </p>
       ) : (
         <>

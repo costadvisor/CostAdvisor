@@ -700,6 +700,17 @@ def test_line_flags_are_codes_not_prose():
     # a continuation becomes its own sentence
     ('Test shares are not published; treat share:0 as "not disclosed", and note that this is made up.',
      'Test shares are not published. Note that this is made up.'),
+    # in brackets: the empty brackets go too (audit A-07)
+    ('Test shares are not disclosed (share:0 = not disclosed). Maker G leads.',
+     'Test shares are not disclosed. Maker G leads.'),
+    # a sentence repeated back to back is kept once, abbreviations included
+    ('Maker H leads. The test set rests on J.R. Maker I. The test set rests on J.R. Maker I. '
+     'The test set rests on J.R. Maker I.',
+     'Maker H leads. The test set rests on J.R. Maker I.'),
+    ('A test line. A test line. Another test line. A test line.',
+     'A test line. Another test line. A test line.'),
+    ('Maker J (Ph. Eur.) and Maker K (Ph. Eur. / USP) are test makers.',
+     'Maker J (Ph. Eur.) and Maker K (Ph. Eur. / USP) are test makers.'),
     # nothing to strip: unchanged, including other uses of "share"
     ('Maker F holds a 30% share: the leader.', 'Maker F holds a 30% share: the leader.'),
     (None, None),
@@ -736,6 +747,7 @@ def test_no_stored_supplier_note_or_current_events_needs_cleaning(content_loaded
     assert notes, "no supplier notes loaded"
     for code, raw in notes:
         assert not share0.search(raw), code
+        assert not re.search(r"\(\s*\)", raw), code
         assert sanitize.clean_supplier_note(raw) == raw.strip(), code
     for code, raw in _stored(db, "current_events"):
         assert "sibling PID" not in raw, code

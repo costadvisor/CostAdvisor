@@ -182,9 +182,12 @@ export default function Profile() {
 }
 
 function ThemePreview({ theme, active, onSelect }) {
+  // color is set here, not inherited: the card shows its own theme, so text
+  // must take that theme's colour, not the page's.
   return (
     <div data-theme={theme.id} style={{
       background: 'var(--surface)',
+      color: 'var(--text)',
       border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
       borderRadius: 'var(--radius-lg)',
       padding: 18,

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import EvoChart from '../components/EvoChart';
 import api, { formatApiError } from '../api';
-import { curSym, fmtMoney, fmtSignedMoney } from '../utils/currency';
+import { curSym, decimalsFor, fmtMoney, fmtSignedMoney } from '../utils/currency';
 import DemoDataNote from '../components/DemoDataNote';
 
 export default function Brief() {
@@ -29,11 +29,16 @@ export default function Brief() {
     product_name, supplier_name, destination_country, currency, unit,
     current_should_cost, current_floor, current_actual_price, gap, gap_pct,
     total_impact, volumes_missing, period_label, evolution, narrative, drivers,
+    as_of_label, base_period_label,
   } = data;
+  const since = base_period_label ? `since ${base_period_label}` : 'since the base quarter';
   const sym = curSym(currency);
-  // Per-unit figures at two decimals, sign in front of the symbol ("−€9.02").
-  const money = (v) => fmtMoney(v, currency, { decimals: 2 });
-  const signedMoney = (v) => fmtSignedMoney(v, currency, { decimals: 2 });
+  // Every per-unit figure at the should-cost's scale (utils/currency), so the
+  // header and the position card print one number one way, not "€291.16" and
+  // "€291.161".
+  const dp = decimalsFor(current_should_cost);
+  const money = (v) => fmtMoney(v, currency, { decimals: dp });
+  const signedMoney = (v) => fmtSignedMoney(v, currency, { decimals: dp });
 
   const verdictColor = gap === null ? 'var(--muted)' : gap > 0 ? 'var(--accent2)' : 'var(--accent)';
   const verdictLabel = gap === null ? 'No actual price data' : gap > 0 ? 'Above should-cost' : 'Below should-cost';
@@ -108,7 +113,7 @@ export default function Brief() {
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: 'var(--accent)' }}>
               {money(current_should_cost)}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>per {unit} at {period_label}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>per {unit} as of {as_of_label || period_label}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Actual Price</div>
@@ -138,31 +143,36 @@ export default function Brief() {
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Floor</div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 700, color: 'var(--accent4)' }}>
-              {current_floor != null ? `${sym}${current_floor.toFixed(3)}` : '—'}
+              {current_floor != null ? money(current_floor) : '—'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>cost before margin — a minimum, not a target</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Should-Cost</div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 700, color: 'var(--accent)' }}>
-              {sym}{current_should_cost.toFixed(3)}
+              {money(current_should_cost)}
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>fair price — open near here</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Current Ask</div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 700, color: 'var(--accent4)' }}>
-              {current_actual_price !== null ? `${sym}${current_actual_price.toFixed(3)}` : '—'}
+              {current_actual_price !== null ? money(current_actual_price) : '—'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>what the supplier is charging today</div>
           </div>
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-          {current_floor != null
-            ? <>Your defensible range for this product is <strong>{sym}{current_floor.toFixed(3)}</strong> to{' '}
-                <strong>{sym}{current_should_cost.toFixed(3)}</strong> — anchor the conversation near should-cost and hold
-                the floor as your walk-away point, not your opening offer.</>
-            : 'The floor (cost before margin) is not available for this formula.'}
+          {/* Already under should-cost: anchoring near it would argue the price up. */}
+          {gap !== null && gap < 0
+            ? <>You already pay <strong>{money(current_actual_price)}</strong>, below the should-cost of{' '}
+                <strong>{money(current_should_cost)}</strong>. Hold the current price; there is no case here
+                for paying more.</>
+            : current_floor != null
+              ? <>Your defensible range for this product is <strong>{money(current_floor)}</strong> to{' '}
+                  <strong>{money(current_should_cost)}</strong> — anchor the conversation near should-cost and hold
+                  the floor as your walk-away point, not your opening offer.</>
+              : 'The floor (cost before margin) is not available for this formula.'}
         </div>
       </div>
 
@@ -267,8 +277,10 @@ export default function Brief() {
             <tr>
               <th>Component</th>
               <th>Index</th>
-              <th className="center">Index Change</th>
-              <th className="center">Contribution to Gap</th>
+              {/* Measured from the formula's base quarter: should-cost movement,
+                  not a split of the supplier gap. */}
+              <th className="center">Index change {since}</th>
+              <th className="center">Should-cost change {since}</th>
               <th className="center">Direction</th>
             </tr>
           </thead>
