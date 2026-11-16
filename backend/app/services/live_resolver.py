@@ -134,6 +134,10 @@ def _resolve_recipe(db: Session, tokens: list[Token]) -> dict[Token, Resolved]:
     return out
 
 
+# The euro twin of a type code: the same input, priced in euros (6 Nov export).
+EUR_SUFFIX = "-EUR"
+
+
 def report_recipe_weights(db: Session, slugs: Iterable[str] | None = None) -> tuple[dict, dict]:
     """Per report: {type code: [weights]} and {line name (lower case): [weights]}
     over the platform recipes of the report's own product lines.
@@ -154,6 +158,12 @@ def report_recipe_weights(db: Session, slugs: Iterable[str] | None = None) -> tu
     for slug, code, name, weight, _id in q:
         if code:
             by_code[slug][code].append(float(weight))
+            # R3: since the 6 Nov export, EU recipe lines use the euro twin of
+            # a code (BRENT-GLB-EUR for BRENT-GLB: the same input priced in
+            # euros). A bar that names the input's own code still covers them,
+            # or its range would silently lose the EU recipes.
+            if code.endswith(EUR_SUFFIX) and len(code) > len(EUR_SUFFIX):
+                by_code[slug][code[:-len(EUR_SUFFIX)]].append(float(weight))
         by_name[slug][name.lower()].append(float(weight))
     return by_code, by_name
 

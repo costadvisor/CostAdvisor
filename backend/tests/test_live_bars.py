@@ -116,3 +116,26 @@ def test_an_unknown_input_shows_the_fallback_and_keeps_the_drawing(db, world):
     out = LiveText(db).html(html)
     assert TWO in out
     assert '<span class="live-value live-missing">4–5%</span>' in out
+
+
+def test_a_coded_bar_also_covers_recipe_lines_on_the_euro_twin(db, world, tenant_a):
+    # R3: since the 6 Nov export EU recipe lines use e.g. BRENT-GLB-EUR for
+    # BRENT-GLB. A third recipe of the same line uses the twin at 60%.
+    from app.models.market_report import MarketReportLine
+    from app.services.live_resolver import report_recipe_weights
+    twin = TypeCode(code=f"{world['code']}-EUR", resolution="ambiguous")
+    db.add(twin)
+    line_id = db.query(MarketReportLine.product_line_id).filter_by(slug=world["slug"]).scalar()
+    t = FormulaTemplate(name=f"Bars twin {world['slug']}", code=f"TST-{world['slug'][-6:]}-EUR",
+                        team_id=None, product_line_id=line_id, created_by=tenant_a["user_id"])
+    db.add(t)
+    db.flush()
+    db.add(FormulaTemplateComponent(template_id=t.id, name="Iron unit (EUR)", component_type="index",
+                                    type_code_id=twin.id, region="Europe", weight_pct=60))
+    db.flush()
+    by_code, _ = report_recipe_weights(db, [world["slug"]])
+    assert sorted(by_code[world["slug"]][world["code"]]) == [26.0, 49.0, 60.0]   # the input, both currencies
+    assert by_code[world["slug"]][twin.code] == [60.0]                           # the twin alone stays itself
+    html = LiveText(db).html(BAR_HTML.format(label="Iron", fills=ONE,
+                                             token=f"{{{{bar:{world['slug']}|code={world['code']}}}}}"))
+    assert "26–60%" in html
