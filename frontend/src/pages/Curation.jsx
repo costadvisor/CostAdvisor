@@ -6,6 +6,7 @@ import { useToast } from '../components/Toast';
 import SheetRoundTripPanel from '../components/SheetRoundTripPanel';
 import LiveNumberPicker from '../components/LiveNumberPicker';
 import StaleQueue from '../components/StaleQueue';
+import NewsProfilesTab from '../components/NewsProfilesTab';
 import exportCsv from '../utils/exportCsv';
 
 /**
@@ -61,6 +62,7 @@ const TABS = [
   { key: 'editorial', label: 'Editorial approvals' },
   { key: 'dimensions', label: 'Dimension decisions' },
   { key: 'stale', label: 'Stale content' },
+  { key: 'news', label: 'News profiles' },
 ];
 
 function Badge({ map, value, badge }) {
@@ -680,6 +682,13 @@ function DimensionQueue({ teamId }) {
 export default function Curation() {
   const { activeTeamId } = useAuth();
   const [tab, setTab] = useState('trust');
+  // News profiles (SCRUM-213) are behind a preview flag: the tab only appears
+  // for the people the server lists in NEWS_PREVIEW_EMAILS.
+  const [newsEnabled, setNewsEnabled] = useState(false);
+  useEffect(() => {
+    api.get('/api/news/enabled').then(({ data }) => setNewsEnabled(!!data.enabled)).catch(() => {});
+  }, []);
+  const tabs = TABS.filter(t => t.key !== 'news' || newsEnabled);
 
   return (
     <div className="ca-page ca-fade-in">
@@ -691,7 +700,7 @@ export default function Curation() {
       </p>
 
       <div style={{ display: 'flex', gap: 6, margin: '14px 0', flexWrap: 'wrap' }}>
-        {TABS.map(t => (
+        {tabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`ca-btn ca-btn-sm ${tab === t.key ? 'ca-btn-primary' : 'ca-btn-ghost'}`}>
             {t.label}
@@ -703,6 +712,7 @@ export default function Curation() {
       {tab === 'editorial' && <EditorialQueue teamId={activeTeamId} />}
       {tab === 'dimensions' && <DimensionQueue teamId={activeTeamId} />}
       {tab === 'stale' && <StaleQueue />}
+      {tab === 'news' && newsEnabled && <NewsProfilesTab />}
     </div>
   );
 }
