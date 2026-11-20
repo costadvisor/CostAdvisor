@@ -17,30 +17,35 @@ export { supplierHref as supplierPath, productHref as productPath, lineHref as l
 export const PRODUCT_COUNT_HINT = 'Products in the grid on which this producer is a counted maker.';
 
 /* ── Filters, synced to the URL ──────────────────────────────────────
- * ?q= &family_id= &industry= &integrated=true|false &min=N
- * Updates replace the history entry, so "Back" from a supplier page lands on
- * the list exactly as it was filtered. */
+ * ?q= &family_id=4&family_id=9 &industry=…&industry=… &integrated=true|false &min=N
+ * Family and industry take several values (a repeated key): a maker of any of
+ * them matches, as on the Lines and Products pages. Updates replace the
+ * history entry, so "Back" from a supplier page lands on the list exactly as
+ * it was filtered. */
+export const LIST_FILTERS = ['family_id', 'industry'];
+
 export function useSupplierFilters() {
   const [params, setParams] = useSearchParams();
 
   const filters = useMemo(() => {
     const integrated = params.get('integrated');
     const min = parseInt(params.get('min'), 10);
-    const familyId = params.get('family_id') || '';
     return {
       q: params.get('q') || '',
-      family_id: /^\d+$/.test(familyId) ? familyId : '',
-      industry: params.get('industry') || '',
+      family_id: [...new Set(params.getAll('family_id').filter((v) => /^\d+$/.test(v)))],
+      industry: [...new Set(params.getAll('industry').filter(Boolean))],
       integrated: integrated === 'true' || integrated === 'false' ? integrated : '',
       min: Number.isFinite(min) && min > 1 ? min : 1,
     };
   }, [params]);
 
+  // An array writes one entry per value; '' / null / [] removes the key.
   const setFilter = useCallback((key, value) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev);
-      const empty = value === '' || value == null || (key === 'min' && Number(value) <= 1);
-      if (empty) next.delete(key); else next.set(key, String(value));
+      next.delete(key);
+      if (Array.isArray(value)) value.forEach((v) => next.append(key, String(v)));
+      else if (!(value === '' || value == null || (key === 'min' && Number(value) <= 1))) next.set(key, String(value));
       return next;
     }, { replace: true });
   }, [setParams]);
@@ -53,19 +58,20 @@ export function useSupplierFilters() {
     }, { replace: true });
   }, [setParams]);
 
-  const activeCount = ['q', 'family_id', 'industry', 'integrated'].filter((k) => filters[k]).length
-    + (filters.min > 1 ? 1 : 0);
+  const activeCount = ['q', 'integrated'].filter((k) => filters[k]).length
+    + filters.family_id.length + filters.industry.length + (filters.min > 1 ? 1 : 0);
 
   return { filters, setFilter, clearAll, activeCount };
 }
 
 /* Query params for GET /api/intel/suppliers. `omit` drops one filter, which is
- * how the sidebar gets counts for the options of a single-select group. */
+ * how the sidebar gets a group's counts: every other filter applied, its own
+ * left out, so a count is what ticking that option gives. */
 export function apiParams(filters, { omit, ...extra } = {}) {
   const p = {
     q: filters.q.trim() || undefined,
-    family_id: filters.family_id || undefined,
-    industry: filters.industry || undefined,
+    family_id: filters.family_id.length ? filters.family_id : undefined,
+    industry: filters.industry.length ? filters.industry : undefined,
     integrated: filters.integrated || undefined,
     min_products: filters.min > 1 ? filters.min : undefined,
   };
@@ -138,7 +144,7 @@ export function useTotals(requests) {
     const ctrl = new AbortController();
     const entries = Object.entries(JSON.parse(sig));
     Promise.all(entries.map(([key, params]) => api
-      .get(SUPPLIERS_URL, { params: { ...params, limit: 1 }, signal: ctrl.signal })
+      .get(SUPPLIERS_URL, { params: { ...params, limit: 1 }, signal: ctrl.signal, paramsSerializer: { indexes: null } })
       .then((res) => [key, res.data?.total])
       .catch(() => [key, undefined])))
       .then((pairs) => {

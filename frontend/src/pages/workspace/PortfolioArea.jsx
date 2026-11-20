@@ -543,7 +543,7 @@ export default function PortfolioArea() {
                                 ) : (
                                   <>
                                     <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={(e) => { e.stopPropagation(); navigate(`/cost-models/${r.costModelId}/evolution`); }}>Evolution</button>
-                                    <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={(e) => { e.stopPropagation(); navigate(`/cost-models/${r.costModelId}/brief`); }}>Brief</button>
+                                    <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={(e) => { e.stopPropagation(); navigate(`/negotiate/${r.costModelId}`); }}>Brief</button>
                                   </>
                                 )}
                               </div>

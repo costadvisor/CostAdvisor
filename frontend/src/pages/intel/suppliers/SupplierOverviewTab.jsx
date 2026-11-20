@@ -253,4 +253,4 @@ export default function SupplierOverviewTab({ supplier: s, familyColor, onFamily
   );
 }
 
-export { Profile };
+export { Profile, DossierRoles };

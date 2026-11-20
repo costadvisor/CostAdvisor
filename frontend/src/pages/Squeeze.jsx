@@ -58,7 +58,7 @@ export default function Squeeze() {
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}`)}>Edit Model</button>
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/pricing`)}>Pricing</button>
           <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/evolution`)}>Evolution</button>
-          <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/cost-models/${costModelId}/brief`)}>Brief</button>
+          <button className="ca-btn ca-btn-ghost" onClick={() => navigate(`/negotiate/${costModelId}`)}>Brief</button>
           <button className="ca-btn ca-btn-ghost ca-btn-sm" onClick={() => exportCsv(
             `squeeze_${product_name}.csv`,
             ['Period', 'Theoretical', 'Actual', 'Gap', 'Gap %', 'Volume', 'Projected', 'Impact', 'Cumulative'],

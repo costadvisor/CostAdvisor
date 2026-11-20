@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import api, { formatApiError } from '../api';
 import { useAuth } from '../AuthContext';
+import { NoTeamNotice } from '../ProtectedRoute';
 
 const STATUS_LABEL = { open: 'Open', pending: 'Awaiting you', resolved: 'Resolved', closed: 'Closed' };
 
@@ -185,51 +186,58 @@ export default function Support() {
   useEffect(() => { load(); }, [load]);
 
   return (
-    <div style={{ maxWidth: 760, margin: '0 auto', padding: '24px 16px' }}>
-      <h2 style={{ marginBottom: 16 }}>Support</h2>
-      <FAQPanel />
-      {selected ? (
-        <ThreadView
-          thread={selected}
-          isStaff={false}
-          onBack={() => { setSelected(null); load(); }}
-          onChanged={load}
-        />
-      ) : (
-        <>
-          <NewThreadForm teamId={activeTeamId} onCreated={t => { load(); setSelected(t); }} />
-          <div className="ca-card">
-            <div className="ca-card-title" style={{ marginBottom: 8 }}>Your messages</div>
-            {err && <div style={{ fontSize: 12, color: 'var(--accent2)' }}>{err}</div>}
-            {!threads ? (
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</div>
-            ) : threads.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                Nothing yet — send a message above and it'll show up here.
-              </div>
-            ) : (
-              threads.map(t => (
-                <div
-                  key={t.id} role="button" tabIndex={0} onClick={() => setSelected(t)}
-                  onKeyDown={e => { if (e.key === 'Enter') setSelected(t); }}
-                  style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    padding: '10px 4px', borderBottom: '1px solid var(--border)', cursor: 'pointer',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{t.subject}</div>
-                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>
-                      {t.scope === 'team' ? 'Team thread' : 'Private'} · {fmtTime(t.updated_at)}
-                    </div>
-                  </div>
-                  <span className="ca-badge">{STATUS_LABEL[t.status] || t.status}</span>
+    <div className="ca-page ca-fade-in">
+      <div className="ca-h1">Support</div>
+      <p className="ca-subtitle">Answers to common questions, and a direct line to the CostAdvisor team.</p>
+      {/* Threads are stored per team, so a user with no team gets the
+          email address instead of a form that cannot be sent. */}
+      <div style={{ maxWidth: 760 }}>
+        <FAQPanel />
+        {!activeTeamId ? (
+          <NoTeamNotice />
+        ) : selected ? (
+          <ThreadView
+            thread={selected}
+            isStaff={false}
+            onBack={() => { setSelected(null); load(); }}
+            onChanged={load}
+          />
+        ) : (
+          <>
+            <NewThreadForm teamId={activeTeamId} onCreated={t => { load(); setSelected(t); }} />
+            <div className="ca-card">
+              <div className="ca-card-title" style={{ marginBottom: 8 }}>Your messages</div>
+              {err && <div style={{ fontSize: 12, color: 'var(--accent2)' }}>{err}</div>}
+              {!threads ? (
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</div>
+              ) : threads.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  Nothing yet — send a message above and it'll show up here.
                 </div>
-              ))
-            )}
-          </div>
-        </>
-      )}
+              ) : (
+                threads.map(t => (
+                  <div
+                    key={t.id} role="button" tabIndex={0} onClick={() => setSelected(t)}
+                    onKeyDown={e => { if (e.key === 'Enter') setSelected(t); }}
+                    style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '10px 4px', borderBottom: '1px solid var(--border)', cursor: 'pointer',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{t.subject}</div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                        {t.scope === 'team' ? 'Team thread' : 'Private'} · {fmtTime(t.updated_at)}
+                      </div>
+                    </div>
+                    <span className="ca-badge">{STATUS_LABEL[t.status] || t.status}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

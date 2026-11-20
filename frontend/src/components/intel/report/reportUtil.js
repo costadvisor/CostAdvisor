@@ -23,3 +23,19 @@ export function lineHref(lineRef) {
 export function sectionDomId(slug, sectionId) {
   return `rpt-${slug}-${sectionId}`.replace(/[^A-Za-z0-9_-]/g, '-');
 }
+
+/** Put every <table> under `root` in its own horizontal scroll box: a table
+ *  wider than the sheet then scrolls instead of being cut off (the sheet
+ *  clips its overflow for the rounded corners). The stored html carries no
+ *  such box (the sanitiser allows none), so it is added to the rendered DOM.
+ *  Safe to run again on the same DOM. */
+export function wrapTables(root) {
+  if (!root) return;
+  root.querySelectorAll('table').forEach((table) => {
+    if (table.parentElement?.classList.contains('ixr-table-scroll')) return;
+    const box = document.createElement('div');
+    box.className = 'ixr-table-scroll';
+    table.replaceWith(box);
+    box.appendChild(table);
+  });
+}

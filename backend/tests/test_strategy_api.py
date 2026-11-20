@@ -659,6 +659,9 @@ def test_analysis_shapes_the_report_for_the_strategic_tab(tenant_a, client_as):
     assert body["caveat"]["split_into_n_lines"] == n
     if n > 1:
         assert f"split into {n} product lines" in body["caveat"]["text"]
+    # Each named line carries its id, so the banner can link to it.
+    assert all(ln["product_line_id"] is not None
+               for ln in body["caveat"]["lines"] if ln["line_key"])
     assert not panels["overview"]["html"].lstrip().startswith("<h2")
 
 

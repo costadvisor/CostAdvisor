@@ -77,6 +77,7 @@ from app.services.catalog_visibility import (
     status_badge,
 )
 from app.services.content_drop.reader import DROP_REGION_BY_APP, REGION_MAP
+from app.services.intel_catalogue import search_fold, search_matches, search_terms
 from app.services.live_values import LiveText
 from app.services.staleness import reader_note
 
@@ -816,8 +817,8 @@ def _precompute_lines(snap: Snapshot) -> None:
                 fns[fn].add(card)
         sup_counter, buckets = _suppliers_of_cards(snap, cards)
         reports = _line_reports(snap, ln.id)
-        search = " ".join([ln.name, ln.family, ln.subfamily or "", ln.platform or ""]
-                          + list(cards) + [snap.templates[c].name for c in cards]).lower()
+        search = search_fold(" ".join([ln.name, ln.family, ln.subfamily or "", ln.platform or ""]
+                                      + list(cards) + [snap.templates[c].name for c in cards]))
         item = {
             "id": ln.id,
             "line_key": ln.line_key,
@@ -877,7 +878,7 @@ def list_lines(db: Session, *, family_id: int | None = None, subfamily_id: int |
     statuses = parse_status(status)
     snap = get_snapshot(db)
     ind_name = _resolve_industry_name(snap, industry) if industry else None
-    needle = q.strip().lower() if q and q.strip() else None
+    terms = search_terms(q)
 
     out = []
     for it in snap.line_items:
@@ -891,7 +892,7 @@ def list_lines(db: Session, *, family_id: int | None = None, subfamily_id: int |
             continue
         if has_report is not None and it["has_report"] != has_report:
             continue
-        if needle and needle not in it["_search"]:
+        if terms and not search_matches(terms, it["_search"]):
             continue
         out.append(_with_status(snap, it, statuses))
 
@@ -1419,7 +1420,7 @@ def _precompute_suppliers(snap: Snapshot) -> None:
             "_regions": Counter(r for lk in counting for r in set(lk.regions)),
             "_cards": set(cards),
             "_lines": lines,
-            "_search": " ".join([p["name"]] + snap.aliases.get(pid_, [])).lower(),
+            "_search": search_fold(" ".join([p["name"]] + snap.aliases.get(pid_, []))),
         })
     rows.sort(key=lambda r: (-r["product_count"], r["name"].lower()))
     generic.sort(key=lambda r: (-r["product_count"], r["name"].lower()))
@@ -1428,23 +1429,37 @@ def _precompute_suppliers(snap: Snapshot) -> None:
     snap.generic_suppliers = generic
 
 
-def list_suppliers(db: Session, *, q: str | None = None, family_id: int | None = None,
-                   industry: str | None = None, min_products: int = 1,
+def _picked(value) -> list:
+    """A filter's values: none, one, or several (a repeated query key)."""
+    if value is None:
+        return []
+    if isinstance(value, (str, int)):
+        value = [value]
+    return [v for v in value if v is not None and v != ""]
+
+
+def list_suppliers(db: Session, *, q: str | None = None,
+                   family_id: Iterable[int] | int | None = None,
+                   industry: Iterable[str] | str | None = None, min_products: int = 1,
                    integrated: bool | None = None, limit: int = 100, offset: int = 0) -> dict:
-    """The directory: producers with at least one counting link on a card."""
+    """The directory: producers with at least one counting link on a card.
+    Several families or industries match a producer in any of them (OR);
+    the different filters all apply."""
     snap = get_snapshot(db)
-    needle = q.strip().lower() if q and q.strip() else None
-    ind_name = _resolve_industry_name(snap, industry) if industry else None
+    terms = search_terms(q)
+    fams = set(_picked(family_id))
+    inds_asked = _picked(industry)
+    inds = {n for n in (_resolve_industry_name(snap, v) for v in inds_asked) if n}
     out = []
     for r in snap.supplier_rows:
         if r["product_count"] < max(min_products, 1):
             continue
-        if needle and needle not in r["_search"]:
+        if terms and not search_matches(terms, r["_search"]):
             continue
-        if family_id is not None and not any(f["id"] == family_id for f in r["families"]):
+        if fams and not any(f["id"] in fams for f in r["families"]):
             continue
-        if industry and (ind_name is None or not any(i["name"] == ind_name
-                                                     for i in r["industries"])):
+        # An industry nobody knows matches nothing, as a single one always did.
+        if inds_asked and not any(i["name"] in inds for i in r["industries"]):
             continue
         if integrated is True and not r["integrated_count"]:
             continue
@@ -1457,6 +1472,16 @@ def list_suppliers(db: Session, *, q: str | None = None, family_id: int | None =
         fam_c.update((f["id"], f["name"]) for f in r["families"])
         ind_c.update(i["name"] for i in r["industries"])
     page = out[offset:offset + limit]
+
+    def head(industries: list[dict]) -> list[dict]:
+        # The card needs every family but only the head of the industry list
+        # (`industry_count` carries the full number). The industries filtered
+        # on lead it, so the card shows why it matched.
+        if inds:
+            industries = ([i for i in industries if i["name"] in inds]
+                          + [i for i in industries if i["name"] not in inds])
+        return industries[:LIST_TOP_INDUSTRIES]
+
     return {
         "total": len(out),
         "limit": limit,
@@ -1466,10 +1491,7 @@ def list_suppliers(db: Session, *, q: str | None = None, family_id: int | None =
                            key=lambda e: e["name"].lower()),
         "industries": _industry_counts(snap, ind_c),
         "generic_suppliers": snap.generic_suppliers,
-        # The card needs every family but only the head of the industry
-        # list; `industry_count` carries the full number.
-        "items": [{**_public(r), "industries": r["industries"][:LIST_TOP_INDUSTRIES]}
-                  for r in page],
+        "items": [{**_public(r), "industries": head(r["industries"])} for r in page],
     }
 
 

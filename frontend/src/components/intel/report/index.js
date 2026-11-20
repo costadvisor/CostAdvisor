@@ -3,4 +3,4 @@
 export { default as ReportView } from './ReportView';
 export { default as ReportCaveat } from './ReportCaveat';
 export { default as ReportHtml } from './ReportHtml';
-export { asOfLabel, lineHref, sectionDomId } from './reportUtil';
+export { asOfLabel, lineHref, sectionDomId, wrapTables } from './reportUtil';

@@ -274,6 +274,7 @@ class Catalogue:
     industries: list[str]
     data_version: dict | None
     _facets: dict = field(default_factory=dict)
+    _search: dict = field(default_factory=dict)   # pid → folded search text, filled lazily
 
 
 _lock = threading.Lock()
@@ -620,6 +621,9 @@ def build_catalogue(db: Session, version: str | None = None) -> Catalogue:
 # ── Facets ───────────────────────────────────────────────────────────────────
 
 SUPPLIER_FACET_LIMIT = 60
+# The sidebar groups, by query key: each counts with its own key left out.
+FACET_KEYS = ("status", "family_id", "industry", "fn", "supplier", "region", "trend",
+              "has_report")
 
 
 def parse_statuses(value: str | None) -> frozenset[str] | None:
@@ -639,58 +643,139 @@ def _in_statuses(item: dict, statuses: frozenset[str] | None) -> bool:
     return statuses is None or (item["status"] is not None and item["status"]["code"] in statuses)
 
 
-def facets(cat: Catalogue, statuses: frozenset[str] | None = None) -> dict:
-    """Sidebar facets and header counts. The facet counts cover the cards in
-    `statuses` (None = every listed card); `statuses[]`, `counts.listed`
-    and `counts.default_view` always cover every listed card, so the status
-    checkboxes can show their own counts. Memoised per status set."""
-    cached = cat._facets.get(statuses)
-    if cached is not None:
-        return cached
-    items = [i for i in cat.items if _in_statuses(i, statuses)]
-    fam: Counter = Counter()
-    fam_names: dict[int, str] = {}
-    for i in items:
-        if i["family"]:
-            fam[i["family"]["id"]] += 1
-            fam_names[i["family"]["id"]] = i["family"]["name"]
-    ind = Counter(x for i in items for x in cat.industries_of.get(i["pid"], ()))
-    fns = Counter(x for i in items for x in cat.functions_of.get(i["pid"], ()))
-    sup = Counter(x for i in items for x in cat.suppliers_of.get(i["pid"], ()))
-    reg = Counter(r for i in items for r in i["regions"])
-    trend = Counter(i["trend_dir"] for i in items if i["trend_dir"])
-    by_status = Counter(i["status"]["code"] for i in cat.items if i["status"])
+def facets(cat: Catalogue, statuses: frozenset[str] | None = None, **filters) -> dict:
+    """Sidebar facets and header counts, under the filters `filter_items`
+    takes. An option's count is what the grid would hold with that option
+    ticked: the cards that pass every active filter except the option's own
+    group (the faceted-search rule; values within a group are OR, so the
+    group's own pick must not narrow its counts).
+
+    The option lists come from the cards in `statuses`, so they do not
+    reshuffle as filters change, and a selected value is always listed. The
+    supplier list is the exception: the top producers under the other
+    filters. `statuses[]` counts follow every filter but the status one;
+    `counts.listed` and `counts.default_view` always cover every listed card;
+    the other `counts` cover the cards in `statuses` (the header's "of N"),
+    except `has_report`, which follows the other filters like an option.
+    Memoised per status set when no other filter is on."""
+    tests = _card_tests(cat, statuses=statuses, **filters)
+    plain = tests.keys() <= {"status"}
+    if plain:
+        cached = cat._facets.get(statuses)
+        if cached is not None:
+            return cached
+
+    # Each group counts the cards that fail no test but its own.
+    pools: dict[str, list[dict]] = {k: [] for k in FACET_KEYS}
+    for i in cat.items:
+        failed = None
+        for key, test in tests.items():
+            if not test(i):
+                if failed is not None:
+                    failed = ""  # two filters fail: no group counts this card
+                    break
+                failed = key
+        if failed is None:
+            for pool in pools.values():
+                pool.append(i)
+        elif failed in pools:
+            pools[failed].append(i)
+
+    view = [i for i in cat.items if _in_statuses(i, statuses)]
+    picked = {k: _values(filters.get(k)) or frozenset() for k in FACET_KEYS}
+
+    fam = Counter(i["family"]["id"] for i in pools["family_id"] if i["family"])
+    fam_names = {i["family"]["id"]: i["family"]["name"] for i in view if i["family"]}
+    for i in cat.items:
+        if i["family"] and i["family"]["id"] in picked["family_id"]:
+            fam_names.setdefault(i["family"]["id"], i["family"]["name"])
+    ind = Counter(x for i in pools["industry"] for x in cat.industries_of.get(i["pid"], ()))
+    fns = Counter(x for i in pools["fn"] for x in cat.functions_of.get(i["pid"], ()))
+    fn_names = {x for i in view for x in cat.functions_of.get(i["pid"], ())} | picked["fn"]
+    sup = Counter(x for i in pools["supplier"] for x in cat.suppliers_of.get(i["pid"], ()))
+    reg = Counter(r for i in pools["region"] for r in i["regions"])
+    view_regions = {r for i in view for r in i["regions"]} | picked["region"]
+    trend = Counter(i["trend_dir"] for i in pools["trend"] if i["trend_dir"])
+    by_status = Counter(i["status"]["code"] for i in pools["status"] if i["status"])
+    listed_by_status = Counter(i["status"]["code"] for i in cat.items if i["status"])
     top_sup = sorted(sup.items(), key=lambda kv: (-kv[1], kv[0].casefold()))[:SUPPLIER_FACET_LIMIT]
+    top_names = {n for n, _ in top_sup}
+    top_sup += sorted(((n, sup.get(n, 0)) for n in picked["supplier"] if n not in top_names),
+                      key=lambda kv: kv[0].casefold())
+    view_fams = {i["family"]["id"] for i in view if i["family"]}
     out = {
         "status_filter": sorted(statuses, key=STATUS_RANK.get) if statuses else None,
         "statuses": [{**_status_ref(code), "count": by_status.get(code, 0)}
                      for code in SUPPLY_STATUSES],
-        "families": [{"id": fid, "name": fam_names[fid], "count": c}
-                     for fid, c in sorted(fam.items(), key=lambda kv: fam_names[kv[0]].casefold())],
+        "families": [{"id": fid, "name": fam_names[fid], "count": fam.get(fid, 0)}
+                     for fid in sorted(view_fams | (picked["family_id"] & fam_names.keys()),
+                                       key=lambda f: fam_names[f].casefold())],
         # Every industry of the demand tree, zero counts included (greyed).
         "industries": [{"name": n, "count": ind.get(n, 0)} for n in cat.industries],
-        "functions": [{"name": n, "count": c} for n, c in sorted(fns.items(),
-                                                                 key=lambda kv: kv[0].casefold())],
+        "functions": [{"name": n, "count": fns.get(n, 0)}
+                      for n in sorted(fn_names, key=str.casefold)],
         "suppliers": [{"name": n, "count": c} for n, c in top_sup],
         "suppliers_total": len(sup),
         "regions": [{"code": r, "app_region": REGION_MAP.get(r), "name": mk.REGION_NAMES.get(r, r),
-                     "color": mk.REGION_COLORS.get(r), "count": reg[r]}
-                    for r in mk.REGION_ORDER if reg.get(r)],
+                     "color": mk.REGION_COLORS.get(r), "count": reg.get(r, 0)}
+                    for r in mk.REGION_ORDER if r in view_regions],
         "trends": [{"name": t, "count": trend.get(t, 0)} for t in ("up", "flat", "down")],
         "counts": {
             "listed": len(cat.items),
-            "default_view": sum(by_status.get(s, 0) for s in DEFAULT_VIEW_STATUSES),
-            "products": len(items),
-            "lines": len({i["line"]["id"] for i in items if i["line"]}),
-            "families": len(fam),
-            "groups": sum(1 for i in items if i["is_group"]),
-            "has_report": sum(1 for i in items if i["has_report"]),
-            "regions": sum(1 for r in mk.REGION_ORDER if reg.get(r)),
+            "default_view": sum(listed_by_status.get(s, 0) for s in DEFAULT_VIEW_STATUSES),
+            "products": len(view),
+            "lines": len({i["line"]["id"] for i in view if i["line"]}),
+            "families": len(view_fams),
+            "groups": sum(1 for i in view if i["is_group"]),
+            "has_report": sum(1 for i in pools["has_report"] if i["has_report"]),
+            "regions": sum(1 for r in mk.REGION_ORDER if any(r in i["regions"] for i in view)),
         },
         "data_version": cat.data_version,
     }
-    cat._facets[statuses] = out
+    if plain:
+        cat._facets[statuses] = out
     return out
+
+
+# ── Search ───────────────────────────────────────────────────────────────────
+
+# The catalogue mixes UK and US spellings; both sides of a search fold to one.
+SEARCH_SPELLINGS = (("sulph", "sulf"), ("aluminum", "aluminium"), ("fibre", "fiber"))
+_EDGE_PUNCT = "()[]{},;:!?\"'“”‘’%"
+
+
+def search_fold(text: str) -> str:
+    """Text as a search compares it: case-folded, one spelling per word."""
+    out = text.casefold()
+    for variant, kept in SEARCH_SPELLINGS:
+        out = out.replace(variant, kept)
+    return out
+
+
+def search_terms(q: str | None) -> list[str]:
+    """The words of a search, folded. Each must appear, in any order
+    ("chloride ferric 40" finds "Ferric chloride … 40%")."""
+    folded = search_fold(q or "").strip()
+    words = [w.strip(_EDGE_PUNCT) for w in folded.split()]
+    return [w for w in words if w] or ([folded] if folded else [])
+
+
+def search_matches(terms: list[str], hay: str) -> bool:
+    return all(t in hay for t in terms)
+
+
+def _search_text(cat: Catalogue, code: str) -> str:
+    """A card's words: code, names, line, sub-family, family, CAS and its
+    counted makers, so a supplier's name finds the cards it makes."""
+    hay = cat._search.get(code)
+    if hay is None:
+        p = cat.products[code]
+        line = p.line or {}
+        hay = search_fold(" ".join(x for x in (
+            p.code, p.name, p.full_name, line.get("name"), line.get("subfamily_name"), p.family,
+            p.cas, *sorted(cat.suppliers_of.get(code, ()))) if x))
+        cat._search[code] = hay
+    return hay
 
 
 # ── Queries over the snapshot ────────────────────────────────────────────────
@@ -706,46 +791,56 @@ def normalize_region(region: str | None) -> str | None:
     return r.upper()
 
 
+def _values(value) -> frozenset | None:
+    """A filter's picked values: none, one, or several (a repeated key)."""
+    if value is None:
+        return None
+    if isinstance(value, (str, int)):
+        value = (value,)
+    picked = frozenset(v for v in value if v is not None and v != "")
+    return picked or None
+
+
+def _card_tests(cat: Catalogue, *, statuses: frozenset[str] | None = None,
+                family_id: Iterable[int] | int | None = None, subfamily_id: int | None = None,
+                line_id: int | None = None, industry: Iterable[str] | str | None = None,
+                fn: Iterable[str] | str | None = None, supplier: Iterable[str] | str | None = None,
+                q: str | None = None, has_report: bool | None = None,
+                region: Iterable[str] | str | None = None,
+                trend: str | None = None) -> dict[str, Any]:
+    """One test per active filter, keyed by its query key. The values of one
+    key are OR (a card passes on any of them); the keys are AND."""
+    tests: dict[str, Any] = {}
+    if statuses is not None:
+        tests["status"] = lambda i: _in_statuses(i, statuses)
+    if fams := _values(family_id):
+        tests["family_id"] = lambda i: (i["family"] or {}).get("id") in fams
+    if subfamily_id is not None:
+        tests["subfamily_id"] = lambda i: (i["subfamily"] or {}).get("id") == subfamily_id
+    if line_id is not None:
+        tests["line_id"] = lambda i: (i["line"] or {}).get("id") == line_id
+    if inds := _values(industry):
+        tests["industry"] = lambda i: not inds.isdisjoint(cat.industries_of.get(i["pid"], ()))
+    if fn_set := _values(fn):
+        tests["fn"] = lambda i: not fn_set.isdisjoint(cat.functions_of.get(i["pid"], ()))
+    if sups := _values(supplier):
+        tests["supplier"] = lambda i: not sups.isdisjoint(cat.suppliers_of.get(i["pid"], ()))
+    if has_report is not None:
+        tests["has_report"] = lambda i: i["has_report"] == has_report
+    if regs := _values(region):
+        tests["region"] = lambda i: not regs.isdisjoint(i["regions"])
+    if trend:
+        tests["trend"] = lambda i: i["trend_dir"] == trend
+    if terms := search_terms(q):
+        tests["q"] = lambda i: search_matches(terms, _search_text(cat, i["pid"]))
+    return tests
+
+
 def filter_items(cat: Catalogue, *, statuses: frozenset[str] | None = None,
-                 family_id: int | None = None, subfamily_id: int | None = None,
-                 line_id: int | None = None, industry: str | None = None,
-                 fn: str | None = None, supplier: str | None = None, q: str | None = None,
-                 has_report: bool | None = None, region: str | None = None,
-                 trend: str | None = None) -> list[dict]:
-    needle = q.strip().casefold() if q and q.strip() else None
-    out = []
-    for item in cat.items:
-        code = item["pid"]
-        if not _in_statuses(item, statuses):
-            continue
-        if family_id is not None and (item["family"] or {}).get("id") != family_id:
-            continue
-        if subfamily_id is not None and (item["subfamily"] or {}).get("id") != subfamily_id:
-            continue
-        if line_id is not None and (item["line"] or {}).get("id") != line_id:
-            continue
-        if industry and industry not in cat.industries_of.get(code, ()):
-            continue
-        if fn and fn not in cat.functions_of.get(code, ()):
-            continue
-        if supplier and supplier not in cat.suppliers_of.get(code, ()):
-            continue
-        if has_report is not None and item["has_report"] != has_report:
-            continue
-        if region and region not in item["regions"]:
-            continue
-        if trend and item["trend_dir"] != trend:
-            continue
-        if needle:
-            p = cat.products[code]
-            line = p.line or {}
-            hay = " ".join(x for x in (code, p.name, p.full_name, line.get("name"),
-                                       line.get("subfamily_name"), p.family, p.cas)
-                           if x).casefold()
-            if needle not in hay:
-                continue
-        out.append(item)
-    return out
+                 **filters) -> list[dict]:
+    """The listed cards that pass every filter (see `_card_tests`)."""
+    tests = list(_card_tests(cat, statuses=statuses, **filters).values())
+    return [i for i in cat.items if all(t(i) for t in tests)]
 
 
 # ── Product detail (header + tab 2) ──────────────────────────────────────────

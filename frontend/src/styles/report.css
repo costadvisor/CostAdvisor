@@ -30,10 +30,19 @@
  * Header, table of contents, gemstone/lever-table and footer rules are kept
  * for completeness (nothing in the stored sections uses them).
  * ──────────────────────────────────────────────────────────────────── */
+/* The template's own font, loaded only with this stylesheet (the app's
+   fonts are in index.html). */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 .report-wrap *{margin:0;padding:0;box-sizing:border-box}
 /* Theming: override --accent / --accent-light (e.g. amber #d4842a / #fef3e2) to retheme a whole report. */
 .report-wrap{--navy:#1a2744;--teal:#0e8c7f;--teal-light:#e8f5f3;--amber:#d4842a;--amber-light:#fef3e2;--red:#c53030;--red-light:#fde8e8;--bg:#f5f7fa;--white:#fff;--text:#2d3748;--text-light:#718096;--border:#e2e8f0;--accent:#0e8c7f;--accent-light:#e8f5f3}
 .report-wrap{font-family:'Inter',system-ui,sans-serif;color:var(--text);line-height:1.7;background:var(--white)}
+/* In-app changes to the two rules above. The delivered file sets no body
+   size and gets the browser's 16px; here body text would inherit the app's
+   13px and sit smaller than the rem-sized tables and cards around it. The
+   template's grey (#718096) is 3.6–4.0:1 on the report's light fills, under
+   AA for 12–14px text; #5a6578 is 5.3:1 on the darkest of them. */
+.report-wrap{font-size:1rem;--text-light:#5a6578}
 .report-wrap .report-header{background:var(--navy);color:#fff;padding:3rem 2rem;position:relative;overflow:hidden}
 .report-wrap .report-header::after{content:'';position:absolute;right:-60px;top:-60px;width:300px;height:300px;border-radius:50%;background:var(--accent);opacity:.15}
 .report-wrap .report-header .badge{display:inline-block;background:var(--accent);color:#fff;font-size:.7rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:.3rem .7rem;border-radius:3px;margin-bottom:1rem}
@@ -139,6 +148,12 @@
 .report-wrap .report-header h1{color:#fff}
 .report-wrap .footer p{margin-bottom:.5rem}
 .report-wrap .footer p:last-child{margin-bottom:0}
+/* Each table sits in a scroll box (wrapTables in reportUtil.js), so a table
+   wider than the sheet scrolls on its own. The box takes the table's margin:
+   a scroll box keeps its child's margins inside, which would add to the
+   paragraph margin above instead of collapsing with it. */
+.report-wrap .ixr-table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:1.5rem 0}
+.report-wrap .ixr-table-scroll > table{margin:0}
 /* The Kraljic SVG is authored at a fixed 260px; keep it inside narrow columns. */
 .report-wrap svg{max-width:100%;height:auto}
 /* Kraljic quadrant labels. Every delivered chart (171 reports) draws the four

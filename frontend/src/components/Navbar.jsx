@@ -93,7 +93,7 @@ export default function Navbar() {
   /* ── Primary nav: the mockups' dropdown groups (DEMO_BUILD_SPEC §7) ──
    * Intelligence ▾ (the platform reference: catalogue, lines, the demand axis,
    * producers, index library) · Portfolio ▾ (what the team buys) · Strategy ·
-   * Negotiation ▾ (monitor → forecast → negotiate, plus the formula library)
+   * Negotiation ▾ (monitor → forecast → negotiate, plus formulas and alerts)
    * — with Dashboard, Team and Admin top-level as before. Every destination
    * the old flat tabs reached is still one click into a group. `match` widens
    * a group's active highlight to routes that have no menu entry of their own
@@ -126,6 +126,7 @@ export default function Navbar() {
         { path: '/forecast', label: 'Forecast' },
         { path: '/negotiate', label: 'Negotiate' },
         { path: '/formulas', label: 'Formulas' },
+        { path: '/alerts', label: 'Alerts' },
       ],
     },
     { kind: 'link', path: '/team', label: 'Team', badge: pendingInviteCount || 0 },
@@ -269,9 +270,9 @@ export default function Navbar() {
   };
 
   // Old flat-nav pages with no slot in the primary nav. This is not a
-  // leftovers list — /alerts and /quotes have no other inbound link anywhere
-  // in the app, so for those this menu is the sole entry point. Products,
-  // Suppliers and Formulas now also sit in the Portfolio/Negotiation groups;
+  // leftovers list — /quotes has no slot in the primary nav (only a link from
+  // Price lists), so this menu is its main entry point. Products, Suppliers, Formulas
+  // and Alerts now also sit in the Portfolio/Negotiation groups;
   // they stay here so nothing a user already knows how to reach moves away.
   // The Wave 3 combo grid (/intelligence/combos) is off the menu; its route
   // stays, and the combo pages are reached from Portfolio.
@@ -300,9 +301,9 @@ export default function Navbar() {
     // this is the only door for somebody holding just the Support Agent
     // platform role, who until now had full API access and no way in.
     ...(isSupportStaff ? [{ path: '/support-console', label: 'Support console' }] : []),
-    // Everything that was mocked here is built; the page now lists only the
-    // blockers no coding session closes.
-    { path: '/preview', label: 'What’s left' },
+    // Internal status page: it names unsigned DPAs and infra gaps, so only a
+    // super admin sees it (App.jsx guards the route the same way).
+    ...(user?.is_super_admin ? [{ path: '/preview', label: 'What’s left' }] : []),
   ];
 
   const handleLogout = async () => { setOpen(false); await logout(); };
@@ -348,7 +349,7 @@ export default function Navbar() {
         key={item.path}
         to={item.path}
         {...shared}
-        aria-current={location.pathname.startsWith(item.path) ? 'page' : undefined}
+        aria-current={isUnder(location.pathname, item.path) ? 'page' : undefined}
         onClick={() => setOpen(false)}
       >
         {item.label}

@@ -23,8 +23,10 @@ const SCOPE_OPTIONS = [
   { value: 'new', label: 'New in September 2026' },
 ];
 
-/* Coverage views over each industry's category-status split. Single select;
- * `highlight` is the bar segment the cards emphasise while it is on. */
+/* Coverage views over each industry's category-status split. They exclude
+ * each other, so the group is drawn as radios; an option no industry meets
+ * (today "Mostly to build") is hidden. `highlight` is the bar segment the
+ * cards emphasise while it is on. */
 const COVERAGE = [
   {
     value: 'servable', label: 'Has servable categories', highlight: 'servable',
@@ -68,9 +70,10 @@ export default function CategoriesPage() {
 
   const q = params.get('q') || '';
   const coverage = coverageOf(params.get('coverage'));
-  const scopeParam = params.get('scope') || '';
+  // Repeated keys, as on the other catalogue pages; an older comma link still reads.
+  const scopeParam = params.getAll('scope').join(',');
   const scopes = useMemo(
-    () => scopeParam.split(',').filter((s) => SCOPE_OPTIONS.some((o) => o.value === s)),
+    () => [...new Set(scopeParam.split(','))].filter((s) => SCOPE_OPTIONS.some((o) => o.value === s)),
     [scopeParam],
   );
   const sort = SORTS.some((s) => s.id === params.get('sort')) ? params.get('sort') : 'name';
@@ -78,8 +81,9 @@ export default function CategoriesPage() {
   const setParam = useCallback((key, value) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (value === null || value === undefined || value === '' || (Array.isArray(value) && !value.length)) next.delete(key);
-      else next.set(key, Array.isArray(value) ? value.join(',') : value);
+      next.delete(key);
+      if (Array.isArray(value)) value.forEach((v) => next.append(key, v));
+      else if (value !== null && value !== undefined && value !== '') next.set(key, value);
       return next;
     }, { replace: true });
   }, [setParams]);
@@ -115,7 +119,8 @@ export default function CategoriesPage() {
     return sortItems(filtered, sort);
   }, [searched, coverage, scopes, sort]);
 
-  const activeCount = (q ? 1 : 0) + (coverage ? 1 : 0) + (scopes.length ? 1 : 0);
+  // One per ticked value, as on the other catalogue pages.
+  const activeCount = (q ? 1 : 0) + (coverage ? 1 : 0) + scopes.length;
   const clearAll = () => setParams((prev) => {
     const next = new URLSearchParams(prev);
     ['q', 'coverage', 'scope'].forEach((k) => next.delete(k));
@@ -144,6 +149,7 @@ export default function CategoriesPage() {
           selected={coverage ? [coverage.value] : []}
           onChange={(next) => setParam('coverage', next[0] || null)}
           multi={false}
+          hideZero
         />
         <FilterGroup
           title="Industry list"

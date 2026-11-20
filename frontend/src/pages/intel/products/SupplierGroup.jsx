@@ -3,15 +3,16 @@ import { useApi } from '../../../components/intel';
 
 /* Supplier filter: the facets' top producers (by card count), plus a search
  * that also reaches the others through GET /api/intel/suppliers. Same markup
- * and classes as the shared FilterGroup, single-select, because FilterGroup's
- * search only filters the options it is given.
+ * and classes as the shared FilterGroup, multi-select like it (several makers
+ * = products by any of them), because FilterGroup's search only filters the
+ * options it is given.
  *
  * Only makers that count toward the supplier floor are here, on listed cards
- * (the API's rule). Counts: the top producers' counts are product cards in the
- * current status view. Producers found by search show no count. */
+ * (the API's rule). Counts: the top producers' counts are product cards under
+ * the other filters. Producers found by search show no count. */
 const COUNT_HINT = 'Products in this view where this producer is a counted maker.';
 
-export default function SupplierGroup({ options = [], value, onPick, limit = 8 }) {
+export default function SupplierGroup({ options = [], values = [], onPick, limit = 8 }) {
   const [open, setOpen] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [text, setText] = useState('');
@@ -25,15 +26,15 @@ export default function SupplierGroup({ options = [], value, onPick, limit = 8 }
   }, [text]);
   const lookup = useApi(needle.length >= 2 ? '/api/intel/suppliers' : null, { q: needle, limit: 12 });
 
+  const sel = useMemo(() => new Set(values), [values]);
   const known = useMemo(() => new Set(options.map((o) => o.value)), [options]);
   const local = useMemo(() => {
     const t = text.trim().toLowerCase();
     if (t) return options.filter((o) => o.value.toLowerCase().includes(t));
     if (expanded || options.length <= limit) return options;
     const head = options.slice(0, limit);
-    const sel = options.find((o) => o.value === value);
-    return sel && !head.includes(sel) ? [...head, sel] : head;
-  }, [options, text, expanded, limit, value]);
+    return [...head, ...options.slice(limit).filter((o) => sel.has(o.value))];
+  }, [options, text, expanded, limit, sel]);
 
   const others = useMemo(() => {
     if (!text.trim() || needle !== text.trim()) return [];
@@ -42,12 +43,13 @@ export default function SupplierGroup({ options = [], value, onPick, limit = 8 }
       .map((s) => ({ value: s.name }));
   }, [lookup.data, known, needle, text]);
 
-  // A supplier picked through the URL or the search, outside the top 60.
-  const pinned = value && !known.has(value) && !others.some((o) => o.value === value) ? [{ value }] : [];
+  // Suppliers picked through the URL or the search, outside the top 60.
+  const pinned = values.filter((v) => !known.has(v) && !others.some((o) => o.value === v))
+    .map((v) => ({ value: v }));
 
-  const toggle = (v) => onPick(value === v ? null : v);
+  const toggle = (v) => onPick(sel.has(v) ? values.filter((x) => x !== v) : [...values, v]);
   const row = (o) => {
-    const checked = value === o.value;
+    const checked = sel.has(o.value);
     return (
       <label key={o.value} className={`ix-fitem${checked ? ' checked' : ''}`}>
         <input type="checkbox" checked={checked} onChange={() => toggle(o.value)} />
@@ -66,7 +68,7 @@ export default function SupplierGroup({ options = [], value, onPick, limit = 8 }
         onClick={() => setOpen((o) => !o)}>
         <span>Supplier</span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          {value && <span className="ix-fgroup-active">1 selected</span>}
+          {values.length > 0 && <span className="ix-fgroup-active">{values.length} selected</span>}
           <span className="ix-chev" aria-hidden>▾</span>
         </span>
       </button>

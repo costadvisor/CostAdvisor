@@ -169,7 +169,6 @@ button.ix-link.ixs-panel-more { margin-top: 10px; font-size: 10.5px; }
 .ixs-ptable col.c-sites { width: 12%; }
 .ixs-pid .ix-badge.sup { margin-left: 2px; }
 .ixs-nowrap { white-space: nowrap; }
-.ixs-not-listed { margin-bottom: 14px; }
 .ixs-ptable tr.ixs-group td {
   background: var(--surface2); padding-top: 7px; padding-bottom: 7px;
   border-bottom: 1px solid var(--border);
@@ -197,3 +196,11 @@ a.ixs-pname:hover { color: var(--accent); text-decoration: underline; }
   .ixs-ptable col.c-prod { width: 32%; }
   .ixs-ptable col.c-ev { width: 19%; }
 }
+
+/* Links that do not count toward the maker floor, after the counted ones (A-10). */
+.ixs-ptable tr.ixs-section td {
+  padding-top: 16px; padding-bottom: 6px; border-bottom: 1px solid var(--border);
+  font-size: 10px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; color: var(--text-secondary);
+}
+.ixs-ptable tbody tr.ixs-section:hover td { background: transparent; }
+.ixs-section-sub { margin-left: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--muted); }
